@@ -1,0 +1,10 @@
+{
+  "name": "Shock Tech Visitor Sign-In",
+  "short_name": "Shock Tech Visitors",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#031d38",
+  "theme_color": "#062f5c",
+  "icons": [{ "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}
