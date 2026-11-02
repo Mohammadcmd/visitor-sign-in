@@ -1,0 +1,55 @@
+name: Build Android app
+
+# Builds the kiosk APK. Run it from the Actions tab ("Run workflow"), or it runs
+# on every push that touches the app. The APK is attached to the run as
+# "shocktech-visitor-kiosk".
+#
+# Repository secrets (Settings > Secrets and variables > Actions), all optional:
+#   KIOSK_API_URL, KIOSK_KEY            built in so the tablet reports to the Google Sheet
+#   KIOSK_KEYSTORE_BASE64, KIOSK_KEYSTORE_PASSWORD,
+#   KIOSK_KEY_ALIAS, KIOSK_KEY_PASSWORD  release signing, so new versions install as updates
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'web/**'
+      - 'android/**'
+      - 'scripts/build-android.mjs'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+      - run: node tests/apps-script.test.js
+      - name: Build APK
+        run: node scripts/build-android.mjs
+        env:
+          KIOSK_API_URL: ${{ secrets.KIOSK_API_URL }}
+          KIOSK_KEY: ${{ secrets.KIOSK_KEY }}
+          KIOSK_KEYSTORE_BASE64: ${{ secrets.KIOSK_KEYSTORE_BASE64 }}
+          KIOSK_KEYSTORE_PASSWORD: ${{ secrets.KIOSK_KEYSTORE_PASSWORD }}
+          KIOSK_KEY_ALIAS: ${{ secrets.KIOSK_KEY_ALIAS }}
+          KIOSK_KEY_PASSWORD: ${{ secrets.KIOSK_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shocktech-visitor-kiosk
+          path: dist/shocktech-visitor-kiosk.apk
+          retention-days: 30
