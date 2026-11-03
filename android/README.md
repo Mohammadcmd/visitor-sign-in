@@ -18,7 +18,7 @@ The kiosk from `web/` packaged as an Android app (APK) for a lobby tablet. It ru
 **Option B: from GitHub, with the Pi connection built in.** No typing on the tablet:
 
 1. In the repository on GitHub, go to **Settings → Secrets and variables → Actions** and add:
-   - `KIOSK_API_URL`: the Pi's address, like `http://192.168.1.50:8080/api`. The Pi's installer prints it.
+   - `KIOSK_API_URL`: the Pi's address, like `http://192.168.1.50/api`. The Pi's installer prints it.
    - `KIOSK_KEY`: the kiosk key the Pi's installer prints.
 2. Go to **Actions → Build Android app → Run workflow**.
 3. When the run finishes, download **shocktech-visitor-kiosk** from its page. The download is a zip containing the APK.
@@ -27,7 +27,7 @@ The kiosk from `web/` packaged as an Android app (APK) for a lobby tablet. It ru
 
 ```bash
 npm ci
-KIOSK_API_URL="http://192.168.1.50:8080/api" KIOSK_KEY="…" npm run android:build
+KIOSK_API_URL="http://192.168.1.50/api" KIOSK_KEY="…" npm run android:build
 # → dist/shocktech-visitor-kiosk.apk
 ```
 

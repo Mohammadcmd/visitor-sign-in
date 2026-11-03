@@ -52,6 +52,7 @@ We used it as inspiration, not as a blueprint.
 | Pi screen | None: the Pi's reader signs visitors out by tap, with the reader's beep as feedback, and mistaken taps undone from the dashboard | The owner's choice. |
 | Records access | A browser dashboard on the Pi plus Excel/CSV downloads | Office computers need to see records without Google. |
 | Backups | Nightly to a shared network folder, refusing to run if it isn't mounted | The memory card must never be the only copy. |
+| Local address | **http://shocktech-rehtekpro.local**, announced by the Pi itself on the standard web port | Works on Windows, Mac and iPhone with no router setup or domain to buy. A hyphen is the only separator a device name allows, and dotted `.local` names don't work everywhere. |
 
 ## What was built, in order
 

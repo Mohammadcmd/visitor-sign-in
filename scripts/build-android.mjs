@@ -3,7 +3,7 @@
 //   node scripts/build-android.mjs
 //
 // Optional environment variables:
-//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi>:8080/api) and the
+//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi address>/api) and the
 //                              kiosk key. Built into the app so the tablet needs no
 //                              setup. Without them the app starts in demo mode (connect
 //                              it later in admin Settings).
@@ -31,9 +31,9 @@ run('npx cap sync android');
 const api = process.env.KIOSK_API_URL || '';
 const key = process.env.KIOSK_KEY || '';
 if ((api && !key) || (!api && key)) throw new Error('Set both KIOSK_API_URL and KIOSK_KEY, or neither.');
-// The Raspberry Pi on the office network: http://<pi address>:8080/api
+// The Raspberry Pi on the office network: http://<pi address>/api
 if (api && !/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api)) {
-  throw new Error('KIOSK_API_URL should look like http://<pi address>:8080/api');
+  throw new Error('KIOSK_API_URL should look like http://<pi address>/api');
 }
 writeFileSync(
   join(android, 'app/src/main/assets/public/kiosk-connection.js'),

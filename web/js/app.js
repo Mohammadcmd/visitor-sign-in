@@ -912,7 +912,7 @@ async function loadSettings() {
     return;
   }
 
-  fact('[data-set-sheet]', DEMO ? res.sheetName : `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://<pi address>:8080'}`);
+  fact('[data-set-sheet]', DEMO ? res.sheetName : `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://shocktech-rehtekpro.local'}`);
   fact('[data-set-folder]', DEMO ? 'Demo: photos stay on this tablet' : `On the Pi (${res.storage}/photos)`);
   fact('[data-set-counts]', `${res.counts.visitors} visitors · ${res.counts.visits} visits · ${res.counts.badges} badges`);
 
@@ -937,7 +937,7 @@ $('[data-set-save]').addEventListener('click', () => {
   const api = $('input[name="setapi"]').value.trim();
   const key = $('input[name="setkey"]').value.trim();
   if (!/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api) || !key) {
-    toast("Enter the Pi's address (http://<pi address>:8080/api) and the kiosk key.");
+    toast("Enter the Pi's address (http://<pi address>/api) and the kiosk key.");
     return;
   }
   try { localStorage.setItem(CONNECTION_KEY, JSON.stringify({ api, key })); } catch { toast("Couldn't save on this tablet."); return; }

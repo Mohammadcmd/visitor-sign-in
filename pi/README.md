@@ -30,7 +30,7 @@ The Pi only uses a little of its power, so it can keep doing other jobs too.
 
 1. On any computer, install **Raspberry Pi Imager** and write **Raspberry Pi OS Lite (64-bit)** to the card.
 2. Before writing, open Imager's settings:
-   - **Hostname:** `visitor-pi`
+   - **Hostname:** `shocktech-rehtekpro` (the installer sets it anyway)
    - **Enable SSH**
    - **Username and password**
    - **Wi-Fi**, if you're not using a cable
@@ -39,7 +39,7 @@ The Pi only uses a little of its power, so it can keep doing other jobs too.
 
 ## 2. Install the visitor server
 
-Connect to the Pi with SSH (`ssh <username>@visitor-pi.local`), or plug in a keyboard and screen for setup. Then run:
+Connect to the Pi with SSH (`ssh <username>@shocktech-rehtekpro.local`), or plug in a keyboard and screen for setup. Then run:
 
 ```bash
 sudo apt-get install -y git
@@ -85,7 +85,7 @@ The memory card is the only copy of the records until this is set up.
 
 ## 4. Connect the tablet
 
-On the tablet, go to admin → **Settings** → **5. Connection**. Enter the address `http://<pi address>:8080/api` and the kiosk key the installer printed, then tap **Save and reconnect**. The status line should read **Connected to the Raspberry Pi**.
+On the tablet, go to admin → **Settings** → **5. Connection**. Enter the address `http://<pi address>/api` and the kiosk key the installer printed, then tap **Save and reconnect**. The status line should read **Connected to the Raspberry Pi**.
 
 If you'd rather not type them: add `KIOSK_API_URL` and `KIOSK_KEY` as GitHub secrets, then rebuild the app as described in [android/README.md](../android/README.md).
 
@@ -100,7 +100,9 @@ If you'd rather not type them: add `KIOSK_API_URL` and `KIOSK_KEY` as GitHub sec
 
 ## The dashboard
 
-Open `http://<pi address>:8080` (or `http://visitor-pi.local:8080`) on any office computer and enter the admin PIN.
+Open **http://shocktech-rehtekpro.local** on any office computer and enter the admin PIN. It works on Windows 10/11, Macs, iPhones and iPads with no setup, because the Pi announces that name on the network itself. If a computer can't find it, use the Pi's number address instead: `http://<pi address>`.
+
+To use a different name, run the installer with it. Use letters, digits and hyphens only: `sudo VISITOR_PI_NAME=visitors ./install.sh` gives `http://visitors.local`.
 
 | Tab | What it shows |
 |---|---|
@@ -119,7 +121,7 @@ Records, settings and the PIN are kept.
 
 ## Security notes
 
-- **Keep it on the office network.** Never forward port 8080 on your router to the internet.
+- **Keep it on the office network.** Never forward the Pi's port 80 on your router to the internet.
 - **Traffic isn't encrypted** inside the office network: the dashboard and tablet use plain `http`. That's normal for a device that never leaves the building. Use a trusted network (not a guest Wi-Fi) for the Pi and tablet.
 - **The tablet needs the kiosk key to talk to the Pi,** and the dashboard needs the admin PIN. After 10 wrong PINs, entry pauses for 10 minutes.
 - **The records include visitors' photos and citizenship.** Treat the Pi and the backup share like any personnel file.

@@ -64,7 +64,7 @@ To just try it out, install `downloads/shocktech-visitor-kiosk-demo.apk`, which 
   - a "who can do what" card
   - Areas and Screening list, listed as coming later
 
-**Records on office computers:** open `http://<pi address>:8080` and enter the admin PIN. You get who's inside, visit history, visitors with photos and badges, plus **Download for Excel (CSV)** buttons.
+**Records on office computers:** open **http://shocktech-rehtekpro.local** and enter the admin PIN. You get who's inside, visit history, visitors with photos and badges, plus **Download for Excel (CSV)** buttons.
 
 ## What's recorded
 
@@ -85,7 +85,7 @@ All of it lives in one database on the Pi, with photos as files next to it, and 
 - **Tuning:** the match thresholds are in `web/config.js` (`FACE_MATCH_MAX`, `FACE_MATCH_MARGIN`).
 
 ## How the tablet talks to the Pi
-The kiosk talks to the Pi only through `call(action, args)` in `web/js/api.js`. It sends JSON to `http://<pi>:8080/api`, with retries and replay-safe request ids so a dropped connection never records a visit twice. The Pi's side is `pi/visitor_pi/store.py`.
+The kiosk talks to the Pi only through `call(action, args)` in `web/js/api.js`. It sends JSON to `http://<pi address>/api`, with retries and replay-safe request ids so a dropped connection never records a visit twice. The Pi's side is `pi/visitor_pi/store.py`.
 
 ## Testing
 - `cd pi && python3 -m unittest discover -s tests` (or `npm test`) tests the Raspberry Pi server: every kiosk action, the dashboard, CSV export, photos, backups and the reader's tap detection.

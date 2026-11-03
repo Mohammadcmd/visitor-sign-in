@@ -391,12 +391,12 @@
               <summary>How to set up the Raspberry Pi</summary>
               <ol>
                 <li>Follow <code>pi/README.md</code> to install the visitor server on the Pi. It prints the Pi's address and the kiosk key at the end.</li>
-                <li>Enter them below: address <code>http://&lt;pi address&gt;:8080/api</code> and the key. Or build them into the app as the <code>KIOSK_API_URL</code> and <code>KIOSK_KEY</code> GitHub secrets.</li>
-                <li>Office computers see the records at <code>http://&lt;pi address&gt;:8080</code> with the admin PIN.</li>
+                <li>Enter them below: address <code>http://&lt;pi address&gt;/api</code> and the key. Or build them into the app as the <code>KIOSK_API_URL</code> and <code>KIOSK_KEY</code> GitHub secrets.</li>
+                <li>Office computers see the records at <code>http://shocktech-rehtekpro.local</code> with the admin PIN.</li>
               </ol>
             </details>
             <div class="set-connect" data-set-connect hidden>
-              <label class="field"><span>Pi address: http://&lt;pi address&gt;:8080/api</span>
+              <label class="field"><span>Pi address: http://&lt;pi address&gt;/api</span>
                 <input readonly inputmode="none" name="setapi" maxlength="200" autocomplete="off"></label>
               <label class="field"><span>Kiosk key</span>
                 <input readonly inputmode="none" name="setkey" maxlength="80" autocomplete="off"></label>

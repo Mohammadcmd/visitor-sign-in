@@ -1,6 +1,6 @@
 // Kiosk settings.
 //
-// Connecting to the Raspberry Pi (http://<pi>:8080/api, see pi/README.md):
+// Connecting to the Raspberry Pi (http://<pi address>/api, see pi/README.md):
 //  - Built into the Android app at build time (kiosk-connection.js, see
 //    android/README.md), so the tablet needs no setup, or
 //  - entered once on the tablet in admin Settings, section 5. The tablet
@@ -33,7 +33,7 @@ function connection() {
 const saved = connection();
 
 export const CONFIG = {
-  // The Pi's address: http://<pi address>:8080/api
+  // The Pi's address: http://<pi address>/api
   API_URL: saved.api || '',
   // Must equal the KIOSK_KEY script property
   KIOSK_KEY: saved.key || '',
