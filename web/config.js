@@ -1,10 +1,12 @@
 // Kiosk settings.
 //
-// Connecting to the Apps Script backend:
+// Connecting to where records are kept: the Raspberry Pi (http://<pi>:8080/api,
+// see pi/README.md) or the Google Apps Script backend. Either way:
 //  - Android app: the build writes the connection into kiosk-connection.js
 //    (see android/README.md), so the tablet needs no setup.
 //  - Browser: open the kiosk once on the tablet with
-//   https://<kiosk address>/?api=<Apps Script /exec URL>&key=<KIOSK_KEY>
+//   https://<kiosk address>/?api=<backend address>&key=<KIOSK_KEY>
+//    (or enter them in admin Settings, section 5)
 // The tablet remembers both and removes them from the address bar, so the key
 // never has to live in this publicly hosted file. (You can also paste them
 // into API_URL / KIOSK_KEY below if the kiosk is hosted privately.)
@@ -36,7 +38,7 @@ function connection() {
 const saved = connection();
 
 export const CONFIG = {
-  // Apps Script web app URL ending in /exec
+  // The Pi's http://<address>:8080/api, or the Apps Script web app URL ending in /exec
   API_URL: saved.api || '',
   // Must equal the KIOSK_KEY script property
   KIOSK_KEY: saved.key || '',

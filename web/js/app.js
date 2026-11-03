@@ -912,14 +912,21 @@ async function loadSettings() {
     return;
   }
 
-  fact('[data-set-sheet]', res.sheetUrl ? `${res.sheetName} · ${res.sheetUrl}` : res.sheetName);
-  fact('[data-set-folder]', res.photoFolderUrl || (DEMO ? 'Demo: photos stay on this tablet' : 'Not created yet (made with the first sign-in)'));
+  const pi = res.backend === 'pi';
+  fact('[data-set-sheet]', pi ? `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://<pi address>:8080'}`
+    : res.sheetUrl ? `Google Sheet "${res.sheetName}" · ${res.sheetUrl}` : res.sheetName);
+  fact('[data-set-folder]', pi ? `On the Pi (${res.storage}/photos)`
+    : res.photoFolderUrl || (DEMO ? 'Demo: photos stay on this tablet' : 'Not created yet (made with the first sign-in)'));
   fact('[data-set-counts]', `${res.counts.visitors} visitors · ${res.counts.visits} visits · ${res.counts.badges} badges`);
 
   const waiting = outboxSize();
   const queued = waiting ? ` ${waiting} photo${waiting === 1 ? '' : 's'} waiting to send.` : '';
   if (DEMO) {
-    setStatus(status, 'demo', 'Demo mode: not connected to Google. Nothing is saved outside this tablet.');
+    setStatus(status, 'demo', 'Demo mode: not connected to a Raspberry Pi or Google. Nothing is saved outside this tablet.');
+  } else if (pi) {
+    const b = res.backup || {};
+    const backup = !b.at ? ' No backup has run yet.' : b.ok ? ` Last backup ${timeOf(b.at)}.` : ` Last backup FAILED: ${b.error}`;
+    setStatus(status, b.at && !b.ok ? 'bad' : 'ok', `Connected to the ${res.sheetName}. Last answered ${timeOf(new Date(net.lastOk || Date.now()).toISOString())}.${backup}${queued}`);
   } else if (res.missingTabs.length) {
     setStatus(status, 'bad', `Connected, but the Sheet is missing these tabs: ${res.missingTabs.join(', ')}. Run setup in the Apps Script.`);
   } else {
@@ -928,7 +935,7 @@ async function loadSettings() {
   }
 
   pinLine.textContent = {
-    settings: `Last changed ${timeOf(res.pinChangedAt)}.`,
+    settings: `Last changed ${timeOf(res.pinChangedAt)}.${pi ? ' The same PIN opens the dashboard on office computers.' : ''}`,
     script_property: "Set in the Apps Script's script properties. Changing it here stores it securely as a hash.",
     demo: 'Demo PIN 123456. Changes here last only on this tablet.',
     none: 'No PIN is set yet.',
@@ -938,8 +945,8 @@ async function loadSettings() {
 $('[data-set-save]').addEventListener('click', () => {
   const api = $('input[name="setapi"]').value.trim();
   const key = $('input[name="setkey"]').value.trim();
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(api) || !key) {
-    toast('Enter the web app URL (ending in /exec) and the kiosk key.');
+  if (!/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api) || !key) {
+    toast('Enter the address (http://<pi address>:8080/api, or the Google /exec URL) and the kiosk key.');
     return;
   }
   try { localStorage.setItem(CONNECTION_KEY, JSON.stringify({ api, key })); } catch { toast("Couldn't save on this tablet."); return; }

@@ -3,9 +3,10 @@
 //   node scripts/build-android.mjs
 //
 // Optional environment variables:
-//   KIOSK_API_URL, KIOSK_KEY   Apps Script /exec URL and KIOSK_KEY. Built into the
-//                              app so the tablet reports to the Google Sheet with no
-//                              setup. Without them the app runs in demo mode.
+//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi>:8080/api) or the
+//                              Apps Script /exec URL, and the kiosk key. Built into the
+//                              app so the tablet needs no setup. Without them the app
+//                              starts in demo mode (connect it later in admin Settings).
 //   KIOSK_KEYSTORE_BASE64      Base64 of a release keystore (.jks), plus
 //   KIOSK_KEYSTORE_PASSWORD    its password,
 //   KIOSK_KEY_ALIAS            key alias, and
@@ -30,8 +31,10 @@ run('npx cap sync android');
 const api = process.env.KIOSK_API_URL || '';
 const key = process.env.KIOSK_KEY || '';
 if ((api && !key) || (!api && key)) throw new Error('Set both KIOSK_API_URL and KIOSK_KEY, or neither.');
-if (api && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(api)) {
-  throw new Error('KIOSK_API_URL should look like https://script.google.com/macros/s/.../exec');
+// Either the Raspberry Pi on the local network (http://<pi address>:8080/api) or
+// the Google Apps Script web app (https://script.google.com/macros/s/.../exec).
+if (api && !/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api)) {
+  throw new Error('KIOSK_API_URL should be http://<pi address>:8080/api or the Apps Script /exec URL');
 }
 writeFileSync(
   join(android, 'app/src/main/assets/public/kiosk-connection.js'),
