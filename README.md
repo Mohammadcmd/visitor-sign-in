@@ -1,10 +1,14 @@
 # Shock Tech Visitor Sign-In Kiosk
 
-A visitor sign-in kiosk for **Shock Tech, Inc.** (Mahwah, NJ). It runs on a lobby tablet, either as an **Android app** or in a browser. It uses a USB NFC reader for visitor badges and saves everything to a Google Sheet, with visitor photos in Google Drive.
+A visitor sign-in kiosk for **Shock Tech, Inc.** (Mahwah, NJ). It runs on a lobby tablet, as an **Android app** or in a browser, and uses a USB NFC reader for visitor badges. Records are kept in one of two places:
+
+- **A Raspberry Pi in the building (recommended).** Everything stays local, with no internet. The Pi is also a tap-to-sign-out station, a records dashboard for office computers, and a nightly backup to a shared folder. See [pi/README.md](pi/README.md).
+- **Google Sheets and Drive,** through the Apps Script backend. The setup is below.
 
 ```
 web/           the kiosk itself (static HTML/CSS/JS)
 android/       the Android app that wraps web/ (setup guide: android/README.md)
+pi/            the Raspberry Pi server, sign-out reader, dashboard and backups (guide: pi/README.md)
 apps-script/   the Google Apps Script backend (Sheets + Drive)
 scripts/       build-android.mjs builds the APK
 tests/         backend tests (node tests/apps-script.test.js)
@@ -55,7 +59,7 @@ The story of how it was designed, and every decision along the way, is in [docs/
 | **Badges** | Badge number, NFC tag, status (available / in use / retired) and current holder. |
 | **Face data** *(hidden)* | Numeric face signatures, only for visitors who opted into quick entry. Turning quick entry off deletes their rows. |
 
-## Setup
+## Setup with Google (alternative to the Raspberry Pi)
 
 ### 1. Google Sheet + Apps Script
 1. Create a Google Sheet in the Shock Tech Google account. Share it only with front desk staff.
@@ -108,7 +112,8 @@ Open the admin screen, go to **Badges → Add badge by tapping it**, and tap eac
 The kiosk talks to the backend only through `call(action, args)` in `web/js/api.js`. To move to another backend, implement the same actions (`register`, `findVisitor`, `faceIndex`, `addFaceSample`, `setQuickEntry`, `assignBadge`, `tapAtWelcome`, `undoSignOut`, `admin*`) with the same JSON shapes, then point `API_URL` at it.
 
 ## Testing
-- `node tests/apps-script.test.js` runs the backend against an in-memory fake Google Sheet and Drive.
+- `node tests/apps-script.test.js` runs the Google backend against an in-memory fake Google Sheet and Drive.
+- `cd pi && python3 -m unittest discover -s tests` tests the Raspberry Pi server: actions, dashboard, CSV, photos, backups and the reader's tap detection.
 - To try the kiosk locally, run `python3 -m http.server -d web 8000` and open `http://localhost:8000` (demo mode).
 
 The visitor questions, rules and compliance approach are adapted from the Rehtek visitor sign-in specification.
