@@ -4,7 +4,7 @@
   "private": true,
   "description": "Shock Tech visitor sign-in kiosk (web app + Android app)",
   "scripts": {
-    "test": "node tests/apps-script.test.js",
+    "test": "cd pi && python3 -m unittest discover -s tests",
     "android:sync": "cap sync android",
     "android:build": "node scripts/build-android.mjs"
   },
