@@ -42,6 +42,8 @@ function fakeGoogle() {
   const book = {
     getSheetByName: (n) => sheets[n] || null,
     insertSheet: (n) => (sheets[n] = makeSheet(n)),
+    getName: () => 'Shock Tech Visitor Log',
+    getUrl: () => 'https://docs.google.com/spreadsheets/d/TEST/edit',
   };
   const folder = (name) => ({
     name, files: [],
@@ -55,7 +57,7 @@ function fakeGoogle() {
   const globals = {
     console,
     SpreadsheetApp: { getActiveSpreadsheet: () => book, openById: () => book },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] || null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: (k) => { delete props[k]; } }) },
     DriveApp: {
       getFolderById: () => root,
       getFoldersByName: () => ({ hasNext: () => true, next: () => root }),
@@ -177,5 +179,19 @@ const first = ctx.handle_({ key: 'k', action: 'register', args, rid: 'abc123-ret
 const again = ctx.handle_({ key: 'k', action: 'register', args, rid: 'abc123-retry' });
 assert.strictEqual(again.visitor.id, first.visitor.id);
 assert.strictEqual(g.sheets.Visitors.rows.length, before + 1);
+
+// Settings page: status, and changing the PIN (stored only as a salted hash).
+const status = api('adminStatus', { token });
+assert.ok(status.ok);
+assert.strictEqual(status.missingTabs.length, 0);
+assert.strictEqual(status.pinSource, 'script_property');
+assert.strictEqual(status.counts.badges, 3);
+assert.strictEqual(api('adminSetPin', { token, pin: '12a' }).error, 'pin_format');
+assert.ok(api('adminSetPin', { token, pin: '13579135' }).ok);
+assert.ok(!g.props.ADMIN_PIN, 'the plain PIN property is removed');
+assert.ok(!String(g.props.ADMIN_PIN_HASH).includes('13579135'), 'only a hash is stored');
+assert.strictEqual(api('adminLogin', { pin: '246810' }).error, 'pin');
+assert.ok(api('adminLogin', { pin: '13579135' }).token);
+assert.strictEqual(api('adminStatus', { token }).pinSource, 'settings');
 
 console.log('apps-script tests passed');

@@ -101,7 +101,8 @@ function doPost(e) {
 // Calls that change the sheet. The kiosk retries these after a network hiccup
 // with the same request id, so the first result is remembered and replayed.
 var WRITE_ACTIONS = ['register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'tapAtWelcome',
-  'undoSignOut', 'adminSignOut', 'adminAddBadge', 'adminLinkTag', 'adminRetireBadge', 'adminRestoreBadge'];
+  'undoSignOut', 'adminSignOut', 'adminAddBadge', 'adminLinkTag', 'adminRetireBadge', 'adminRestoreBadge',
+  'adminSetPin'];
 var REPLAY_TTL = 30 * 60;  // seconds
 
 function handle_(req) {
@@ -138,6 +139,8 @@ function dispatch_(req) {
   if (!checkAdmin_(a.token)) return { ok: false, error: 'admin' };
   switch (req.action) {
     case 'adminInside': return adminInside_();
+    case 'adminStatus': return adminStatus_();
+    case 'adminSetPin': return adminSetPin_(a);
     case 'adminBadges': return adminBadges_();
     case 'adminSignOut': return withLock_(function () { return adminSignOut_(a); });
     case 'adminAddBadge': return withLock_(function () { return adminAddBadge_(a); });
@@ -362,8 +365,7 @@ function adminLogin_(a) {
   var cache = CacheService.getScriptCache();
   var fails = Number(cache.get('pinfails') || 0);
   if (fails >= 10) return { ok: false, error: 'locked' };
-  var pin = PropertiesService.getScriptProperties().getProperty('ADMIN_PIN');
-  if (!pin || String(a.pin || '') !== pin) {
+  if (!pinMatches_(String(a.pin || ''))) {
     cache.put('pinfails', String(fails + 1), 600);
     Utilities.sleep(700);
     return { ok: false, error: 'pin' };
@@ -371,6 +373,60 @@ function adminLogin_(a) {
   var token = Utilities.getUuid();
   cache.put('admin:' + token, '1', ADMIN_TOKEN_TTL);
   return { ok: true, token: token, ttl: ADMIN_TOKEN_TTL };
+}
+
+/**
+ * A PIN set from the Settings page is kept only as a salted SHA-256 hash
+ * (ADMIN_PIN_HASH). Until then, the ADMIN_PIN script property is used.
+ */
+function pinMatches_(pin) {
+  var props = PropertiesService.getScriptProperties();
+  var stored = props.getProperty('ADMIN_PIN_HASH');
+  if (stored) {
+    var h = JSON.parse(stored);
+    return h.hash === pinHash_(h.salt, pin);
+  }
+  var plain = props.getProperty('ADMIN_PIN');
+  return !!plain && pin === plain;
+}
+
+function pinHash_(salt, pin) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ':' + pin).map(function (b) {
+    return ('0' + ((b + 256) % 256).toString(16)).slice(-2);
+  }).join('');
+}
+
+function adminSetPin_(a) {
+  var pin = String(a.pin || '');
+  if (!/^\d{6,8}$/.test(pin)) return { ok: false, error: 'pin_format' };
+  var salt = Utilities.getUuid();
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ADMIN_PIN_HASH', JSON.stringify({ salt: salt, hash: pinHash_(salt, pin), at: new Date().toISOString() }));
+  props.deleteProperty('ADMIN_PIN');
+  return { ok: true, at: new Date().toISOString() };
+}
+
+/** Everything the Settings page reports about the Google side. */
+function adminStatus_() {
+  var ss = book_(), props = PropertiesService.getScriptProperties();
+  var missing = Object.keys(HEADERS).filter(function (name) { return !ss.getSheetByName(name); });
+  var stored = props.getProperty('ADMIN_PIN_HASH');
+  var folderId = props.getProperty('PHOTO_FOLDER_ID');
+  var count = function (name) {
+    var sh = ss.getSheetByName(name);
+    return sh ? Math.max(0, sh.getLastRow() - 1) : 0;
+  };
+  return {
+    ok: true,
+    sheetName: ss.getName(),
+    sheetUrl: ss.getUrl(),
+    photoFolderUrl: folderId ? 'https://drive.google.com/drive/folders/' + folderId : '',
+    missingTabs: missing,
+    counts: { visitors: count(TABS.visitors), visits: count(TABS.visits), badges: count(TABS.badges) },
+    pinChangedAt: stored ? JSON.parse(stored).at : '',
+    pinSource: stored ? 'settings' : (props.getProperty('ADMIN_PIN') ? 'script_property' : 'none'),
+    serverTime: new Date().toISOString()
+  };
 }
 
 function checkAdmin_(token) {
