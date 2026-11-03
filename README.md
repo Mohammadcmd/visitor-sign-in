@@ -37,6 +37,12 @@ The story of how it was designed, and every decision along the way, is in [docs/
 **Admin:** press and hold the Shock Tech logo on the welcome screen for 2.5 seconds, then enter the admin PIN.
 - **Inside now:** everyone signed in, with a **Sign out** button for each.
 - **Badges:** add badges by tapping them on the reader (they're numbered V1, V2, … automatically), link or relink NFC tags, and retire or restore badges.
+- **Settings**, in eight numbered sections:
+  - the Google Sheet connection, with a live status line and setup steps
+  - changing the admin PIN (stored only as a salted hash)
+  - printing the badge labels and lobby sign
+  - a "who can do what" card
+  - Areas and Screening list, listed as coming later
 
 ## The Google Sheet
 
