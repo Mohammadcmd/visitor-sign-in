@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shock Tech Visitor Records</title>
+<link rel="icon" href="/static/icon.png">
+<style>
+  :root {
+    --blue: #0a5ea8; --blue-bright: #1a7fd0; --blue-deep: #063a6e; --navy: #031d38;
+    --ink: #0d1b2a; --ink-soft: #4a5a6b; --line: #d9e2ec; --paper: #eef3f8; --ok: #1f8a4c; --bad: #b5121b;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--paper); }
+  button { font: inherit; cursor: pointer; border: 0; }
+  .hidden { display: none !important; }
+
+  header { display: flex; align-items: center; gap: 20px; padding: 14px 28px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  header img { height: 42px; }
+  header h1 { margin: 0; font-size: 18px; color: var(--ink-soft); font-weight: 600; }
+  nav { display: flex; gap: 4px; margin-left: auto; padding: 4px; border-radius: 12px; background: #e3eaf2; }
+  nav button { padding: 9px 18px; border-radius: 9px; background: none; color: var(--ink-soft); font-weight: 700; }
+  nav button.on { background: #fff; color: var(--blue-deep); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .ghost { background: none; color: var(--blue); font-weight: 700; padding: 9px 12px; border-radius: 9px; }
+  .ghost:hover { background: rgba(10,94,168,.08); }
+  .primary { background: var(--blue); color: #fff; font-weight: 700; padding: 10px 18px; border-radius: 10px; }
+  .primary:hover { background: var(--blue-deep); }
+  .secondary { background: #fff; color: var(--blue-deep); font-weight: 700; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 26px 28px 60px; }
+  h2 { margin: 0 0 14px; font-size: 24px; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .row h2 { margin: 0; margin-right: auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+  .card .num { font-size: 34px; font-weight: 800; }
+  .card .label { color: var(--ink-soft); font-weight: 600; }
+  .card.warn { border-color: #f1b6b6; background: #fdf2f2; }
+  .card.good { border-color: #b9e3c8; background: #f1faf4; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-bottom: 26px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { background: #f6f9fc; color: var(--ink-soft); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: 0; }
+  .badge { display: inline-block; min-width: 46px; padding: 4px 10px; border-radius: 8px; background: var(--blue-deep); color: #fff; font-weight: 800; text-align: center; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; background: #e8f0f8; color: var(--blue-deep); }
+  .pill.foreign { background: #fff3e4; color: #b35d00; }
+  .pill.in { background: #e6f6ec; color: var(--ok); }
+  .pill.retired { background: #eceff2; color: #7c8894; }
+  .thumb { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: #e3eaf2; display: block; }
+  .empty { padding: 34px; text-align: center; color: var(--ink-soft); }
+  .muted { color: var(--ink-soft); }
+  input[type=text], input[type=date], input[type=password] { font: inherit; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+  .act { padding: 6px 12px; border-radius: 8px; background: #eef3f8; color: var(--blue-deep); font-weight: 700; font-size: 14px; }
+  .act.confirm { background: var(--bad); color: #fff; }
+
+  .login { max-width: 380px; margin: 12vh auto; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 34px; text-align: center; }
+  .login img { width: 220px; }
+  .login h2 { margin: 18px 0 6px; }
+  .login input { width: 100%; font-size: 22px; text-align: center; letter-spacing: .3em; margin: 16px 0 10px; }
+  .login .primary { width: 100%; padding: 13px; font-size: 17px; }
+  .error { color: var(--bad); font-weight: 600; min-height: 22px; }
+  .note { font-size: 14px; color: var(--ink-soft); }
+  @media (max-width: 760px) { header { flex-wrap: wrap; } nav { margin-left: 0; } .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="login" id="login">
+  <img src="/static/shocktech-logo.png" alt="Shock Tech">
+  <h2>Visitor records</h2>
+  <p class="muted">Enter the admin PIN.</p>
+  <form id="loginForm">
+    <input type="password" id="pin" inputmode="numeric" autocomplete="current-password" maxlength="8" autofocus>
+    <p class="error" id="loginError"></p>
+    <button class="primary" type="submit">Open</button>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <img src="/static/shocktech-logo.png" alt="Shock Tech">
+    <h1 class="hide-sm">Visitor records</h1>
+    <nav>
+      <button data-tab="overview" class="on">Overview</button>
+      <button data-tab="visits">Visits</button>
+      <button data-tab="visitors">Visitors</button>
+      <button data-tab="badges">Badges</button>
+    </nav>
+    <button class="ghost" id="logout">Log out</button>
+  </header>
+
+  <main>
+    <section data-pane="overview">
+      <div class="cards">
+        <div class="card"><div class="num" id="cInside">–</div><div class="label">Inside now</div></div>
+        <div class="card"><div class="num" id="cDay">–</div><div class="label">Visits in the last 24 hours</div></div>
+        <div class="card"><div class="num" id="cVisitors">–</div><div class="label">Visitors on file</div></div>
+        <div class="card" id="backupCard"><div class="label">Last backup</div><div id="backupText" style="margin-top:6px;font-weight:600">–</div>
+          <button class="ghost" id="backupNow" style="padding-left:0;margin-top:6px">Back up now</button></div>
+      </div>
+      <div class="row"><h2>Inside now</h2><span class="note">Updates every 15 seconds</span></div>
+      <div class="panel"><table id="insideTable"></table></div>
+      <div class="row"><h2>Signed out in the last 30 minutes</h2></div>
+      <p class="note" style="margin-top:-8px">A mistaken tap on the Pi's reader can be undone here.</p>
+      <div class="panel"><table id="recentTable"></table></div>
+    </section>
+
+    <section data-pane="visits" class="hidden">
+      <div class="row">
+        <h2>Visits</h2>
+        <label class="muted">From <input type="date" id="vFrom"></label>
+        <label class="muted">To <input type="date" id="vTo"></label>
+        <input type="text" id="vSearch" placeholder="Search name, company, host">
+        <button class="primary" id="vExport">Download for Excel (CSV)</button>
+      </div>
+      <div class="panel"><table id="visitsTable"></table></div>
+    </section>
+
+    <section data-pane="visitors" class="hidden">
+      <div class="row">
+        <h2>Visitors</h2>
+        <input type="text" id="pSearch" placeholder="Search name or company">
+        <button class="primary" id="pExport">Download for Excel (CSV)</button>
+      </div>
+      <div class="panel"><table id="visitorsTable"></table></div>
+    </section>
+
+    <section data-pane="badges" class="hidden">
+      <div class="row"><h2>Badges</h2><span class="note">Add and link badges from the tablet's admin screen.</span></div>
+      <div class="panel"><table id="badgesTable"></table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const when = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return esc(iso);
+    const today = new Date().toDateString() === d.toDateString();
+    return d.toLocaleString([], today ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+  let tab = 'overview';
+  let timer = null;
+
+  async function get(path) {
+    const res = await fetch(path, { credentials: 'same-origin' });
+    if (res.status === 401) { showLogin(); throw new Error('login'); }
+    return res.json();
+  }
+  async function post(path, body) {
+    const res = await fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    if (res.status === 401) { showLogin(); throw new Error('login'); }
+    return res.json();
+  }
+
+  function showLogin() {
+    clearInterval(timer);
+    $('app').classList.add('hidden');
+    $('login').classList.remove('hidden');
+    $('pin').value = '';
+    $('pin').focus();
+  }
+  function showApp() {
+    $('login').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    show('overview');
+  }
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('loginError').textContent = '';
+    const res = await post('/dash/login', { pin: $('pin').value });
+    if (res.ok) showApp();
+    else $('loginError').textContent = res.error === 'locked' ? 'Too many tries. Wait 10 minutes.' : 'Wrong PIN.';
+  });
+  $('logout').addEventListener('click', async () => { await post('/dash/logout'); showLogin(); });
+
+  document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
+  function show(name) {
+    tab = name;
+    document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+    document.querySelectorAll('[data-pane]').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== name));
+    clearInterval(timer);
+    load();
+    if (name === 'overview') timer = setInterval(load, 15000);
+  }
+  function load() {
+    ({ overview: loadOverview, visits: loadVisits, visitors: loadVisitors, badges: loadBadges })[tab]().catch(() => {});
+  }
+
+  function table(el, head, rows, empty) {
+    el.innerHTML = rows.length
+      ? `<thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody>`
+      : `<tbody><tr><td class="empty">${empty}</td></tr></tbody>`;
+  }
+  const kind = (k) => k === 'Foreign national' ? '<span class="pill foreign">Foreign national</span>' : '<span class="pill">Visitor</span>';
+
+  async function loadOverview() {
+    const d = await get('/dash/summary');
+    $('cInside').textContent = d.inside.length;
+    $('cDay').textContent = d.visits24h;
+    $('cVisitors').textContent = d.status.counts.visitors;
+    const b = d.status.backup || {};
+    const card = $('backupCard');
+    card.classList.toggle('warn', !b.ok);
+    card.classList.toggle('good', !!b.ok);
+    $('backupText').textContent = !d.backupDir ? 'Off: no backup folder is set.'
+      : !b.at ? 'Not run yet. The first runs tonight.'
+      : b.ok ? `${when(b.at)} · OK` : `${when(b.at)} · FAILED: ${b.error}`;
+    table($('insideTable'), ['Badge', 'Name', 'Company', 'Visiting', 'Kind', 'Since', ''],
+      d.inside.map((v) => `<tr><td><span class="badge">${esc(v.badge)}</span></td><td><strong>${esc(v.first)} ${esc(v.last)}</strong></td>
+        <td>${esc(v.company)}</td><td>${esc(v.visiting)}</td><td>${kind(v.kind)}</td><td>${when(v.since)}</td>
+        <td style="text-align:right"><button class="act" data-signout="${esc(v.visitId)}">Sign out</button></td></tr>`),
+      'Nobody is signed in right now.');
+    table($('recentTable'), ['Badge', 'Name', 'Company', 'Signed out', 'How', ''],
+      d.recent.map((v) => `<tr><td><span class="badge">${esc(v.badge)}</span></td><td>${esc(v.first)} ${esc(v.last)}</td>
+        <td>${esc(v.company)}</td><td>${when(v.signed_out)}</td><td class="muted">${esc(v.signed_out_by)}</td>
+        <td style="text-align:right"><button class="act" data-undo="${esc(v.id)}">Undo</button></td></tr>`),
+      'No one has signed out in the last 30 minutes.');
+    document.querySelectorAll('[data-signout]').forEach((btn) => btn.addEventListener('click', () => confirmTap(btn, 'Tap again', async () => {
+      await post('/dash/signout', { visitId: btn.dataset.signout }); loadOverview();
+    })));
+    document.querySelectorAll('[data-undo]').forEach((btn) => btn.addEventListener('click', async () => {
+      const r = await post('/dash/undo', { visitId: btn.dataset.undo });
+      if (!r.ok) alert(r.error === 'badge_in_use' ? 'That badge is already in use by someone else.' : 'Too late to undo.');
+      loadOverview();
+    }));
+  }
+  $('backupNow').addEventListener('click', async () => {
+    $('backupText').textContent = 'Backing up…';
+    await post('/dash/backup'); loadOverview();
+  });
+
+  function confirmTap(btn, label, action) {
+    if (btn.classList.contains('confirm')) { btn.disabled = true; action(); return; }
+    const text = btn.textContent;
+    btn.classList.add('confirm'); btn.textContent = label;
+    setTimeout(() => { btn.classList.remove('confirm'); btn.textContent = text; }, 3000);
+  }
+
+  const visitQuery = () => new URLSearchParams({ from: $('vFrom').value, to: $('vTo').value, q: $('vSearch').value.trim() }).toString();
+  async function loadVisits() {
+    const d = await get('/dash/visits?' + visitQuery());
+    table($('visitsTable'), ['Signed in', 'Signed out', 'Name', 'Company', 'Visiting', 'Purpose', 'Kind', 'Badge'],
+      d.visits.map((v) => `<tr><td>${when(v.signed_in)}</td><td>${v.signed_out ? when(v.signed_out) : '<span class="pill in">Inside</span>'}</td>
+        <td><strong>${esc(v.first)} ${esc(v.last)}</strong></td><td>${esc(v.company)}</td><td>${esc(v.visiting)}</td>
+        <td>${esc(v.purpose)}</td><td>${kind(v.kind)}</td><td><span class="badge">${esc(v.badge)}</span></td></tr>`),
+      'No visits match.');
+  }
+  ['vFrom', 'vTo'].forEach((id) => $(id).addEventListener('change', loadVisits));
+  let searchTimer;
+  $('vSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadVisits, 300); });
+  $('vExport').addEventListener('click', () => { location.href = '/dash/visits.csv?' + visitQuery(); });
+
+  async function loadVisitors() {
+    const d = await get('/dash/visitors?' + new URLSearchParams({ q: $('pSearch').value.trim() }));
+    table($('visitorsTable'), ['', 'Name', 'Company', 'Citizenship', 'Quick entry', 'Visits', 'Last visit', 'Photos'],
+      d.visitors.map((v) => `<tr><td>${v.photo ? `<img class="thumb" src="${esc(v.photo)}" alt="" loading="lazy">` : '<span class="thumb"></span>'}</td>
+        <td><strong>${esc(v.first)} ${esc(v.last)}</strong></td><td>${esc(v.company)}</td>
+        <td>${esc(v.citizenship)}${v.country && v.country !== 'United States' ? ` <span class="muted">(${esc(v.country)})</span>` : ''}</td>
+        <td>${v.quick_entry ? 'Yes' : 'No'}</td><td>${v.visit_count}</td><td>${when(v.last_visit)}</td><td>${v.photoCount}</td></tr>`),
+      'No visitors yet.');
+  }
+  let peopleTimer;
+  $('pSearch').addEventListener('input', () => { clearTimeout(peopleTimer); peopleTimer = setTimeout(loadVisitors, 300); });
+  $('pExport').addEventListener('click', () => { location.href = '/dash/visitors.csv'; });
+
+  async function loadBadges() {
+    const d = await get('/dash/badges');
+    const order = (b) => Number((/\d+/.exec(b.badge) || [0])[0]);
+    table($('badgesTable'), ['Badge', 'Status', 'Holder', 'Since', 'NFC tag'],
+      d.badges.sort((a, b) => order(a) - order(b)).map((b) => {
+        const s = String(b.status).toLowerCase();
+        return `<tr><td><span class="badge">${esc(b.badge)}</span></td>
+          <td><span class="pill ${s === 'in use' ? 'in' : s === 'retired' ? 'retired' : ''}">${esc(s)}</span></td>
+          <td>${esc(b.holder) || '<span class="muted">—</span>'}</td><td>${b.since ? when(b.since) : '—'}</td>
+          <td class="muted">${b.tag ? '…' + esc(String(b.tag).slice(-6)) : 'Not linked'}</td></tr>`;
+      }), 'No badges yet. Add them from the tablet: admin → Badges → Add badge by tapping it.');
+  }
+
+  // Already logged in from earlier?
+  get('/dash/summary').then(showApp).catch(() => {});
+</script>
+</body>
+</html>

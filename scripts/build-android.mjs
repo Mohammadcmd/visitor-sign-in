@@ -3,9 +3,10 @@
 //   node scripts/build-android.mjs
 //
 // Optional environment variables:
-//   KIOSK_API_URL, KIOSK_KEY   Apps Script /exec URL and KIOSK_KEY. Built into the
-//                              app so the tablet reports to the Google Sheet with no
-//                              setup. Without them the app runs in demo mode.
+//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi address>/api) and the
+//                              kiosk key. Built into the app so the tablet needs no
+//                              setup. Without them the app starts in demo mode (connect
+//                              it later in admin Settings).
 //   KIOSK_KEYSTORE_BASE64      Base64 of a release keystore (.jks), plus
 //   KIOSK_KEYSTORE_PASSWORD    its password,
 //   KIOSK_KEY_ALIAS            key alias, and
@@ -30,14 +31,15 @@ run('npx cap sync android');
 const api = process.env.KIOSK_API_URL || '';
 const key = process.env.KIOSK_KEY || '';
 if ((api && !key) || (!api && key)) throw new Error('Set both KIOSK_API_URL and KIOSK_KEY, or neither.');
-if (api && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(api)) {
-  throw new Error('KIOSK_API_URL should look like https://script.google.com/macros/s/.../exec');
+// The Raspberry Pi on the office network: http://<pi address>/api
+if (api && !/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api)) {
+  throw new Error('KIOSK_API_URL should look like http://<pi address>/api');
 }
 writeFileSync(
   join(android, 'app/src/main/assets/public/kiosk-connection.js'),
   `// Written by scripts/build-android.mjs\nwindow.KIOSK_CONNECTION = ${api ? JSON.stringify({ api, key }) : 'null'};\n`,
 );
-console.log(api ? 'Connection to the Google Sheet built in.' : 'No connection given: the app will run in demo mode.');
+console.log(api ? 'Connection to the Raspberry Pi built in.' : 'No connection given: the app starts in demo mode.');
 
 // 3. Signing.
 // android/app/build.gradle reads the passwords from the environment; only the

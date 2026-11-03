@@ -7,6 +7,10 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.os.Build;
 import android.os.SystemClock;
+import android.print.PrintAttributes;
+import android.print.PrintManager;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -29,6 +33,8 @@ public class KioskPlugin extends Plugin {
     private static final long UNLOCK_MS = 5 * 60 * 1000;
     private static long unlockedUntil = 0;
     private static boolean askedToPin = false;
+    // Held until printing is done; a WebView that's only referenced locally can be collected mid-print.
+    private static WebView printing;
 
     static void lock(Activity activity) {
         if (SystemClock.elapsedRealtime() < unlockedUntil || isLocked(activity)) return;
@@ -69,6 +75,36 @@ public class KioskPlugin extends Plugin {
                 // Wasn't locked.
             }
             call.resolve();
+        });
+    }
+
+    /**
+     * Opens Android's print dialog (a printer, or Save as PDF) for an HTML page,
+     * such as the badge labels from the admin Settings page.
+     */
+    @PluginMethod
+    public void print(PluginCall call) {
+        String html = call.getString("html", "");
+        String title = call.getString("title", "Shock Tech Visitors");
+        Activity activity = getActivity();
+        activity.runOnUiThread(() -> {
+            WebView page = new WebView(activity);
+            printing = page;
+            page.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    PrintManager printer = (PrintManager) activity.getSystemService(Context.PRINT_SERVICE);
+                    if (printer == null) {
+                        call.reject("Printing isn't available on this tablet");
+                        return;
+                    }
+                    printer.print(title, view.createPrintDocumentAdapter(title),
+                        new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.NA_LETTER).build());
+                    call.resolve();
+                }
+            });
+            // Images (the logo) are inlined as data URLs, so no base URL is needed.
+            page.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
         });
     }
 

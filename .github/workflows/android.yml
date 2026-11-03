@@ -5,7 +5,7 @@ name: Build Android app
 # "shocktech-visitor-kiosk".
 #
 # Repository secrets (Settings > Secrets and variables > Actions), all optional:
-#   KIOSK_API_URL, KIOSK_KEY            built in so the tablet reports to the Google Sheet
+#   KIOSK_API_URL, KIOSK_KEY            the Raspberry Pi's address and kiosk key, built in
 #   KIOSK_KEYSTORE_BASE64, KIOSK_KEYSTORE_PASSWORD,
 #   KIOSK_KEY_ALIAS, KIOSK_KEY_PASSWORD  release signing, so new versions install as updates
 on:
@@ -38,7 +38,9 @@ jobs:
           java-version: 21
           cache: gradle
       - run: npm ci
-      - run: node tests/apps-script.test.js
+      - name: Raspberry Pi server tests
+        working-directory: pi
+        run: python3 -m unittest discover -s tests
       - name: Build APK
         run: node scripts/build-android.mjs
         env:

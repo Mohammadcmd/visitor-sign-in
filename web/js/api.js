@@ -1,4 +1,4 @@
-// Talks to the Apps Script backend, or to an in-browser stand-in in demo mode.
+// Talks to the Raspberry Pi (pi/visitor_pi), or to an in-browser stand-in in demo mode.
 import { CONFIG } from '../config.js';
 import { nameKey, companyWords, sameCompany, near, normalizeTag } from './match.js';
 
@@ -10,8 +10,12 @@ const TIMEOUT_MS = 20000;
 const OUTBOX = 'shocktech-kiosk-outbox';
 const OUTBOX_MAX = 40;
 
+/** When the backend last answered or failed (for the Settings page). */
+export const net = { lastOk: 0, lastFail: 0 };
+
 /** Tells the page whether the backend is reachable (for the "Offline" indicator). */
 function reportNet(ok) {
+  net[ok ? 'lastOk' : 'lastFail'] = Date.now();
   window.dispatchEvent(new CustomEvent('kiosk-net', { detail: { ok } }));
 }
 
@@ -21,8 +25,7 @@ async function send(action, args, rid) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    // text/plain keeps this a "simple" request, so the browser skips the CORS
-    // preflight that Apps Script can't answer.
+    // text/plain keeps this a "simple" request, so the browser skips the CORS preflight.
     const res = await fetch(CONFIG.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -88,6 +91,11 @@ export async function flushOutbox() {
   } finally {
     flushing = false;
   }
+}
+
+/** How many calls are waiting on the tablet to be sent. */
+export function outboxSize() {
+  return readOutbox().length;
 }
 
 function readOutbox() {
@@ -236,7 +244,7 @@ function demoAction(s, action, a) {
       return { ok: true };
     }
     case 'adminLogin':
-      return a.pin === DEMO_PIN ? { ok: true, token: 'demo', ttl: 900 } : { ok: false, error: 'pin' };
+      return a.pin === (s.pin || DEMO_PIN) ? { ok: true, token: 'demo', ttl: 900 } : { ok: false, error: 'pin' };
   }
   if (a.token !== 'demo') return { ok: false, error: 'admin' };
   switch (action) {
@@ -247,6 +255,15 @@ function demoAction(s, action, a) {
         kind: v.kind, badge: v.badge, since: v.signedIn,
       })),
     };
+    case 'adminStatus': return {
+      ok: true, backend: 'demo', sheetName: 'Demo (this browser only)', sheetUrl: '',
+      counts: { visitors: s.visitors.length, visits: s.visits.length, badges: s.badges.length },
+      pinChangedAt: s.pinAt || '', pinSource: s.pin ? 'settings' : 'demo', serverTime: now(),
+    };
+    case 'adminSetPin':
+      if (!/^\d{6,8}$/.test(String(a.pin || ''))) return { ok: false, error: 'pin_format' };
+      s.pin = a.pin; s.pinAt = now();
+      return { ok: true, at: s.pinAt };
     case 'adminBadges': return { ok: true, badges: s.badges.map((b) => ({ badge: b.badge, tag: b.tag || '', status: b.status, holder: b.holder || '', since: b.since || '' })) };
     case 'adminSignOut': {
       const v = s.visits.find((x) => x.id === a.visitId);

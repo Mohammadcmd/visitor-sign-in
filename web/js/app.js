@@ -1,6 +1,6 @@
 // Shock Tech visitor kiosk: screen flow and wiring.
 import { CONFIG } from '../config.js';
-import { call, queue, DEMO } from './api.js';
+import { call, queue, net, outboxSize, DEMO } from './api.js';
 import { Keyboard } from './keyboard.js';
 import { listenForTaps } from './nfc.js';
 import * as face from './face.js';
@@ -174,7 +174,7 @@ const ENTER = {
 // ------------------------------------------------------------------ welcome
 
 $('[data-screen="welcome"]').addEventListener('click', () => {
-  if (suppressClick) { suppressClick = false; return; }
+  if (Date.now() < suppressClickUntil) return; // the end of the long press that opened admin
   if (state.busy) return;
   show('choice');
 });
@@ -190,14 +190,16 @@ function tickClock() {
   $('[data-clock]').textContent = new Date().toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// Press and hold the logo for 2.5 s to open the admin PIN pad.
-let suppressClick = false;
+// Press and hold the logo for 2.5 s to open the admin PIN pad. The click that
+// ends the long press is ignored, but only briefly: it often lands on the PIN
+// pad instead, and a flag left set would swallow the next visitor's tap.
+let suppressClickUntil = 0;
 (() => {
   const logo = $('[data-admin-hold]');
   let timer;
   const cancel = () => clearTimeout(timer);
   logo.addEventListener('pointerdown', () => {
-    timer = setTimeout(() => { suppressClick = true; openPin(); }, 2500);
+    timer = setTimeout(() => { suppressClickUntil = Date.now() + 1500; openPin(); }, 2500);
   });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => logo.addEventListener(ev, cancel));
 })();
@@ -762,6 +764,7 @@ function adminTab(name) {
   $$('[data-admin-tab]').forEach((t) => t.classList.toggle('active', t.dataset.adminTab === name));
   $$('[data-admin-pane]').forEach((p) => { p.hidden = p.dataset.adminPane !== name; });
   if (name === 'inside') loadInside();
+  else if (name === 'settings') loadSettings();
   else loadBadges();
 }
 
@@ -876,6 +879,156 @@ function confirmTap(btn, label, action) {
   btn.textContent = label;
   setTimeout(() => { btn.classList.remove('confirm'); btn.textContent = text; }, 3000);
 }
+
+// ------------------------------------------------------------------ admin settings
+
+const CONNECTION_KEY = 'shocktech-kiosk-connection';
+const BUILT_IN = !!(window.KIOSK_CONNECTION && window.KIOSK_CONNECTION.api);
+
+function setStatus(el, cls, text) {
+  el.className = `set-status ${cls}`;
+  el.textContent = text;
+}
+
+$('[data-settings-refresh]').addEventListener('click', () => loadSettings());
+
+async function loadSettings() {
+  const status = $('[data-set-status]');
+  const pinLine = $('[data-set-pin]');
+  $('[data-set-pin-error]').textContent = '';
+  $('[data-set-connect]').hidden = BUILT_IN;
+  if (!BUILT_IN) {
+    $('input[name="setapi"]').value = CONFIG.API_URL;
+    $('input[name="setkey"]').value = CONFIG.KIOSK_KEY;
+  }
+
+  setStatus(status, '', 'Checking…');
+  const res = await adminApi('adminStatus');
+  const fact = (sel, text) => { $(sel).textContent = text; };
+  if (!res.ok) {
+    setStatus(status, 'bad', `Can't reach the Raspberry Pi: ${errorText(res)}`);
+    ['[data-set-sheet]', '[data-set-folder]', '[data-set-counts]'].forEach((sel) => fact(sel, '—'));
+    pinLine.textContent = '—';
+    return;
+  }
+
+  fact('[data-set-sheet]', DEMO ? res.sheetName : `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://shocktech-rehtekpro.local'}`);
+  fact('[data-set-folder]', DEMO ? 'Demo: photos stay on this tablet' : `On the Pi (${res.storage}/photos)`);
+  fact('[data-set-counts]', `${res.counts.visitors} visitors · ${res.counts.visits} visits · ${res.counts.badges} badges`);
+
+  const waiting = outboxSize();
+  const queued = waiting ? ` ${waiting} photo${waiting === 1 ? '' : 's'} waiting to send.` : '';
+  if (DEMO) {
+    setStatus(status, 'demo', 'Demo mode: not connected to the Raspberry Pi. Nothing is saved outside this tablet.');
+  } else {
+    const b = res.backup || {};
+    const backup = !b.at ? ' No backup has run yet.' : b.ok ? ` Last backup ${timeOf(b.at)}.` : ` Last backup FAILED: ${b.error}`;
+    setStatus(status, b.at && !b.ok ? 'bad' : 'ok', `Connected to the ${res.sheetName}. Last answered ${timeOf(new Date(net.lastOk || Date.now()).toISOString())}.${backup}${queued}`);
+  }
+
+  pinLine.textContent = {
+    settings: `Last changed ${timeOf(res.pinChangedAt)}.${DEMO ? '' : ' The same PIN opens the dashboard on office computers.'}`,
+    demo: 'Demo PIN 123456. Changes here last only on this tablet.',
+    none: 'No PIN is set yet. Set one on the Pi: python3 -m visitor_pi set-pin',
+  }[res.pinSource] || '';
+}
+
+$('[data-set-save]').addEventListener('click', () => {
+  const api = $('input[name="setapi"]').value.trim();
+  const key = $('input[name="setkey"]').value.trim();
+  if (!/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api) || !key) {
+    toast("Enter the Pi's address (http://<pi address>/api) and the kiosk key.");
+    return;
+  }
+  try { localStorage.setItem(CONNECTION_KEY, JSON.stringify({ api, key })); } catch { toast("Couldn't save on this tablet."); return; }
+  location.reload();
+});
+
+$('[data-set-disconnect]').addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to disconnect', () => {
+  try { localStorage.removeItem(CONNECTION_KEY); } catch { /* nothing saved */ }
+  location.reload();
+}));
+
+$('[data-set-pin-save]').addEventListener('click', async () => {
+  const err = $('[data-set-pin-error]');
+  const a = $('input[name="setpin1"]'), b = $('input[name="setpin2"]');
+  kb.close();
+  if (!/^\d{6,8}$/.test(a.value)) { err.textContent = 'The PIN must be 6 to 8 digits.'; return; }
+  if (a.value !== b.value) { err.textContent = "The two PINs don't match."; return; }
+  err.textContent = '';
+  const res = await adminApi('adminSetPin', { pin: a.value });
+  if (!res.ok) { err.textContent = errorText(res); return; }
+  a.value = ''; b.value = '';
+  toast('Admin PIN changed.');
+  loadSettings();
+});
+
+// Things to print: badge labels and the lobby sign, on US Letter.
+let logoDataUrl = null;
+async function logoData() {
+  if (!logoDataUrl) {
+    const blob = await (await fetch('assets/shocktech-logo.png')).blob();
+    logoDataUrl = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+  }
+  return logoDataUrl;
+}
+
+async function printableSheet() {
+  const res = await adminApi('adminBadges');
+  if (!res.ok) throw new Error(errorText(res));
+  const logo = await logoData();
+  const badges = res.badges.filter((b) => String(b.status).toLowerCase() !== 'retired')
+    .sort((x, y) => String(x.badge).localeCompare(String(y.badge), undefined, { numeric: true }));
+  const labels = badges.map((b) => `<div class="label"><div class="band"></div><img src="${logo}" alt=""><div class="word">VISITOR</div><div class="no">${esc(b.badge)}</div></div>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Shock Tech visitor badges</title><style>
+    @page { size: letter; margin: 0.5in; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #0d1b2a; }
+    .sign { height: 9.9in; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border: 3px solid #063a6e; border-radius: 24px; page-break-after: always; padding: 0.6in; }
+    .sign img { width: 4.2in; }
+    .sign h1 { margin: 0.5in 0 0; font-size: 46pt; color: #063a6e; letter-spacing: -0.01em; }
+    .sign p { margin: 0.25in 0 0; font-size: 22pt; line-height: 1.4; }
+    .sign .leave { margin-top: 0.6in; padding: 0.2in 0.4in; border-radius: 16px; background: #eef3f8; font-size: 18pt; }
+    .grid { display: grid; grid-template-columns: repeat(2, 3.5in); gap: 0.3in 0.4in; justify-content: center; }
+    .label { height: 2.3in; border: 1.5px dashed #9aa8b6; border-radius: 14px; overflow: hidden; text-align: center; break-inside: avoid; display: flex; flex-direction: column; align-items: center; }
+    .band { align-self: stretch; height: 0.38in; background: #063a6e; }
+    .label img { width: 1.45in; margin-top: 0.12in; }
+    .word { margin-top: 0.06in; font-size: 13pt; font-weight: 800; letter-spacing: 0.3em; color: #063a6e; }
+    .no { margin-top: 0.02in; font-size: 28pt; line-height: 1.1; font-weight: 900; color: #0d1b2a; }
+    .empty { text-align: center; font-size: 16pt; color: #4a5a6b; }
+  </style></head><body>
+    <div class="sign"><img src="${logo}" alt="Shock Tech"><h1>Welcome, visitors</h1>
+      <p>Please sign in at the tablet before you go past the front desk.</p>
+      <p>Then take any visitor badge from the tray and tap it on the reader.</p>
+      <div class="leave"><strong>Leaving?</strong> Tap your badge on the reader to sign out, and leave it at the front desk.</div></div>
+    ${labels ? `<div class="grid">${labels}</div>` : '<p class="empty">No badges are registered yet. Add them on the Badges page, then print again.</p>'}
+  </body></html>`;
+}
+
+$('[data-print-preview]').addEventListener('click', async () => {
+  const box = $('[data-print-frame]');
+  try {
+    const html = await printableSheet();
+    box.innerHTML = '';
+    const frame = document.createElement('iframe');
+    frame.srcdoc = html;
+    box.appendChild(frame);
+    box.hidden = false;
+  } catch (err) { toast(String(err.message || err)); }
+});
+
+$('[data-print-go]').addEventListener('click', async () => {
+  try {
+    const html = await printableSheet();
+    if (Kiosk) { await Kiosk.print({ html, title: 'Shock Tech visitor badges' }); return; }
+    // Browser: print from a hidden frame so the kiosk itself isn't printed.
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;width:0;height:0;border:0;';
+    frame.srcdoc = html;
+    frame.onload = () => { frame.contentWindow.print(); setTimeout(() => frame.remove(), 60000); };
+    document.body.appendChild(frame);
+  } catch (err) { toast(String(err.message || err)); }
+});
 
 function timeOf(iso) {
   const d = new Date(iso);
