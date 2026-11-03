@@ -1,5 +1,5 @@
-// Name, company and NFC tag normalization. Mirrors the helpers in
-// apps-script/Code.gs so the kiosk's demo mode matches the real backend.
+// Name, company and NFC tag normalization. Mirrors pi/visitor_pi/matching.py so
+// the kiosk's demo mode matches the Raspberry Pi.
 
 export function nameKey(s) {
   return String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()

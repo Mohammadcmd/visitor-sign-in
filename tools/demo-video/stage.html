@@ -111,7 +111,7 @@
   <div class="ipad" id="ipad"><div class="screen-wrap"><iframe id="kiosk" src="../../web/index.html" allow="camera; fullscreen"></iframe></div></div>
 
   <div class="sheet" id="sheet">
-    <div class="top"><i></i>Shock Tech Visitor Log</div>
+    <div class="top"><i></i>visitors.csv · downloaded from the Raspberry Pi</div>
     <div class="grid" id="grid"></div>
     <div class="tabs"><span class="on">Visitors</span><span>Visits</span><span>Badges</span></div>
   </div>
@@ -159,12 +159,12 @@
     card(html) { $('tc').innerHTML = html; $('tc').classList.add('show'); },
     hideCard() { $('tc').classList.remove('show'); },
     sheet(rows) {
-      const cols = ['First Name', 'Last Name', 'Company', 'Who are you visiting?', 'Purpose', 'Citizenship status', 'Country', 'Quick entry', 'Registered', 'Photo folder'];
+      const cols = ['First Name', 'Last Name', 'Company', 'Who are you visiting?', 'Purpose', 'Citizenship status', 'Country', 'Quick entry', 'Registered', 'Photos'];
       const letters = 'ABCDEFGHIJ';
       const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
       $('grid').innerHTML = `<table><thead><tr><th></th>${cols.map((_, i) => `<th>${letters[i]}</th>`).join('')}</tr></thead><tbody>
         <tr><td class="rn">1</td>${cols.map((c) => `<td>${c}</td>`).join('')}</tr>
-        ${rows.map((r, i) => `<tr class="${r.isNew ? 'new' : ''}"><td class="rn">${i + 2}</td>${r.cells.map((c, j) => `<td class="${j === 9 ? 'link' : ''}">${esc(c)}</td>`).join('')}</tr>`).join('')}
+        ${rows.map((r, i) => `<tr class="${r.isNew ? 'new' : ''}"><td class="rn">${i + 2}</td>${r.cells.map((c, j) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}
         ${Array.from({ length: 14 }, (_, i) => `<tr><td class="rn">${rows.length + i + 2}</td>${cols.map(() => '<td></td>').join('')}</tr>`).join('')}
       </tbody></table>`;
       $('sheet').classList.add('show');

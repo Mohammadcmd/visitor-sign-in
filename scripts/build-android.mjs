@@ -3,10 +3,10 @@
 //   node scripts/build-android.mjs
 //
 // Optional environment variables:
-//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi>:8080/api) or the
-//                              Apps Script /exec URL, and the kiosk key. Built into the
-//                              app so the tablet needs no setup. Without them the app
-//                              starts in demo mode (connect it later in admin Settings).
+//   KIOSK_API_URL, KIOSK_KEY   The Raspberry Pi's address (http://<pi>:8080/api) and the
+//                              kiosk key. Built into the app so the tablet needs no
+//                              setup. Without them the app starts in demo mode (connect
+//                              it later in admin Settings).
 //   KIOSK_KEYSTORE_BASE64      Base64 of a release keystore (.jks), plus
 //   KIOSK_KEYSTORE_PASSWORD    its password,
 //   KIOSK_KEY_ALIAS            key alias, and
@@ -31,16 +31,15 @@ run('npx cap sync android');
 const api = process.env.KIOSK_API_URL || '';
 const key = process.env.KIOSK_KEY || '';
 if ((api && !key) || (!api && key)) throw new Error('Set both KIOSK_API_URL and KIOSK_KEY, or neither.');
-// Either the Raspberry Pi on the local network (http://<pi address>:8080/api) or
-// the Google Apps Script web app (https://script.google.com/macros/s/.../exec).
+// The Raspberry Pi on the office network: http://<pi address>:8080/api
 if (api && !/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api)) {
-  throw new Error('KIOSK_API_URL should be http://<pi address>:8080/api or the Apps Script /exec URL');
+  throw new Error('KIOSK_API_URL should look like http://<pi address>:8080/api');
 }
 writeFileSync(
   join(android, 'app/src/main/assets/public/kiosk-connection.js'),
   `// Written by scripts/build-android.mjs\nwindow.KIOSK_CONNECTION = ${api ? JSON.stringify({ api, key }) : 'null'};\n`,
 );
-console.log(api ? 'Connection to the Google Sheet built in.' : 'No connection given: the app will run in demo mode.');
+console.log(api ? 'Connection to the Raspberry Pi built in.' : 'No connection given: the app starts in demo mode.');
 
 // 3. Signing.
 // android/app/build.gradle reads the passwords from the environment; only the

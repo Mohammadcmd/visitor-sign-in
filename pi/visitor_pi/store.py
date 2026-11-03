@@ -1,8 +1,8 @@
 """Everything the kiosk can ask for, stored in one SQLite database on the Pi.
 
-The actions and their JSON replies match apps-script/Code.gs exactly, so the
-tablet app talks to the Pi the same way it would talk to Google. Photos are
-saved as JPEG files under <data>/photos/<visitor id>/.
+These are the actions the tablet app calls through web/js/api.js, with the
+same JSON replies as its demo mode. Photos are saved as JPEG files under
+<data>/photos/<visitor id>/.
 """
 import base64
 import hashlib
@@ -120,7 +120,7 @@ class Store:
     # ------------------------------------------------------------ entry point
 
     def handle(self, req):
-        """One API call from the kiosk: {key, action, args, rid}. Mirrors handle_() in Code.gs."""
+        """One API call from the kiosk: {key, action, args, rid}."""
         if not isinstance(req, dict) or not secrets.compare_digest(str(req.get('key') or ''), self.kiosk_key):
             return {'ok': False, 'error': 'kiosk_key'}
         rid = req.get('rid')
@@ -478,8 +478,7 @@ class Store:
         return {
             'ok': True, 'backend': 'pi',
             'sheetName': f'Raspberry Pi ({os.uname().nodename})',
-            'sheetUrl': self.dashboard_url, 'photoFolderUrl': '', 'storage': self.data_dir,
-            'missingTabs': [],
+            'sheetUrl': self.dashboard_url, 'storage': self.data_dir,
             'counts': {'visitors': count('visitors'), 'visits': count('visits'), 'badges': count('badges')},
             'pinChangedAt': json.loads(stored)['at'] if stored else '',
             'pinSource': 'settings' if stored else 'none',

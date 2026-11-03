@@ -39,15 +39,16 @@ We used it as inspiration, not as a blueprint.
 | Badges | A generic USB NFC reader that acts as a keyboard | Cheap, works on any tablet, no extra drivers. |
 | Face recognition | Opt-in "quick entry", offered at the end of the first sign-in | Visitors should consent before their face is used, and biometric privacy laws vary by state. |
 | When the camera isn't sure | Never guess: find the visitor by name, and save that look at them as a new sample (opted-in visitors only) | Accuracy, plus more samples over time. |
-| Backend | Google Apps Script, writing to the Sheet and Drive | Free and needs no server. It can be replaced later through one file (`web/js/api.js`). |
-| Hosting | Kiosk outside Apps Script | Apps Script pages block camera access. |
+| Backend (first version) | Google Apps Script, writing to a Sheet and Drive. **Later replaced entirely by the Raspberry Pi** (below). | Free and needed no server. Kept swappable through one file (`web/js/api.js`), which made the move to the Pi easy. |
+| Hosting (first version) | Kiosk outside Apps Script | Apps Script pages block camera access. Moot once the kiosk became an Android app talking to the Pi. |
 | Signing out | Tap a badge on the welcome screen, or sign out from the admin screen | As requested. |
 | Look and feel | Keynote-style screen transitions, kept professional: calm colors and motion, no confetti or sparkles | The owner asked for "good but professional". |
 | Returning visitors | Name screen first, with the face check running in the background while they type | Faster: no waiting on a camera scan. |
 | Device | **Android app (APK)** on whatever Android tablet is available, plus a generic USB NFC reader | No hosting, works offline for face data, and a real kiosk lockdown. |
 | Repository | Fresh repository `visitor-sign-in` with a clean history | The owner wanted nothing left from an earlier, unrelated project. |
 | Settings page | Rehtek's eight-section structure, mapped to this kiosk's real features | Sections for features not built yet (areas, screening) say so instead of pretending. |
-| Where records live | A **Raspberry Pi in the building**, with no Google at all (Google stays as an option) | Keep visitor data local. |
+| Where records live | A **Raspberry Pi in the building** | Keep visitor data local. |
+| Google | **Removed entirely**: the Apps Script backend, its tests and every Google setup step | One place for records, less to maintain, and no way to send visitor data to the cloud by accident. |
 | Pi screen | None: the Pi's reader signs visitors out by tap, with the reader's beep as feedback, and mistaken taps undone from the dashboard | The owner's choice. |
 | Records access | A browser dashboard on the Pi plus Excel/CSV downloads | Office computers need to see records without Google. |
 | Backups | Nightly to a shared network folder, refusing to run if it isn't mounted | The memory card must never be the only copy. |
@@ -102,6 +103,11 @@ We used it as inspiration, not as a blueprint.
    - the tablet connects to it over the local network from Settings
    - also fixed: holding the logo to open admin could make the next visitor's welcome-screen tap be ignored
 
+10. **Google removed:**
+    - the Apps Script backend and its tests are deleted
+    - the Raspberry Pi is the only place records live
+    - the Settings page, guides and app build only describe the Pi, with demo mode still there for trying the kiosk out
+
 ## Where things are
 
 | Thing | Location |
@@ -109,9 +115,8 @@ We used it as inspiration, not as a blueprint.
 | Kiosk | `web/` |
 | Android app | `android/` (guide: `android/README.md`), built with `scripts/build-android.mjs` |
 | Raspberry Pi server | `pi/` (guide: `pi/README.md`) |
-| Google backend | `apps-script/Code.gs`; tests in `tests/` |
 | Demo videos | `media/` |
-| Ready-to-install demo APK | `downloads/` (demo mode, not connected to a Sheet) |
+| Ready-to-install demo APK | `downloads/` (demo mode; connect it to the Pi in Settings) |
 | Demo video recording kit | `tools/demo-video/` |
 | Original reference spec | `docs/reference/` |
 

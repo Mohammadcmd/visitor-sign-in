@@ -1,4 +1,4 @@
-// Talks to the Apps Script backend, or to an in-browser stand-in in demo mode.
+// Talks to the Raspberry Pi (pi/visitor_pi), or to an in-browser stand-in in demo mode.
 import { CONFIG } from '../config.js';
 import { nameKey, companyWords, sameCompany, near, normalizeTag } from './match.js';
 
@@ -25,8 +25,7 @@ async function send(action, args, rid) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    // text/plain keeps this a "simple" request, so the browser skips the CORS
-    // preflight that Apps Script can't answer.
+    // text/plain keeps this a "simple" request, so the browser skips the CORS preflight.
     const res = await fetch(CONFIG.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -257,7 +256,7 @@ function demoAction(s, action, a) {
       })),
     };
     case 'adminStatus': return {
-      ok: true, sheetName: 'Demo (this browser only)', sheetUrl: '', photoFolderUrl: '', missingTabs: [],
+      ok: true, backend: 'demo', sheetName: 'Demo (this browser only)', sheetUrl: '',
       counts: { visitors: s.visitors.length, visits: s.visits.length, badges: s.badges.length },
       pinChangedAt: s.pinAt || '', pinSource: s.pin ? 'settings' : 'demo', serverTime: now(),
     };

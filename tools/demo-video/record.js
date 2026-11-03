@@ -189,18 +189,18 @@ const LITE_CSS = '.aurora{filter:none!important;opacity:.4!important} *{backdrop
   await sleep(4600);
   await S('reader', false);
 
-  // 4. Google Sheet
-  await S('chapter', 4, 'Every visit lands in Google Sheets', 'Names, answers and a link to each visitor\'s photo folder, plus a time-in / time-out log and the badge register.');
+  // 4. Records stay on the Raspberry Pi
+  await S('chapter', 4, 'Every visit stays in the building', 'Names, answers and photos are kept on a Raspberry Pi at Shock Tech. Office computers see them in its dashboard, or download them for Excel.');
   const store = await frame.evaluate(() => JSON.parse(localStorage.getItem('shocktech-kiosk-demo-v1')));
   const date = (s) => new Date(s).toLocaleDateString('en-US');
   const rows = store.visitors.map((v) => ({
     isNew: v.first === 'Jordan',
-    cells: [v.first, v.last, v.company, v.visiting, v.purpose, v.citizenship, v.country || 'United States', v.quickEntry ? 'Yes' : 'No', date(v.registered), 'drive.google.com/…/' + v.last],
+    cells: [v.first, v.last, v.company, v.visiting, v.purpose, v.citizenship, v.country || 'United States', v.quickEntry ? 'Yes' : 'No', date(v.registered), 'On the Pi'],
   }));
   await S('ipad', 'away');
   await sleep(500);
   await S('sheet', rows);
-  await S('sub', 'Jordan\'s sign-in just arrived');
+  await S('sub', 'Jordan\'s sign-in, downloaded from the Pi');
   await sleep(6500);
   await S('hideSheet');
   await S('ipad', '');
@@ -283,7 +283,7 @@ const LITE_CSS = '.aurora{filter:none!important;opacity:.4!important} *{backdrop
     <ul>
       <li><b>✓</b>Visitors sign themselves in</li>
       <li><b>✓</b>ITAR / EAR citizenship check built in</li>
-      <li><b>✓</b>Every visit logged in Google Sheets</li>
+      <li><b>✓</b>Every record kept on site</li>
       <li><b>✓</b>Badges tracked in and out</li>
     </ul>
     <div class="cta">Ready for the Shock Tech lobby</div>`);

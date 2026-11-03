@@ -906,39 +906,30 @@ async function loadSettings() {
   const res = await adminApi('adminStatus');
   const fact = (sel, text) => { $(sel).textContent = text; };
   if (!res.ok) {
-    setStatus(status, 'bad', `Can't reach the Google connection: ${errorText(res)}`);
+    setStatus(status, 'bad', `Can't reach the Raspberry Pi: ${errorText(res)}`);
     ['[data-set-sheet]', '[data-set-folder]', '[data-set-counts]'].forEach((sel) => fact(sel, '—'));
     pinLine.textContent = '—';
     return;
   }
 
-  const pi = res.backend === 'pi';
-  fact('[data-set-sheet]', pi ? `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://<pi address>:8080'}`
-    : res.sheetUrl ? `Google Sheet "${res.sheetName}" · ${res.sheetUrl}` : res.sheetName);
-  fact('[data-set-folder]', pi ? `On the Pi (${res.storage}/photos)`
-    : res.photoFolderUrl || (DEMO ? 'Demo: photos stay on this tablet' : 'Not created yet (made with the first sign-in)'));
+  fact('[data-set-sheet]', DEMO ? res.sheetName : `${res.sheetName}. Dashboard: ${res.sheetUrl || 'http://<pi address>:8080'}`);
+  fact('[data-set-folder]', DEMO ? 'Demo: photos stay on this tablet' : `On the Pi (${res.storage}/photos)`);
   fact('[data-set-counts]', `${res.counts.visitors} visitors · ${res.counts.visits} visits · ${res.counts.badges} badges`);
 
   const waiting = outboxSize();
   const queued = waiting ? ` ${waiting} photo${waiting === 1 ? '' : 's'} waiting to send.` : '';
   if (DEMO) {
-    setStatus(status, 'demo', 'Demo mode: not connected to a Raspberry Pi or Google. Nothing is saved outside this tablet.');
-  } else if (pi) {
+    setStatus(status, 'demo', 'Demo mode: not connected to the Raspberry Pi. Nothing is saved outside this tablet.');
+  } else {
     const b = res.backup || {};
     const backup = !b.at ? ' No backup has run yet.' : b.ok ? ` Last backup ${timeOf(b.at)}.` : ` Last backup FAILED: ${b.error}`;
     setStatus(status, b.at && !b.ok ? 'bad' : 'ok', `Connected to the ${res.sheetName}. Last answered ${timeOf(new Date(net.lastOk || Date.now()).toISOString())}.${backup}${queued}`);
-  } else if (res.missingTabs.length) {
-    setStatus(status, 'bad', `Connected, but the Sheet is missing these tabs: ${res.missingTabs.join(', ')}. Run setup in the Apps Script.`);
-  } else {
-    const how = BUILT_IN ? 'built into this app' : 'saved on this tablet';
-    setStatus(status, 'ok', `Connected to "${res.sheetName}" (${how}). Google last answered ${timeOf(new Date(net.lastOk || Date.now()).toISOString())}.${queued}`);
   }
 
   pinLine.textContent = {
-    settings: `Last changed ${timeOf(res.pinChangedAt)}.${pi ? ' The same PIN opens the dashboard on office computers.' : ''}`,
-    script_property: "Set in the Apps Script's script properties. Changing it here stores it securely as a hash.",
+    settings: `Last changed ${timeOf(res.pinChangedAt)}.${DEMO ? '' : ' The same PIN opens the dashboard on office computers.'}`,
     demo: 'Demo PIN 123456. Changes here last only on this tablet.',
-    none: 'No PIN is set yet.',
+    none: 'No PIN is set yet. Set one on the Pi: python3 -m visitor_pi set-pin',
   }[res.pinSource] || '';
 }
 
@@ -946,7 +937,7 @@ $('[data-set-save]').addEventListener('click', () => {
   const api = $('input[name="setapi"]').value.trim();
   const key = $('input[name="setkey"]').value.trim();
   if (!/^https?:\/\/[^\s/]+(:\d+)?\/\S*$/.test(api) || !key) {
-    toast('Enter the address (http://<pi address>:8080/api, or the Google /exec URL) and the kiosk key.');
+    toast("Enter the Pi's address (http://<pi address>:8080/api) and the kiosk key.");
     return;
   }
   try { localStorage.setItem(CONNECTION_KEY, JSON.stringify({ api, key })); } catch { toast("Couldn't save on this tablet."); return; }

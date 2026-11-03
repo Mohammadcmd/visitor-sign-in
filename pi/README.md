@@ -1,6 +1,6 @@
 # Raspberry Pi: the local home base
 
-The Raspberry Pi keeps **all visitor records inside the building**. Nothing is sent to Google or the internet.
+The Raspberry Pi keeps **all visitor records inside the building**. Nothing is sent to the internet or any cloud service.
 
 - **It stores everything:** visitors, visits, badges and photos, in a database on the Pi.
 - **It's the tablet's server:** the sign-in tablet talks to the Pi over your local network.
@@ -141,4 +141,4 @@ cd pi && python3 -m unittest discover -s tests       # tests
 python3 -m visitor_pi serve --config ./dev.json      # run locally (dev.json: {"data_dir": "./data", "port": 8090})
 ```
 
-The server is plain Python 3 (standard library only, plus `python3-evdev` for the reader). It answers the same `/api` actions as `apps-script/Code.gs`, so the tablet app works with either backend.
+The server is plain Python 3 (standard library only, plus `python3-evdev` for the reader). It answers the `/api` actions the tablet app calls through `web/js/api.js`.

@@ -1,18 +1,13 @@
 // Kiosk settings.
 //
-// Connecting to where records are kept: the Raspberry Pi (http://<pi>:8080/api,
-// see pi/README.md) or the Google Apps Script backend. Either way:
-//  - Android app: the build writes the connection into kiosk-connection.js
-//    (see android/README.md), so the tablet needs no setup.
-//  - Browser: open the kiosk once on the tablet with
-//   https://<kiosk address>/?api=<backend address>&key=<KIOSK_KEY>
-//    (or enter them in admin Settings, section 5)
-// The tablet remembers both and removes them from the address bar, so the key
-// never has to live in this publicly hosted file. (You can also paste them
-// into API_URL / KIOSK_KEY below if the kiosk is hosted privately.)
+// Connecting to the Raspberry Pi (http://<pi>:8080/api, see pi/README.md):
+//  - Built into the Android app at build time (kiosk-connection.js, see
+//    android/README.md), so the tablet needs no setup, or
+//  - entered once on the tablet in admin Settings, section 5. The tablet
+//    remembers it. (Opening the kiosk with ?api=<address>&key=<key> does the same.)
 //
-// With no connection the kiosk runs in demo mode: everything is stored in this
-// browser only and a "Simulate badge tap" panel appears.
+// With no connection the kiosk runs in demo mode: everything is stored on this
+// tablet only and a "Simulate badge tap" panel appears.
 
 const STORAGE_KEY = 'shocktech-kiosk-connection';
 
@@ -38,7 +33,7 @@ function connection() {
 const saved = connection();
 
 export const CONFIG = {
-  // The Pi's http://<address>:8080/api, or the Apps Script web app URL ending in /exec
+  // The Pi's address: http://<pi address>:8080/api
   API_URL: saved.api || '',
   // Must equal the KIOSK_KEY script property
   KIOSK_KEY: saved.key || '',

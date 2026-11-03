@@ -1,6 +1,6 @@
 # Shock Tech Visitors: Android app
 
-The kiosk from `web/` packaged as an Android app (APK) for a lobby tablet. It runs full screen, keeps the screen on, keeps the tablet locked to the app, and reports every sign-in to the Google Sheet with nothing to set up on the tablet.
+The kiosk from `web/` packaged as an Android app (APK) for a lobby tablet. It runs full screen, keeps the screen on, keeps the tablet locked to the app, and saves every sign-in to the **Raspberry Pi** on the office network (see [pi/README.md](../pi/README.md)). Nothing goes to the internet.
 
 ## What you need
 
@@ -13,27 +13,33 @@ The kiosk from `web/` packaged as an Android app (APK) for a lobby tablet. It ru
 
 ## 1. Get the APK
 
-**Option A: from GitHub** (recommended once the Google Sheet is set up)
+**Option A: the ready-made app.** Use `downloads/shocktech-visitor-kiosk-demo.apk` from the repository. It starts in demo mode; connect it to the Pi afterwards in admin → Settings → **5. Connection**.
+
+**Option B: from GitHub, with the Pi connection built in.** No typing on the tablet:
 
 1. In the repository on GitHub, go to **Settings → Secrets and variables → Actions** and add:
-   - `KIOSK_API_URL`: the Apps Script web app URL ending in `/exec` (see the main README).
-   - `KIOSK_KEY`: the `KIOSK_KEY` script property.
+   - `KIOSK_API_URL`: the Pi's address, like `http://192.168.1.50:8080/api`. The Pi's installer prints it.
+   - `KIOSK_KEY`: the kiosk key the Pi's installer prints.
 2. Go to **Actions → Build Android app → Run workflow**.
 3. When the run finishes, download **shocktech-visitor-kiosk** from its page. The download is a zip containing the APK.
 
-**Option B: build it on a computer** that has Node 22, Java 21 and the Android SDK:
+**Option C: build it on a computer** that has Node 22, Java 21 and the Android SDK:
 
 ```bash
 npm ci
-KIOSK_API_URL="https://script.google.com/macros/s/…/exec" KIOSK_KEY="…" npm run android:build
+KIOSK_API_URL="http://192.168.1.50:8080/api" KIOSK_KEY="…" npm run android:build
 # → dist/shocktech-visitor-kiosk.apk
 ```
 
-Without `KIOSK_API_URL` and `KIOSK_KEY`, the app runs in **demo mode**: nothing is saved to Google, and the admin PIN is `123456`. That's handy for trying it out.
+Without `KIOSK_API_URL` and `KIOSK_KEY`, the app starts in **demo mode**:
+- nothing is saved outside the tablet
+- the admin PIN is `123456`
+
+That's handy for trying it out. Connect it to the Pi later in admin → Settings → **5. Connection**.
 
 ## 2. Install it on the tablet
 
-1. Copy the APK to the tablet (USB cable, Google Drive, or email) and open it.
+1. Copy the APK to the tablet (USB cable or email) and open it.
 2. Android asks to allow installs from that source. Allow it, then tap **Install**.
 3. Open **Shock Tech Visitors**. When asked, allow the **camera**.
 4. Android asks whether to **pin** the app. Tap **Got it / Start**. This keeps visitors inside the kiosk.
@@ -80,7 +86,7 @@ To undo it, factory-reset the tablet.
 ## Updates
 
 - Every build is signed. Android only installs a new version **over** the old one if both were signed with the same key.
-- Builds without a release key use a throwaway debug key. To install a newer debug build, uninstall the old app first. Nothing important is lost, because visits live in the Google Sheet.
+- Builds without a release key use a throwaway debug key. To install a newer debug build, uninstall the old app first. Nothing important is lost, because visits live on the Raspberry Pi.
 - To sign every build with one permanent key, create a keystore once and add it to the GitHub secrets:
 
   ```bash
@@ -96,7 +102,7 @@ To undo it, factory-reset the tablet.
 | Problem | Fix |
 |---|---|
 | Badge taps do nothing | Tap anywhere on the kiosk screen once, so it has keyboard focus. Check that the reader types numbers in another app. |
-| A small "Offline · reconnecting…" label | The tablet can't reach Google. Sign-ins need the connection. New face photos wait on the tablet and are sent automatically once it's back. |
+| A small "Offline · reconnecting…" label | The tablet can't reach the Raspberry Pi. Check that the Pi is on and that the tablet is on the office Wi-Fi. Sign-ins need the connection. New face photos wait on the tablet and are sent automatically once it's back. |
 | Animations stutter | The app turns off blur effects automatically on slower tablets. Updating Android System WebView also helps. |
 | The camera bubble says "Camera off" | Allow the camera: **Settings → Apps → Shock Tech Visitors → Permissions → Camera**. |
 | Everything looks small | The app scales itself to fit the screen. A tablet with a larger screen shows it bigger. |

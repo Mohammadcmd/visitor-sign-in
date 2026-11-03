@@ -1,5 +1,5 @@
-"""Name, company and NFC tag normalization. Same rules as web/js/match.js and
-apps-script/Code.gs, so every part of the system agrees on who matches whom."""
+"""Name, company and NFC tag normalization. Same rules as web/js/match.js (the
+kiosk's demo mode), so every part of the system agrees on who matches whom."""
 import re
 import unicodedata
 

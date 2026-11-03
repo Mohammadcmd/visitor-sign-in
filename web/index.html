@@ -363,7 +363,7 @@
 
           <section class="set-card">
             <h3><span class="set-no">2</span>Visitor sign-in</h3>
-            <p>Visitors sign in on <strong>this tablet</strong>: new visitors answer the questions and take a photo, and returning visitors find themselves by name or quick entry. Every sign-in is saved where the records are kept (below), with each visitor's photos.</p>
+            <p>Visitors sign in on <strong>this tablet</strong>: new visitors answer the questions and take a photo, and returning visitors find themselves by name or quick entry. Every sign-in, with each visitor's photos, is saved on the Raspberry Pi in the building.</p>
             <dl class="set-facts">
               <dt>Records kept in</dt><dd data-set-sheet>…</dd>
               <dt>Photos</dt><dd data-set-folder>…</dd>
@@ -385,7 +385,7 @@
 
           <section class="set-card">
             <h3><span class="set-no">5</span>Connection</h3>
-            <p>Connects the kiosk to where the records are kept: the <strong>Raspberry Pi</strong> on the local network (recommended, nothing leaves the building), or a Google Sheet.</p>
+            <p>Connects the kiosk to the <strong>Raspberry Pi</strong> on the office network, where every record is kept. Nothing leaves the building.</p>
             <p class="set-status" data-set-status>Checking…</p>
             <details class="set-steps">
               <summary>How to set up the Raspberry Pi</summary>
@@ -395,19 +395,8 @@
                 <li>Office computers see the records at <code>http://&lt;pi address&gt;:8080</code> with the admin PIN.</li>
               </ol>
             </details>
-            <details class="set-steps">
-              <summary>How to set up a Google Sheet instead</summary>
-              <ol>
-                <li>Create a Google Sheet in the Shock Tech account and share it only with front desk staff.</li>
-                <li>In the Sheet: <strong>Extensions → Apps Script</strong>. Paste in <code>apps-script/Code.gs</code> and <code>appsscript.json</code>.</li>
-                <li><strong>Project Settings → Script properties:</strong> add <code>ADMIN_PIN</code> (6 to 8 digits). You can change it from section 6 afterwards.</li>
-                <li>Run <strong>setup</strong> once and allow access. It creates the tabs and a <code>KIOSK_KEY</code>.</li>
-                <li><strong>Deploy → New deployment → Web app</strong>, Execute as <strong>Me</strong>, access <strong>Anyone</strong>. Copy the URL ending in <code>/exec</code>.</li>
-                <li>Enter the URL and key below, or build them into the app as the <code>KIOSK_API_URL</code> and <code>KIOSK_KEY</code> GitHub secrets.</li>
-              </ol>
-            </details>
             <div class="set-connect" data-set-connect hidden>
-              <label class="field"><span>Address: http://&lt;pi address&gt;:8080/api, or the Google /exec URL</span>
+              <label class="field"><span>Pi address: http://&lt;pi address&gt;:8080/api</span>
                 <input readonly inputmode="none" name="setapi" maxlength="200" autocomplete="off"></label>
               <label class="field"><span>Kiosk key</span>
                 <input readonly inputmode="none" name="setkey" maxlength="80" autocomplete="off"></label>
@@ -447,9 +436,10 @@
             <table class="set-roles">
               <tr><th>Visitors</th><td>Sign in, take a badge, and sign out by tapping it on the reader.</td></tr>
               <tr><th>Anyone with the admin PIN</th><td>See who's inside, sign people out, add and manage badges, print labels, change these settings and the PIN.</td></tr>
-              <tr><th>People the Google Sheet is shared with</th><td>See every visit, visitor answer and photo. Share it only with front desk staff.</td></tr>
+              <tr><th>Office computers with the PIN</th><td>See every visit, visitor answer and photo on the Pi's dashboard, and download them for Excel.</td></tr>
+              <tr><th>Whoever can log in to the Pi</th><td>Can read the database and photos directly. Keep the Pi's own login with IT.</td></tr>
             </table>
-            <p class="set-warn">Never share the Google Sheet or the photo folder by public link: they hold visitors' personal information, including photos and citizenship.</p>
+            <p class="set-warn">Never open the Pi to the internet or share its backup folder widely: they hold visitors' personal information, including photos and citizenship.</p>
           </section>
         </div>
       </div>

@@ -1,17 +1,23 @@
 # Shock Tech Visitor Sign-In Kiosk
 
-A visitor sign-in kiosk for **Shock Tech, Inc.** (Mahwah, NJ). It runs on a lobby tablet, as an **Android app** or in a browser, and uses a USB NFC reader for visitor badges. Records are kept in one of two places:
+A visitor sign-in kiosk for **Shock Tech, Inc.** (Mahwah, NJ). Visitors sign in on a lobby **Android tablet** and tap a visitor badge on a USB NFC reader.
 
-- **A Raspberry Pi in the building (recommended).** Everything stays local, with no internet. The Pi is also a tap-to-sign-out station, a records dashboard for office computers, and a nightly backup to a shared folder. See [pi/README.md](pi/README.md).
-- **Google Sheets and Drive,** through the Apps Script backend. The setup is below.
+**Every record stays in the building**, on a **Raspberry Pi**. Nothing is sent to the internet or any cloud service. The Pi is also:
+- a tap-to-sign-out station
+- a records dashboard for office computers, with Excel/CSV downloads
+- the source of a nightly backup to a shared folder
 
 ```
-web/           the kiosk itself (static HTML/CSS/JS)
-android/       the Android app that wraps web/ (setup guide: android/README.md)
+ Tablet (Android app)  ──office network──▶  Raspberry Pi  ◀── USB NFC reader (tap to sign out)
+   sign-in kiosk                             • database + photos
+ Office computers  ──browser──▶  dashboard   • nightly backup ──▶ shared folder (office PC / NAS)
+```
+
+```
+web/           the kiosk itself (HTML/CSS/JS)
+android/       the Android app that wraps web/ (guide: android/README.md)
 pi/            the Raspberry Pi server, sign-out reader, dashboard and backups (guide: pi/README.md)
-apps-script/   the Google Apps Script backend (Sheets + Drive)
 scripts/       build-android.mjs builds the APK
-tests/         backend tests (node tests/apps-script.test.js)
 docs/          project history and the original reference spec
 media/         product demo video and the badge-tap animation
 downloads/     a ready-to-install demo build of the Android app
@@ -19,6 +25,16 @@ tools/         the kit that records the demo video
 ```
 
 The story of how it was designed, and every decision along the way, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md).
+
+## Setting it up
+
+1. **Raspberry Pi:** install the visitor server with one command, then set up the nightly backup. See [pi/README.md](pi/README.md). The installer prints the Pi's address and the kiosk key.
+2. **Tablet:** install the Android app, then connect it to the Pi in admin → Settings → **5. Connection**. See [android/README.md](android/README.md).
+3. **Badges:** on the tablet, go to admin → **Badges → Add badge by tapping it**, and tap each badge card on the reader in turn.
+
+To just try it out, install `downloads/shocktech-visitor-kiosk-demo.apk`, which runs in **demo mode**:
+- nothing is saved outside the tablet
+- the admin PIN is `123456`
 
 ## What visitors see
 
@@ -28,7 +44,7 @@ The story of how it was designed, and every decision along the way, is in [docs/
    - first and last name
    - company, who they're visiting, and purpose of the visit
    - citizenship status, plus country when they're not a U.S. citizen
-   - a picture taken with the iPad camera
+   - a picture taken with the tablet's camera
    - the visitor rules, agreed to as an electronic signature
    - an opt-in: *"Want quick entry next time?"*
 4. **Returning visitor:** the visitor starts typing their name right away. Meanwhile, a small live camera in the corner compares what it sees with visitors who opted into quick entry. Whichever finds them first wins.
@@ -36,84 +52,43 @@ The story of how it was designed, and every decision along the way, is in [docs/
    - **Typing:** matching people appear as suggestions above the keyboard, with no need to press "Find me".
    - **Not sure, or never opted in:** the kiosk never guesses; the name search does the work. What the camera saw is added to their profile (only if they opted in) so recognition keeps improving. Visitors who haven't opted in are offered quick entry at that point.
 5. **Tap any visitor badge on the reader.** An animated screen shows how. The tapped badge is assigned to that visitor.
-6. **Leaving:** a visitor taps their badge while the welcome screen shows and is signed out. The badge is released, and a "Not you? Undo" button stays up for a few seconds.
+6. **Leaving:** a visitor taps their badge, either on the Raspberry Pi's reader or on the tablet's reader while the welcome screen shows, and is signed out. The badge is released for the next guest.
 
-**Admin:** press and hold the Shock Tech logo on the welcome screen for 2.5 seconds, then enter the admin PIN.
+**Admin on the tablet:** press and hold the Shock Tech logo on the welcome screen for 2.5 seconds, then enter the admin PIN.
 - **Inside now:** everyone signed in, with a **Sign out** button for each.
 - **Badges:** add badges by tapping them on the reader (they're numbered V1, V2, … automatically), link or relink NFC tags, and retire or restore badges.
 - **Settings**, in eight numbered sections:
-  - the Google Sheet connection, with a live status line and setup steps
+  - the connection to the Pi, with a live status line including the last backup
   - changing the admin PIN (stored only as a salted hash)
   - printing the badge labels and lobby sign
   - a "who can do what" card
   - Areas and Screening list, listed as coming later
 
-## The Google Sheet
+**Records on office computers:** open `http://<pi address>:8080` and enter the admin PIN. You get who's inside, visit history, visitors with photos and badges, plus **Download for Excel (CSV)** buttons.
 
-`setup()` creates four tabs. Columns are looked up by header name, so you can reorder them.
+## What's recorded
 
-| Tab | Contents |
+| Record | Contents |
 |---|---|
-| **Visitors** | First Name, Last Name, then every answer (Company, Who are you visiting, Purpose, Citizenship status, Country, Visitor acknowledgment, Quick entry), Registered, Last visit, Visit count, Visitor ID, and finally **Photo folder**: a link to that visitor's own Drive folder of pictures. |
-| **Visits** | One row per sign-in: time in, name, company, visiting, purpose, Visitor or Foreign national, badge, how they signed in, time out, and who signed them out. |
+| **Visitors** | First and last name, then every answer (company, who they're visiting, purpose, citizenship status, country, visitor acknowledgment, quick entry), registered, last visit, visit count, and their photos. |
+| **Visits** | One per sign-in: time in, name, company, visiting, purpose, Visitor or Foreign national, badge, how they signed in, time out, and who or what signed them out. |
 | **Badges** | Badge number, NFC tag, status (available / in use / retired) and current holder. |
-| **Face data** *(hidden)* | Numeric face signatures, only for visitors who opted into quick entry. Turning quick entry off deletes their rows. |
+| **Face data** | Numeric face signatures, only for visitors who opted into quick entry. Turning quick entry off deletes them. |
 
-## Setup with Google (alternative to the Raspberry Pi)
-
-### 1. Google Sheet + Apps Script
-1. Create a Google Sheet in the Shock Tech Google account. Share it only with front desk staff.
-2. **Extensions → Apps Script.** Replace `Code.gs` with `apps-script/Code.gs`. In Project Settings, turn on "Show appsscript.json" and paste in `apps-script/appsscript.json`.
-3. **Project Settings → Script properties:**
-   - `ADMIN_PIN`: 6 to 8 digits.
-   - `PHOTO_FOLDER_ID` *(optional)*: the Drive folder for photos. If you leave it out, a folder named "Shock Tech visitor photos" is created.
-4. Run **`setup`** once from the editor and allow access. It creates the tabs and a `KIOSK_KEY` (shown in the log and in Script properties).
-5. **Deploy → New deployment → Web app.** Set *Execute as:* **Me** and *Who has access:* **Anyone**. Copy the URL ending in `/exec`.
-   - To update the code later, use **Deploy → Manage deployments → Edit → New version**, so the URL stays the same.
-
-### 2. Put the kiosk on the tablet
-**Android tablet (recommended):** build and install the app as described in [android/README.md](android/README.md). The connection to the Sheet is built into the app, so steps 2 to 4 below are only for running the kiosk in a browser.
-
-**Browser (iPad or any tablet):** `web/` is a static site. It must be served over **HTTPS** for the camera to work. Any static host works, for example GitHub Pages from this repo, Netlify or Cloudflare Pages.
-
-Apps Script's own web pages block camera access, which is why the kiosk is hosted separately and calls Apps Script as an API.
-
-### 3. Connect the tablet (browser only)
-On the tablet, open this link once:
-
-```
-https://<kiosk address>/?api=<your /exec URL>&key=<KIOSK_KEY>
-```
-
-The tablet remembers both values and removes them from the address bar. Open `?disconnect` to forget them. Without a connection, the kiosk runs in **demo mode**:
-- data stays in that browser only
-- a panel simulates badge taps
-- the admin PIN is `123456`
-
-### 4. iPad kiosk settings (browser only)
-- **Settings → Display & Brightness → Auto-Lock → Never.**
-- **Settings → Accessibility → Guided Access → On.** Open the kiosk in Safari and triple-click the side or top button to lock the iPad to it.
-- Allow camera access for the site when Safari asks.
-- **NFC reader:** use a reader that acts as a keyboard (types the tag number, then Enter), connected by USB-C or Bluetooth.
-  - The kiosk tells a tap apart from typing by speed, and handles readers that send the number twice.
-  - While a keyboard-style reader is connected, the iPad hides its own keyboard. That's why the kiosk has its own on-screen keyboard.
-
-### 5. Badges
-Open the admin screen, go to **Badges → Add badge by tapping it**, and tap each badge card on the reader in turn.
+All of it lives in one database on the Pi, with photos as files next to it, and both are copied to the backup folder every night.
 
 ## Face recognition and privacy
-- Runs entirely on the iPad with [face-api.js](https://github.com/vladmandic/face-api). Photos are never sent to a face-recognition service.
-- A match needs most frames to agree, a close distance, and a clear gap to the next-closest person. Anything less falls back to typing a name.
-- Quick entry is **opt-in**, and visitors are told what's kept. Biometric privacy laws vary by state; have Shock Tech confirm the opt-in wording meets its legal requirements.
-- Anyone with the `KIOSK_KEY` can call the backend, including reading the face index. Keep the key off public pages: use the setup link above rather than committing it.
-- The match thresholds are in `web/config.js` (`FACE_MATCH_MAX`, `FACE_MATCH_MARGIN`).
+- **On the tablet only.** Recognition runs entirely on the tablet with [face-api.js](https://github.com/vladmandic/face-api), whose files are bundled into the app. Photos are never sent to a face-recognition service.
+- **It never guesses.** A match needs most frames to agree, a close distance, and a clear gap to the next-closest person. Anything less falls back to typing a name.
+- **Quick entry is opt-in,** and visitors are told what's kept. Biometric privacy laws vary by state; have Shock Tech confirm the opt-in wording meets its legal requirements.
+- **The kiosk key guards the data.** The tablet needs the Pi's kiosk key to read or write anything, including the face index. Keep the Pi on the office network, never open to the internet.
+- **Tuning:** the match thresholds are in `web/config.js` (`FACE_MATCH_MAX`, `FACE_MATCH_MARGIN`).
 
-## Moving off Apps Script later
-The kiosk talks to the backend only through `call(action, args)` in `web/js/api.js`. To move to another backend, implement the same actions (`register`, `findVisitor`, `faceIndex`, `addFaceSample`, `setQuickEntry`, `assignBadge`, `tapAtWelcome`, `undoSignOut`, `admin*`) with the same JSON shapes, then point `API_URL` at it.
+## How the tablet talks to the Pi
+The kiosk talks to the Pi only through `call(action, args)` in `web/js/api.js`. It sends JSON to `http://<pi>:8080/api`, with retries and replay-safe request ids so a dropped connection never records a visit twice. The Pi's side is `pi/visitor_pi/store.py`.
 
 ## Testing
-- `node tests/apps-script.test.js` runs the Google backend against an in-memory fake Google Sheet and Drive.
-- `cd pi && python3 -m unittest discover -s tests` tests the Raspberry Pi server: actions, dashboard, CSV, photos, backups and the reader's tap detection.
-- To try the kiosk locally, run `python3 -m http.server -d web 8000` and open `http://localhost:8000` (demo mode).
+- `cd pi && python3 -m unittest discover -s tests` (or `npm test`) tests the Raspberry Pi server: every kiosk action, the dashboard, CSV export, photos, backups and the reader's tap detection.
+- To try the kiosk in a browser, run `python3 -m http.server -d web 8000` and open `http://localhost:8000`. It runs in demo mode, with a panel that simulates badge taps.
 
 The visitor questions, rules and compliance approach are adapted from the Rehtek visitor sign-in specification.

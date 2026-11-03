@@ -1,6 +1,6 @@
 """The Pi's web server, on the local network only.
 
-  POST /api              the kiosk app (same protocol as the Google backend)
+  POST /api              the kiosk app (see web/js/api.js)
   GET  /                 the records dashboard for office computers (admin PIN)
   /dash/...              the dashboard's data, actions, CSV downloads and photos
 """
