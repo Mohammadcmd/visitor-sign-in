@@ -174,7 +174,7 @@ const ENTER = {
 // ------------------------------------------------------------------ welcome
 
 $('[data-screen="welcome"]').addEventListener('click', () => {
-  if (suppressClick) { suppressClick = false; return; }
+  if (Date.now() < suppressClickUntil) return; // the end of the long press that opened admin
   if (state.busy) return;
   show('choice');
 });
@@ -190,14 +190,16 @@ function tickClock() {
   $('[data-clock]').textContent = new Date().toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// Press and hold the logo for 2.5 s to open the admin PIN pad.
-let suppressClick = false;
+// Press and hold the logo for 2.5 s to open the admin PIN pad. The click that
+// ends the long press is ignored, but only briefly: it often lands on the PIN
+// pad instead, and a flag left set would swallow the next visitor's tap.
+let suppressClickUntil = 0;
 (() => {
   const logo = $('[data-admin-hold]');
   let timer;
   const cancel = () => clearTimeout(timer);
   logo.addEventListener('pointerdown', () => {
-    timer = setTimeout(() => { suppressClick = true; openPin(); }, 2500);
+    timer = setTimeout(() => { suppressClickUntil = Date.now() + 1500; openPin(); }, 2500);
   });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => logo.addEventListener(ev, cancel));
 })();
