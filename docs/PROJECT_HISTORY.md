@@ -46,6 +46,7 @@ We used it as inspiration, not as a blueprint.
 | Returning visitors | Name screen first, with the face check running in the background while they type | Faster: no waiting on a camera scan. |
 | Device | **Android app (APK)** on whatever Android tablet is available, plus a generic USB NFC reader | No hosting, works offline for face data, and a real kiosk lockdown. |
 | Repository | Fresh repository `visitor-sign-in` with a clean history | The owner wanted nothing left from an earlier, unrelated project. |
+| Settings page | Rehtek's eight-section structure, mapped to this kiosk's real features | Sections for features not built yet (areas, screening) say so instead of pretending. |
 
 ## What was built, in order
 
@@ -82,6 +83,10 @@ We used it as inspiration, not as a blueprint.
    - retries with replay-safe request ids, an offline outbox
    - scaling for small screens, a lite mode for slow tablets
    - a GitHub Actions APK build
+
+8. **Admin Settings page:**
+   - eight numbered sections in the same order as Rehtek's settings page, filled with what this kiosk actually has: sign-in and Sheet details, badges, the Google connection with a live status and setup steps, a changeable admin PIN, printable badge labels and lobby sign, and who can do what
+   - Areas and the Screening list are marked as coming later
 
 ## Where things are
 

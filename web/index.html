@@ -332,6 +332,7 @@
       <nav class="tabs" role="tablist">
         <button type="button" class="tab active" data-admin-tab="inside">Inside now</button>
         <button type="button" class="tab" data-admin-tab="badges">Badges</button>
+        <button type="button" class="tab" data-admin-tab="settings">Settings</button>
       </nav>
       <button type="button" class="btn-ghost" data-kiosk-unlock hidden>Unlock tablet</button>
       <button type="button" class="btn-secondary" data-admin-exit>Exit admin</button>
@@ -347,6 +348,102 @@
           <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button></div>
         <p class="admin-banner" data-admin-banner hidden></p>
         <div class="admin-list" data-badge-list></div>
+      </div>
+
+      <div class="admin-pane" data-admin-pane="settings" hidden>
+        <div class="admin-head"><h2>Settings</h2>
+          <button type="button" class="btn-ghost" data-settings-refresh>Refresh</button></div>
+        <div class="settings">
+
+          <section class="set-card set-soon">
+            <h3><span class="set-no">1</span>Areas <em class="soon">Coming later</em></h3>
+            <p>The places in the building a visitor can be approved for, such as the lobby and offices, the shop floor and inspection. Each would have a name and a <strong>Controlled</strong> checkbox for areas where ITAR hardware, technical data or CUI can be seen.</p>
+            <p class="set-note">Not part of the kiosk yet. Areas only matter together with approvals for foreign nationals and door checks, which are planned but not built.</p>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">2</span>Visitor sign-in</h3>
+            <p>Visitors sign in on <strong>this tablet</strong>: new visitors answer the questions and take a photo, and returning visitors find themselves by name or quick entry. Every sign-in is saved to the Google Sheet below, with each visitor's photos in their own Google Drive folder.</p>
+            <dl class="set-facts">
+              <dt>Google Sheet</dt><dd data-set-sheet>…</dd>
+              <dt>Photo folder</dt><dd data-set-folder>…</dd>
+              <dt>Records</dt><dd data-set-counts>…</dd>
+            </dl>
+          </section>
+
+          <section class="set-card set-soon">
+            <h3><span class="set-no">3</span>Screening list <em class="soon">Coming later</em></h3>
+            <p>A check of every visitor and company against the U.S. government's Consolidated Screening List (Commerce, State and Treasury denied-party and sanctions lists) at sign-in, with the list loaded here at least weekly.</p>
+            <p class="set-note">Not part of the kiosk yet. Until it is, the front desk should check visitors from outside the U.S. by hand at <strong>trade.gov</strong> (Consolidated Screening List search).</p>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">4</span>Visitor badges</h3>
+            <p>Badges are added by tapping them on the reader, and linked, retired or restored on the Badges page.</p>
+            <div class="set-actions"><button type="button" class="btn-primary" data-admin-tab="badges">Open Badges</button></div>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">5</span>Google connection</h3>
+            <p>Connects the kiosk to the Google Apps Script that saves to the Sheet.</p>
+            <p class="set-status" data-set-status>Checking…</p>
+            <details class="set-steps">
+              <summary>How to set it up</summary>
+              <ol>
+                <li>Create a Google Sheet in the Shock Tech account and share it only with front desk staff.</li>
+                <li>In the Sheet: <strong>Extensions → Apps Script</strong>. Paste in <code>apps-script/Code.gs</code> and <code>appsscript.json</code>.</li>
+                <li><strong>Project Settings → Script properties:</strong> add <code>ADMIN_PIN</code> (6 to 8 digits). You can change it from section 6 afterwards.</li>
+                <li>Run <strong>setup</strong> once and allow access. It creates the tabs and a <code>KIOSK_KEY</code>.</li>
+                <li><strong>Deploy → New deployment → Web app</strong>, Execute as <strong>Me</strong>, access <strong>Anyone</strong>. Copy the URL ending in <code>/exec</code>.</li>
+                <li>Android app: add the URL and key as the <code>KIOSK_API_URL</code> and <code>KIOSK_KEY</code> GitHub secrets and rebuild the app. Browser: enter them below.</li>
+              </ol>
+            </details>
+            <div class="set-connect" data-set-connect hidden>
+              <label class="field"><span>Web app URL (ends in /exec)</span>
+                <input readonly inputmode="none" name="setapi" maxlength="200" autocomplete="off"></label>
+              <label class="field"><span>Kiosk key</span>
+                <input readonly inputmode="none" name="setkey" maxlength="80" autocomplete="off"></label>
+              <div class="set-actions">
+                <button type="button" class="btn-primary" data-set-save>Save and reconnect</button>
+                <button type="button" class="btn-ghost" data-set-disconnect>Disconnect</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">6</span>Admin PIN</h3>
+            <p>The PIN that opens this admin screen. After 10 wrong tries in 10 minutes, PIN entry pauses. It's stored as a salted hash, never the digits themselves.</p>
+            <p class="set-status" data-set-pin>…</p>
+            <div class="set-pin">
+              <label class="field"><span>New PIN (6 to 8 digits)</span>
+                <input type="password" readonly inputmode="none" name="setpin1" maxlength="8" autocomplete="off"></label>
+              <label class="field"><span>Repeat new PIN</span>
+                <input type="password" readonly inputmode="none" name="setpin2" maxlength="8" autocomplete="off"></label>
+            </div>
+            <p class="form-error" data-set-pin-error></p>
+            <div class="set-actions"><button type="button" class="btn-primary" data-set-pin-save>Change PIN</button></div>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">7</span>Things to print</h3>
+            <p>One printable sheet with a <strong>label for each registered badge</strong> (its number, the Shock Tech logo and "VISITOR") and the <strong>lobby sign</strong> pointing visitors to the tablet. Reprint after adding badges.</p>
+            <div class="set-actions">
+              <button type="button" class="btn-secondary" data-print-preview>Show the sheet</button>
+              <button type="button" class="btn-primary" data-print-go>Print or save as PDF</button>
+            </div>
+            <div class="print-preview" data-print-frame hidden></div>
+          </section>
+
+          <section class="set-card">
+            <h3><span class="set-no">8</span>Who can do what</h3>
+            <table class="set-roles">
+              <tr><th>Visitors</th><td>Sign in, take a badge, and sign out by tapping it on the reader.</td></tr>
+              <tr><th>Anyone with the admin PIN</th><td>See who's inside, sign people out, add and manage badges, print labels, change these settings and the PIN.</td></tr>
+              <tr><th>People the Google Sheet is shared with</th><td>See every visit, visitor answer and photo. Share it only with front desk staff.</td></tr>
+            </table>
+            <p class="set-warn">Never share the Google Sheet or the photo folder by public link: they hold visitors' personal information, including photos and citizenship.</p>
+          </section>
+        </div>
       </div>
     </div>
   </section>
@@ -394,7 +491,7 @@
   <div class="keyboard" data-keyboard hidden></div>
 
   <div class="demo-panel" data-demo hidden>
-    <strong>Demo mode</strong> · no backend connected · admin PIN 123456
+    <strong>Demo mode</strong> · no backend connected · default admin PIN 123456
     <div class="demo-taps" data-demo-taps></div>
   </div>
 </div>
