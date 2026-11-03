@@ -13,3 +13,7 @@ android/capacitor-cordova-android-plugins/
 dist/
 *.keystore
 *.jks
+__pycache__/
+*.pyc
+pi/data/
+pi/dev.json
