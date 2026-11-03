@@ -8,7 +8,13 @@ android/       the Android app that wraps web/ (setup guide: android/README.md)
 apps-script/   the Google Apps Script backend (Sheets + Drive)
 scripts/       build-android.mjs builds the APK
 tests/         backend tests (node tests/apps-script.test.js)
+docs/          project history and the original reference spec
+media/         product demo video and the badge-tap animation
+downloads/     a ready-to-install demo build of the Android app
+tools/         the kit that records the demo video
 ```
+
+The story of how it was designed, and every decision along the way, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md).
 
 ## What visitors see
 
