@@ -1,4 +1,4 @@
-package com.shocktech.visitorkiosk;
+package com.visitorsignin.kiosk;
 
 import android.app.admin.DeviceAdminReceiver;
 

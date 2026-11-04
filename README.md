@@ -1,128 +1,109 @@
-# Visitor Sign In
+# Visitor Sign-In
 
-Visitor sign-in kiosks for lobby tablets. This repository holds two of them:
-
-| Kiosk | Where | What it is |
-|---|---|---|
-| **Configurable kiosk** | repository root: `index.html`, `app.js`, `styles.css`, `apps-script.js` | For any business. A setup wizard asks for the company name, an admin login, the logo, NFC/RFID cards, where to store records (this device or Google Sheets) and optional screening questions that can politely decline a visitor, with a photo, a staff alert and an admin override. **Guide: [docs/visitor-sign-in.md](docs/visitor-sign-in.md)** |
-| **Shock Tech kiosk** | `web/`, `android/`, `apps-script/` | Built for Shock Tech, Inc.: face-recognition quick entry, an Android app, visitor photo folders in Google Drive. Documented below. |
-
-Both are static web apps with no build step, so they can be hosted together. With GitHub Pages serving this repository, the configurable kiosk is at `/` and the Shock Tech kiosk at `/web/`.
+A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
 ```
-index.html, app.js, styles.css   the configurable kiosk (guide: docs/visitor-sign-in.md)
-apps-script.js                   its Google Sheets connector, copied from the setup screen
-sw.js, manifest.webmanifest      its offline support and install manifest
-tests/connector.test.js, tests/e2e.test.js   its tests
+web/           the kiosk (static HTML/CSS/JS, no build step)
+android/       the Android app that wraps web/ (guide: android/README.md)
+apps-script/   the Google Sheets backend (Apps Script), used when records go to Google Sheets
+scripts/       build-android.mjs builds the APK; sync-backend.mjs bundles the backend into the wizard
+tests/         backend tests and an end-to-end browser test
+docs/          project history, presets (docs/presets/) and the original reference spec
+media/         product demo videos; downloads/ an earlier demo build of the app
+tools/         icon rendering (tools/icons/) and the demo video kit (tools/demo-video/)
 ```
 
----
+How it was designed, and why, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md).
 
-## Shock Tech Visitor Sign-In Kiosk
+## Setup: the first start
 
-A visitor sign-in kiosk for **Shock Tech, Inc.** (Mahwah, NJ). It runs on a lobby tablet, either as an **Android app** or in a browser. It uses a USB NFC reader for visitor badges and saves everything to a Google Sheet, with visitor photos in Google Drive.
+Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5 minutes, or 10 with Google Sheets):
 
-```
-web/           the kiosk itself (static HTML/CSS/JS)
-android/       the Android app that wraps web/ (setup guide: android/README.md)
-apps-script/   the Google Apps Script backend (Sheets + Drive)
-scripts/       build-android.mjs builds the APK
-tests/         backend tests (node tests/apps-script.test.js)
-docs/          project history and the original reference spec
-media/         product demo video and the badge-tap animation
-downloads/     a ready-to-install demo build of the Android app
-tools/         the kit that records the demo video
-```
+| Step | What you choose |
+|---|---|
+| **1. Company** | Name, a tagline, and one brand color. Every screen's colors are worked out from it, with a live preview. |
+| **2. Admin login** | The admin's name and a 6 to 8 digit PIN. The PIN is only stored as a one-way hash. Easy PINs like `123456` are refused. |
+| **3. Logo** | A PNG with a transparent background. The wizard checks the transparency and shrinks large files. No logo? A clean text logo in your color is made for you. |
+| **4. Visitor badges** | Use NFC/RFID badges, or none. With badges, tap each card on the reader right there: they're numbered V1, V2, … Without badges, visitors sign out on the screen ("Leaving?"). |
+| **5. Records** | **On this tablet** (private, nothing to set up) or **Google Sheets** (a live sheet your team can open anywhere, photos in your Google Drive, several tablets on one sheet). |
+| **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
+| **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
+| **8. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons and visitor rules. |
 
-The story of how it was designed, and every decision along the way, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTORY.md).
+The last screen sums everything up and lists what to do next. Everything can be changed later: **press and hold the logo on the welcome screen for 2.5 seconds**, enter the PIN, then **Settings**.
 
-### What visitors see
+Setting up another tablet: export the settings from Admin → Settings and import them on the first step, or, with Google Sheets, use **Connect another tablet** to get a private link that connects it to the same sheet and settings.
 
-1. **Welcome screen**, always on: "Welcome to Shock Tech — Tap anywhere to get started".
+## What visitors see
+
+1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start.
 2. **New visitor** or **Returning visitor**.
-3. **New visitor** answers the sign-in questions one screen at a time:
-   - first and last name
-   - company, who they're visiting, and purpose of the visit
-   - citizenship status, plus country when they're not a U.S. citizen
-   - a picture taken with the iPad camera
-   - the visitor rules, agreed to as an electronic signature
-   - an opt-in: *"Want quick entry next time?"*
-4. **Returning visitor:** the visitor starts typing their name right away. Meanwhile, a small live camera in the corner compares what it sees with visitors who opted into quick entry. Whichever finds them first wins.
-   - **Camera is sure:** a "Welcome back, Dana! — That's me" card appears at the top, often before they finish typing.
-   - **Typing:** matching people appear as suggestions above the keyboard, with no need to press "Find me".
-   - **Not sure, or never opted in:** the kiosk never guesses; the name search does the work. What the camera saw is added to their profile (only if they opted in) so recognition keeps improving. Visitors who haven't opted in are offered quick entry at that point.
-5. **Tap any visitor badge on the reader.** An animated screen shows how. The tapped badge is assigned to that visitor.
-6. **Leaving:** a visitor taps their badge while the welcome screen shows and is signed out. The badge is released, and a "Not you? Undo" button stays up for a few seconds.
+3. **New visitors** answer one screen at a time: name; company, who they're visiting and why; your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
+4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again.
+5. **Finish:** tap any visitor badge on the reader, or (without badges) they're signed in straight away.
+6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds.
 
-**Admin:** press and hold the Shock Tech logo on the welcome screen for 2.5 seconds, then enter the admin PIN.
-- **Inside now:** everyone signed in, with a **Sign out** button for each.
-- **Badges:** add badges by tapping them on the reader (they're numbered V1, V2, … automatically), link or relink NFC tags, and retire or restore badges.
+### Declined visitors
 
-### The Google Sheet
+When an answer is set to decline (for example "Not a U.S. citizen or permanent resident"):
 
-`setup()` creates four tabs. Columns are looked up by header name, so you can reorder them.
+- The visitor still takes their picture (unless photos are off), then sees your polite message, "A member of our team has been notified", and nothing about why.
+- The visit is recorded as **Declined**, with the answers and the photo. A red dot appears on the welcome screen, the visit shows in **Admin → Needs attention**, and with Google Sheets an alert email (with the photo) goes to the addresses you chose.
+- **Overriding:** a staff member can tap **Staff override** on the decline screen, enter the PIN and a reason, and the visitor finishes signing in. Or, in **Needs attention**, **Let in** lets that visitor sign in normally at the kiosk for the next two hours. Either way the admin's name and reason are saved with the visit, which shows as "Visitor (override)".
+
+Answers set to **let in and alert** sign the visitor in, mark the visit (for example "Needs induction"), and alert staff the same way.
+
+## Admin screen
+
+Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself after 3 minutes without a touch.
+
+- **Inside now:** everyone signed in, with a Sign out button.
+- **Needs attention:** declined and flagged visitors from the last two weeks, with photos and answers. **Let in** or **Mark reviewed**.
+- **Badges:** add badges by tapping them, link or relink tags, retire or restore badges.
+- **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
+
+## Where records are kept
+
+**On this tablet:** visitors, visits, badges and photos stay in the browser's storage on that tablet, private and offline. Good for one tablet and simple needs.
+
+**Google Sheets:** the script in `apps-script/Code.gs` runs in your own Google account. It makes these tabs (columns are found by header name, so you can reorder or add columns):
 
 | Tab | Contents |
 |---|---|
-| **Visitors** | First Name, Last Name, then every answer (Company, Who are you visiting, Purpose, Citizenship status, Country, Visitor acknowledgment, Quick entry), Registered, Last visit, Visit count, Visitor ID, and finally **Photo folder**: a link to that visitor's own Drive folder of pictures. |
-| **Visits** | One row per sign-in: time in, name, company, visiting, purpose, Visitor or Foreign national, badge, how they signed in, time out, and who signed them out. |
-| **Badges** | Badge number, NFC tag, status (available / in use / retired) and current holder. |
-| **Face data** *(hidden)* | Numeric face signatures, only for visitors who opted into quick entry. Turning quick entry off deletes their rows. |
+| **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, and a link to the visitor's Drive photo folder. |
+| **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, time out and by whom, and review notes. |
+| **Badges** | Badge number, NFC tag, status (available / in use / retired) and holder. |
+| **Face data** *(hidden)* | Face signatures, only for visitors who opted into quick entry. Turning it off deletes their rows. |
+| **Settings** *(hidden)* | The kiosk settings, shared by every tablet on the sheet. The logo is kept in Drive. |
 
-### Setup
+The first kiosk to connect becomes the sheet's owner: its random kiosk key is saved in the script's properties, and requests without it are refused. Other tablets join with the private link from Admin → Settings. The tablet keeps working through Wi-Fi drops: nonessential writes wait in an outbox and go out when it's back.
 
-#### 1. Google Sheet + Apps Script
-1. Create a Google Sheet in the Shock Tech Google account. Share it only with front desk staff.
-2. **Extensions → Apps Script.** Replace `Code.gs` with `apps-script/Code.gs`. In Project Settings, turn on "Show appsscript.json" and paste in `apps-script/appsscript.json`.
-3. **Project Settings → Script properties:**
-   - `ADMIN_PIN`: 6 to 8 digits.
-   - `PHOTO_FOLDER_ID` *(optional)*: the Drive folder for photos. If you leave it out, a folder named "Shock Tech visitor photos" is created.
-4. Run **`setup`** once from the editor and allow access. It creates the tabs and a `KIOSK_KEY` (shown in the log and in Script properties).
-5. **Deploy → New deployment → Web app.** Set *Execute as:* **Me** and *Who has access:* **Anyone**. Copy the URL ending in `/exec`.
-   - To update the code later, use **Deploy → Manage deployments → Edit → New version**, so the URL stays the same.
+The kiosk must be served over **HTTPS** for the camera (any static host: GitHub Pages, Netlify, Cloudflare Pages). Apps Script's own pages block the camera, which is why the kiosk is hosted separately and calls Apps Script as an API. A setup link also works: `https://<kiosk address>/?api=<web app URL>&key=<kiosk key>`; open `?disconnect` to forget it.
 
-#### 2. Put the kiosk on the tablet
-**Android tablet (recommended):** build and install the app as described in [android/README.md](android/README.md). The connection to the Sheet is built into the app, so steps 2 to 4 below are only for running the kiosk in a browser.
+**Updating the script:** when a new version of this project changes `apps-script/Code.gs`, copy it into the Apps Script editor (Admin → Settings → Copy the latest Apps Script code), then **Deploy → Manage deployments → Edit → New version**, so the URL stays the same.
 
-**Browser (iPad or any tablet):** `web/` is a static site. It must be served over **HTTPS** for the camera to work. Any static host works, for example GitHub Pages from this repo, Netlify or Cloudflare Pages.
+## The tablet
 
-Apps Script's own web pages block camera access, which is why the kiosk is hosted separately and calls Apps Script as an API.
+- **Android (recommended):** see [android/README.md](android/README.md). Full screen, locked to the app, starts after a reboot, and can have the Google Sheets connection built in.
+- **iPad:** open the kiosk in Safari, allow the camera, set **Auto-Lock → Never**, and turn on **Guided Access** (Settings → Accessibility) to lock the iPad to it.
+- **NFC/RFID reader:** any USB or Bluetooth reader that acts as a keyboard (types the card number, then Enter). The kiosk tells a tap from typing by speed. While such a reader is connected, tablets hide their own keyboard, so the kiosk brings its own.
 
-#### 3. Connect the tablet (browser only)
-On the tablet, open this link once:
+## Privacy
 
-```
-https://<kiosk address>/?api=<your /exec URL>&key=<KIOSK_KEY>
-```
+- Face recognition runs on the tablet with [face-api.js](https://github.com/vladmandic/face-api). It's opt-in per visitor; photos are never sent to a recognition service. Biometric privacy laws vary; check the opt-in wording meets yours.
+- A match needs most frames to agree, a close distance and a clear gap to the next person; anything less falls back to typing a name. Thresholds are in `web/config.js`.
+- Visitors are asked not to enter ID numbers or other sensitive details. Declined visitors only see your general message; admins see the answers.
+- Anyone with the kiosk key can call the backend. Keep the setup link private.
 
-The tablet remembers both values and removes them from the address bar. Open `?disconnect` to forget them. Without a connection, the kiosk runs in **demo mode**:
-- data stays in that browser only
-- a panel simulates badge taps
-- the admin PIN is `123456`
+## Trying it and testing
 
-#### 4. iPad kiosk settings (browser only)
-- **Settings → Display & Brightness → Auto-Lock → Never.**
-- **Settings → Accessibility → Guided Access → On.** Open the kiosk in Safari and triple-click the side or top button to lock the iPad to it.
-- Allow camera access for the site when Safari asks.
-- **NFC reader:** use a reader that acts as a keyboard (types the tag number, then Enter), connected by USB-C or Bluetooth.
-  - The kiosk tells a tap apart from typing by speed, and handles readers that send the number twice.
-  - While a keyboard-style reader is connected, the iPad hides its own keyboard. That's why the kiosk has its own on-screen keyboard.
+- **Demo:** serve `web/` (`npm start`, then open `http://localhost:8080/?demo`). Sample company and data, a panel that simulates badge taps, admin PIN `123456`, nothing saved.
+- `npm test` runs the backend against an in-memory Google Sheet and Drive, and checks the wizard's copy of the backend is current.
+- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, a decline, a staff override, the admin screen, and a second tablet joining by link.
+- After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
-#### 5. Badges
-Open the admin screen, go to **Badges → Add badge by tapping it**, and tap each badge card on the reader in turn.
+## Shock Tech
 
-### Face recognition and privacy
-- Runs entirely on the iPad with [face-api.js](https://github.com/vladmandic/face-api). Photos are never sent to a face-recognition service.
-- A match needs most frames to agree, a close distance, and a clear gap to the next-closest person. Anything less falls back to typing a name.
-- Quick entry is **opt-in**, and visitors are told what's kept. Biometric privacy laws vary by state; have Shock Tech confirm the opt-in wording meets its legal requirements.
-- Anyone with the `KIOSK_KEY` can call the backend, including reading the face index. Keep the key off public pages: use the setup link above rather than committing it.
-- The match thresholds are in `web/config.js` (`FACE_MATCH_MAX`, `FACE_MATCH_MARGIN`).
+This kiosk started as Shock Tech, Inc.'s own. To set a tablet up exactly as Shock Tech's was (logo, colors, tagline, visit reasons, ITAR rules, and the citizenship question flagging foreign nationals), import [docs/presets/shock-tech.json](docs/presets/shock-tech.json) on the first setup step, then choose a PIN. An existing Shock Tech Google Sheet keeps working: update the script, connect with the same kiosk key, and use the same admin PIN; old columns such as "Who are you visiting at Shock Tech?" are kept. To update tablets that already have the old Android app, build with `KIOSK_APP_ID=com.shocktech.visitorkiosk` (see android/README.md).
 
-### Moving off Apps Script later
-The kiosk talks to the backend only through `call(action, args)` in `web/js/api.js`. To move to another backend, implement the same actions (`register`, `findVisitor`, `faceIndex`, `addFaceSample`, `setQuickEntry`, `assignBadge`, `tapAtWelcome`, `undoSignOut`, `admin*`) with the same JSON shapes, then point `API_URL` at it.
-
-### Testing
-- `node tests/apps-script.test.js` runs the backend against an in-memory fake Google Sheet and Drive.
-- To try the kiosk locally, run `python3 -m http.server -d web 8000` and open `http://localhost:8000` (demo mode).
-
-The visitor questions, rules and compliance approach are adapted from the Rehtek visitor sign-in specification.
+The visitor questions, rules and compliance approach were first adapted from the Rehtek visitor sign-in specification in `docs/reference/`.

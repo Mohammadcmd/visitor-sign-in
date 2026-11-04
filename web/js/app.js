@@ -1,10 +1,15 @@
-// Shock Tech visitor kiosk: screen flow and wiring.
+// Visitor sign-in kiosk: screen flow and wiring.
 import { CONFIG } from '../config.js';
-import { call, queue, DEMO } from './api.js';
+import { call, queue, DEMO, MODE, BACKEND_VERSION } from './api.js';
 import { Keyboard } from './keyboard.js';
 import { listenForTaps } from './nfc.js';
 import * as face from './face.js';
 import * as fx from './transitions.js';
+import {
+  settings, useSettings, loadCache, applyTheme, logoFor, fill, activeQuestions, everyVisitQuestions,
+  quickEntryOn, splitOption, demoSettings,
+} from './settings.js';
+import { initSetup, openSetup, setupTap } from './setup.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -12,18 +17,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const initials = (p) => `${(p.first || '?')[0]}${(p.last || '')[0] || ''}`.toUpperCase();
 
-const STEPS = ['intro', 'name', 'visit', 'citizenship', 'photo', 'rules', 'quick'];
-const US_CITIZEN = 'U.S. citizen';
-
 const state = {
   screen: 'welcome',
   lastTouch: Date.now(),
   busy: false,
   faceIndex: [],
   // current visitor flow
+  flow: 'new',            // 'new' (sign-in questions) | 'returning' (every-visit questions)
+  steps: [],              // the form's steps for this visitor
   visitor: null,          // { id, first, last, company, quickEntry }
   method: '',
-  answers: {},
+  answers: {},            // form fields by input name
+  qa: {},                 // screening answers by question id
+  qf: {},                 // follow-up answers by question id
+  result: null,           // { declined, reasons, flags } once the questions are answered
+  declineId: '',
+  override: null,         // { by, reason } after a staff member let a declined visitor in
+  resume: false,
   step: 0,
   photo: null,            // { dataUrl, canvas }
   photoDescriptor: null,
@@ -35,6 +45,7 @@ const state = {
   adminToken: null,
   adminMode: null,        // null | { type: 'add' } | { type: 'link', badge }
   adminBadges: [],
+  attention: 0,
   // sign-out undo
   undo: null,
 };
@@ -51,8 +62,8 @@ function transitionKind(from, to) {
   if (from === 'welcome' && to === 'choice') return 'zoom';
   if (from === 'choice' && (to === 'form' || to === 'find')) return 'expand';
   if (to === 'badge') return 'iris';
-  if (to === 'done') return 'flip';
-  if (to === 'admin') return 'rise';
+  if (to === 'done' || to === 'declined') return 'flip';
+  if (to === 'admin' || to === 'setup') return 'rise';
   return 'push';
 }
 
@@ -110,12 +121,13 @@ function errorText(res) {
     case 'badge_in_use': return `Badge ${res.badge} is already checked out to someone. Please use a different badge.`;
     case 'badge_retired': return `Badge ${res.badge} is out of service. Please use a different badge.`;
     case 'missing': return 'Some answers are missing. Please go back and check.';
-    case 'kiosk_key': return 'This kiosk is not connected correctly. Please see the front desk.';
+    case 'kiosk_key': case 'not_connected': return 'This kiosk is not connected correctly. Please see the front desk.';
     default: return 'Something went wrong. Please see the front desk.';
   }
 }
 
 async function refreshFaceIndex() {
+  if (!quickEntryOn()) { state.faceIndex = []; return; }
   const res = await api('faceIndex');
   if (res.ok) state.faceIndex = res.people;
 }
@@ -136,20 +148,95 @@ function saveSample(source) {
   state.sample = null;
 }
 
+// ------------------------------------------------------------------ settings → screens
+
+/** Puts the company's name, logo, colors, questions and rules on every screen. */
+function applySettings() {
+  const s = settings();
+  applyTheme(s);
+  const logo = logoFor(s);
+  $$('[data-org-logo]').forEach((img) => { img.src = logo; img.alt = s.org.name; });
+  $$('[data-org-name]').forEach((el) => { el.textContent = s.org.name || 'us'; });
+  const tagline = $('[data-org-tagline]');
+  tagline.textContent = s.org.tagline;
+  tagline.hidden = !s.org.tagline;
+  document.title = s.org.name ? `${s.org.name} Visitor Sign-In` : 'Visitor Sign-In';
+
+  // Intro: a fixed opening, any notes the screening questions need, and the company's own text.
+  const intro = ['Please sign in before your visit. It takes about two minutes.'];
+  activeQuestions(s).forEach((q) => { if (q.intro && !q.every) intro.push(q.intro); });
+  if (s.form.intro) intro.push(...s.form.intro.split(/\n{2,}/));
+  intro.push('We use this information only to manage your visit. Please don\'t enter ID numbers or other sensitive details.', 'Need help? Ask at the front desk.');
+  $('[data-intro]').innerHTML = intro.map((p) => `<p>${esc(fill(p, s))}</p>`).join('');
+
+  $('[data-host-field]').hidden = !s.form.askHost;
+  $('[data-host-label]').textContent = fill(s.form.hostLabel, s);
+  $('[data-host-hint]').textContent = fill(s.form.hostHint, s);
+  $('[data-purpose-field]').hidden = !s.form.askPurpose;
+  const chips = $('[data-chips="purpose"]');
+  chips.hidden = !s.form.askPurpose || !s.form.purposes.length;
+  chips.innerHTML = s.form.purposes.map((p) => `<button type="button" class="chip">${esc(p)}</button>`).join('');
+  $('[data-rules]').innerHTML = s.form.rules.map((r) => `<li>${esc(fill(r, s))}</li>`).join('');
+
+  // With badges, visitors sign out by tapping them; without, there's a button.
+  $('[data-foot-badge]').hidden = !s.badges;
+  $$('[data-leave-open]').forEach((b) => { b.hidden = s.badges; });
+  $('[data-admin-tab="badges"]').hidden = !s.badges;
+  $('[data-done-text]').textContent = s.badges
+    ? 'Please wear your badge where it can be seen. Your host will meet you at the front desk.'
+    : 'Please take a seat. Your host will meet you at the front desk.';
+  $('[data-done-leave]').textContent = s.badges
+    ? 'When you leave, tap your badge on the reader to sign out.'
+    : 'When you leave, tap "Leaving?" on the welcome screen to sign out.';
+  $('[data-find-hint]').textContent = quickEntryOn(s)
+    ? 'Start typing your name. If you turned on quick entry, the camera may recognize you first.'
+    : 'Start typing your name.';
+  $('[data-cam-bubble]').hidden = !quickEntryOn(s);
+  buildScreeningSteps();
+}
+
+/** One step per screening question, placed before the photo step. */
+function buildScreeningSteps() {
+  $$('[data-screen="form"] .step[data-step^="q:"]').forEach((el) => el.remove());
+  const photoStep = $('[data-screen="form"] .step[data-step="photo"]');
+  for (const q of activeQuestions()) {
+    const el = document.createElement('div');
+    el.className = 'step';
+    el.dataset.step = `q:${q.id}`;
+    const answer = q.type === 'text'
+      ? `<label class="field"><span>Your answer</span><input readonly inputmode="none" name="qa-${esc(q.id)}" data-cap="sentence" maxlength="120" autocomplete="off"></label>`
+      : `<div class="options" role="radiogroup">${q.options.map((o) => {
+        const { main, note } = splitOption(o);
+        return `<button type="button" class="option" role="radio" aria-checked="false" data-q="${esc(q.id)}" data-value="${esc(o)}">${esc(main)}${note ? ` <small>${esc(note)}</small>` : ''}</button>`;
+      }).join('')}</div>`;
+    el.innerHTML = `<p class="eyebrow" data-step-count></p><h2>${esc(fill(q.text))}</h2>${q.hint ? `<p class="hint">${esc(fill(q.hint))}</p>` : ''}${answer}`
+      + (q.followUp ? `<label class="field" data-followup="${esc(q.id)}" hidden><span>${esc(q.followUp.label)}</span><input readonly inputmode="none" name="qf-${esc(q.id)}" data-cap="words" maxlength="60" autocomplete="off"></label>` : '');
+    photoStep.before(el);
+  }
+}
+
 // ------------------------------------------------------------------ screen entry hooks
 
 const ENTER = {
   welcome() {
     face.stopCamera();
-    Object.assign(state, { visitor: null, method: '', answers: {}, photo: null, photoDescriptor: null, sample: null });
+    Object.assign(state, {
+      visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null,
+      resume: false, photo: null, photoDescriptor: null, sample: null, flow: 'new',
+    });
     stopIdle();
+    refreshAttention();
   },
   choice() {
     // Warm the camera so the returning-visitor check starts instantly.
-    face.startCamera($('[data-video="return"]')).catch(() => {});
+    if (quickEntryOn()) face.startCamera($('[data-video="return"]')).catch(() => {});
   },
-  form() { resetForm(); },
+  form() {
+    if (state.resume) { state.resume = false; renderStep({ instant: true }); return; }
+    resetForm();
+  },
   find() { resetFind(); },
+  leave() { resetLeave(); },
   badge() {
     const v = state.visitor;
     const returning = state.method !== 'new visitor';
@@ -168,6 +255,12 @@ const ENTER = {
     strokes.forEach((el) => { el.style.animation = 'none'; });
     setTimeout(() => strokes.forEach((el) => { el.style.animation = ''; }), 480);
   },
+  declined() {
+    face.stopCamera();
+    const first = state.answers.first || state.visitor?.first || '';
+    $('[data-declined-title]').textContent = first ? `Thank you, ${first}` : 'Thank you';
+    $('[data-declined-text]').textContent = fill(settings().screening.declineMessage);
+  },
   admin() { adminTab('inside'); },
 };
 
@@ -183,8 +276,9 @@ $$('[data-go]').forEach((b) => b.addEventListener('click', (e) => {
   e.stopPropagation();
   show(b.dataset.go);
 }));
-$('[data-action="new"]').addEventListener('click', (e) => show('form', { rect: e.currentTarget.getBoundingClientRect() }));
+$('[data-action="new"]').addEventListener('click', (e) => { state.flow = 'new'; show('form', { rect: e.currentTarget.getBoundingClientRect() }); });
 $('[data-action="returning"]').addEventListener('click', (e) => show('find', { rect: e.currentTarget.getBoundingClientRect() }));
+$$('[data-leave-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); show('leave'); }));
 
 function tickClock() {
   $('[data-clock]').textContent = new Date().toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -202,36 +296,90 @@ let suppressClick = false;
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => logo.addEventListener(ev, cancel));
 })();
 
-// ------------------------------------------------------------------ new visitor form
+/** The small red dot by the clock: declined or flagged visitors nobody has reviewed yet. */
+async function refreshAttention() {
+  if (!settings().setupComplete) return;
+  const res = await api('ping');
+  if (!res.ok) return;
+  state.attention = Number(res.attention) || 0;
+  $('[data-attn-dot]').hidden = !state.attention;
+  const count = $('[data-attn-count]');
+  count.hidden = !state.attention;
+  count.textContent = state.attention;
+  if (MODE === 'cloud' && (res.version || 1) < BACKEND_VERSION) state.oldBackend = true;
+}
+
+// ------------------------------------------------------------------ visitor questions
+//
+// New visitors: intro, name, visit details, each screening question, photo,
+// rules, quick entry. Returning visitors only answer the questions asked on
+// every visit. If an answer declines them, they take their photo and see a
+// polite message instead of the rest.
+
+function questionSteps() {
+  return state.flow === 'returning' ? everyVisitQuestions() : activeQuestions();
+}
+
+/** The steps that follow the questions, given how the questions came out. */
+function stepsAfterQuestions() {
+  const s = settings();
+  if (state.result?.declined) return s.photos === 'off' ? [] : ['photo'];
+  if (state.flow === 'returning') return [];
+  const out = [];
+  if (s.photos === 'all') out.push('photo');
+  if (s.form.rules.length) out.push('rules');
+  if (quickEntryOn(s)) out.push('quick');
+  return out;
+}
+
+function buildSteps() {
+  const qs = questionSteps().map((q) => `q:${q.id}`);
+  const head = state.flow === 'returning' ? [] : ['intro', 'name', 'visit'];
+  return [...head, ...qs, ...stepsAfterQuestions()];
+}
 
 function resetForm() {
   state.step = 0;
   state.answers = {};
+  state.qa = {};
+  state.qf = {};
+  state.result = null;
+  state.declineId = '';
+  state.override = null;
   state.photo = null;
   state.photoDescriptor = null;
+  state.steps = buildSteps();
   $$('[data-screen="form"] input').forEach((i) => { i.value = ''; i.classList.remove('invalid'); });
-  $$('[data-options="citizenship"] .option').forEach((o) => { o.classList.remove('on'); o.setAttribute('aria-checked', 'false'); });
+  $$('[data-screen="form"] .option').forEach((o) => { o.classList.remove('on'); o.setAttribute('aria-checked', 'false'); });
   $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.remove('on'));
-  $('[data-country]').hidden = true;
+  $$('[data-followup]').forEach((f) => { f.hidden = true; });
   $('[data-agree]').setAttribute('aria-checked', 'false');
   clearPhoto();
   renderStep({ instant: true });
 }
 
+const currentStep = () => state.steps[state.step];
+const questionById = (id) => activeQuestions().find((q) => q.id === id);
+
 function renderStep({ instant = false, back = false } = {}) {
-  const name = STEPS[state.step];
+  const name = currentStep();
   const steps = $$('[data-screen="form"] .step');
   const from = steps.find((s) => s.classList.contains('active'));
   const to = steps.find((s) => s.dataset.step === name);
-  if (instant) steps.forEach((s) => s.classList.toggle('active', s === to));
-  else fx.step(from, to, back);
-  $('[data-progress]').style.width = `${(state.step / (STEPS.length - 1)) * 100}%`;
+  if (instant || !from) steps.forEach((s) => s.classList.toggle('active', s === to));
+  else if (from !== to) fx.step(from, to, back);
+  const total = state.steps.filter((s) => s !== 'intro').length;
+  const at = state.steps.slice(0, state.step + 1).filter((s) => s !== 'intro').length;
+  const label = state.flow === 'returning' ? `Quick question ${at} of ${total}` : `Step ${at} of ${total}`;
+  if (to) $$('[data-step-count]', to).forEach((e) => { e.textContent = label; });
+  $('[data-progress]').style.width = `${(state.step / Math.max(1, state.steps.length - 1)) * 100}%`;
   $('[data-form-error]').textContent = '';
   const next = $('[data-form-next]');
   $('[data-screen="form"] .form-foot').hidden = name === 'quick';
   next.hidden = name === 'quick';
-  next.textContent = name === 'intro' ? "Let's begin" : 'Continue';
-  $('[data-form-back]').style.visibility = state.step === 0 ? 'hidden' : '';
+  const last = state.step === state.steps.length - 1;
+  next.textContent = name === 'intro' ? "Let's begin" : last && !state.result?.declined ? (state.flow === 'returning' ? 'Continue' : 'Sign in') : 'Continue';
+  $('[data-form-back]').style.visibility = state.step === 0 || state.override ? 'hidden' : '';
   $('[data-screen="form"] .form-body').scrollTop = 0;
   kb.close();
   if (name === 'photo') startPhotoCamera();
@@ -244,29 +392,41 @@ function formError(msg, inputs = []) {
   inputs.forEach((i) => i.classList.add('invalid'));
 }
 
+const answerOf = (q) => (q.type === 'text' ? (state.answers[`qa-${q.id}`] || '').trim() : state.qa[q.id] || '');
+const needsFollowUp = (q) => !!q.followUp && q.followUp.answers.includes(answerOf(q));
+
 function validateStep() {
   const a = state.answers;
+  const s = settings();
   const field = (n) => $(`[data-screen="form"] input[name="${n}"]`);
-  switch (STEPS[state.step]) {
+  const name = currentStep();
+  if (name.startsWith('q:')) {
+    const q = questionById(name.slice(2));
+    if (!q) return true;
+    if (!answerOf(q)) { formError(q.type === 'text' ? 'Please answer the question.' : 'Please choose an answer.', q.type === 'text' ? [field(`qa-${q.id}`)] : []); return false; }
+    if (needsFollowUp(q) && !(a[`qf-${q.id}`] || '').trim()) { formError(`Please enter your ${q.followUp.label.toLowerCase()}.`, [field(`qf-${q.id}`)]); return false; }
+    return true;
+  }
+  switch (name) {
     case 'name': {
       const bad = ['first', 'last'].filter((n) => !(a[n] || '').trim());
       if (bad.length) { formError('Please enter your first and last name.', bad.map(field)); return false; }
       return true;
     }
     case 'visit': {
-      const bad = ['company', 'visiting', 'purpose'].filter((n) => !(a[n] || '').trim());
+      const need = ['company'];
+      if (s.form.askHost) need.push('visiting');
+      if (s.form.askPurpose) need.push('purpose');
+      const bad = need.filter((n) => !(a[n] || '').trim());
       if (bad.length) {
         formError(bad.includes('company') && bad.length === 1 ? 'Please enter your company, or “N/A”.' : 'Please answer each question.', bad.map(field));
         return false;
       }
       return true;
     }
-    case 'citizenship':
-      if (!a.citizenship) { formError('Please choose your citizenship status.'); return false; }
-      if (a.citizenship !== US_CITIZEN && !(a.country || '').trim()) { formError('Please enter your country of citizenship.', [field('country')]); return false; }
-      return true;
     case 'photo':
-      if (!state.photo) { formError('Please take your picture.'); return false; }
+      if (!state.photo && settings().photos === 'all' && !state.result?.declined) { formError('Please take your picture.'); return false; }
+      if (!state.photo && state.result?.declined && $('[data-camera-error]').hidden) { formError('Please take your picture.'); return false; }
       return true;
     case 'rules':
       if (!a.agreed) { formError('Please check the box to agree to the visitor rules.'); return false; }
@@ -276,42 +436,92 @@ function validateStep() {
   }
 }
 
+/** Decides the questions once the last one is answered. */
+function evaluate() {
+  const flags = [], reasons = [];
+  for (const q of questionSteps()) {
+    const answer = answerOf(q);
+    if (q.rule.action === 'none' || !q.rule.answers.includes(answer)) continue;
+    const item = { label: q.label, answer, flagLabel: q.rule.flagLabel || q.label };
+    (q.rule.action === 'decline' ? reasons : flags).push(item);
+  }
+  return { declined: reasons.length > 0, reasons, flags };
+}
+
+function answersForRecord() {
+  const out = [];
+  for (const q of activeQuestions()) {
+    out.push({ label: q.label, value: answerOf(q) });
+    if (q.followUp) out.push({ label: q.followUp.label, value: needsFollowUp(q) ? (state.answers[`qf-${q.id}`] || '').trim() : q.followUp.otherwise });
+  }
+  return out;
+}
+
 $('[data-form-next]').addEventListener('click', () => {
-  if (!validateStep()) return;
-  if (state.step < STEPS.length - 1) { state.step++; renderStep(); }
+  if (state.busy || !validateStep()) return;
+  const name = currentStep();
+  const qs = questionSteps();
+  const lastQuestion = qs.length && name === `q:${qs[qs.length - 1].id}`;
+  if (lastQuestion) {
+    state.result = evaluate();
+    state.steps = [...state.steps.slice(0, state.step + 1), ...stepsAfterQuestions()];
+    if (state.result.declined && state.step === state.steps.length - 1) { submitDecline(); return; }
+  }
+  if (state.result?.declined && name === 'photo') { submitDecline(); return; }
+  if (state.step < state.steps.length - 1) { state.step++; renderStep(); return; }
+  finishQuestions(false, centerOf($('[data-form-next]')));
 });
 $('[data-form-back]').addEventListener('click', () => {
   if (state.step > 0) { state.step--; renderStep({ back: true }); }
 });
 
-$$('.screen input[readonly]').forEach((input) => {
-  input.addEventListener('click', () => kb.open(input));
-  input.addEventListener('input', () => {
-    input.classList.remove('invalid');
-    if (input.closest('[data-screen="form"]')) state.answers[input.name] = input.value;
-    if (input.name === 'purpose') $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.toggle('on', c.textContent === input.value));
-  });
+/** Every field on every screen opens the on-screen keyboard. */
+document.addEventListener('click', (e) => {
+  const input = e.target.closest('input[readonly]');
+  if (input && !input.closest('[hidden]')) kb.open(input);
+});
+document.addEventListener('input', (e) => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  input.classList.remove('invalid');
+  if (!input.closest('[data-screen="form"]')) return;
+  state.answers[input.name] = input.value;
+  if (input.name === 'purpose') $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.toggle('on', c.textContent === input.value));
+});
+document.addEventListener('paste', (e) => {
+  if (!kb.input) return;
+  e.preventDefault();
+  kb.insert(e.clipboardData?.getData('text') || '');
 });
 
-$$('[data-chips="purpose"] .chip').forEach((chip) => chip.addEventListener('click', () => {
+$('[data-chips="purpose"]').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
   const input = $('input[name="purpose"]');
   input.value = chip.textContent;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   kb.close();
-}));
+});
 
-$$('[data-options="citizenship"] .option').forEach((opt) => opt.addEventListener('click', () => {
-  $$('[data-options="citizenship"] .option').forEach((o) => {
+// Screening answers (generated steps, so one delegated handler).
+$('[data-form-body]').addEventListener('click', (e) => {
+  const opt = e.target.closest('.option[data-q]');
+  if (!opt) return;
+  const q = questionById(opt.dataset.q);
+  if (!q) return;
+  $$('.option', opt.parentElement).forEach((o) => {
     o.classList.toggle('on', o === opt);
     o.setAttribute('aria-checked', String(o === opt));
   });
-  state.answers.citizenship = opt.dataset.value;
-  const needsCountry = opt.dataset.value !== US_CITIZEN;
-  $('[data-country]').hidden = !needsCountry;
+  state.qa[q.id] = opt.dataset.value;
   $('[data-form-error]').textContent = '';
-  if (needsCountry) kb.open($('input[name="country"]'));
-  else kb.close();
-}));
+  const follow = $(`[data-followup="${CSS.escape(q.id)}"]`);
+  if (follow) {
+    follow.hidden = !needsFollowUp(q);
+    if (!follow.hidden) kb.open($('input', follow));
+    else kb.close();
+  }
+});
 
 $('[data-agree]').addEventListener('click', (e) => {
   const on = e.currentTarget.getAttribute('aria-checked') !== 'true';
@@ -360,6 +570,7 @@ $('[data-capture]').addEventListener('click', async () => {
   $('[data-retake]').hidden = false;
   $('[data-form-error]').textContent = '';
   face.stopCamera();
+  if (!quickEntryOn()) return;
   // Check the picture shows a face; this descriptor is used only if they opt into quick entry.
   try {
     const d = await face.describe(shot.canvas);
@@ -371,28 +582,142 @@ $('[data-capture]').addEventListener('click', async () => {
 $('[data-retake]').addEventListener('click', () => { clearPhoto(); startPhotoCamera(); });
 
 // Quick-entry choice submits the sign-in.
-$$('[data-quick]').forEach((b) => b.addEventListener('click', () => submitNewVisitor(b.dataset.quick === 'yes', centerOf(b))));
+$$('[data-quick]').forEach((b) => b.addEventListener('click', () => finishQuestions(b.dataset.quick === 'yes', centerOf(b))));
+
+function finishQuestions(quickEntry, origin) {
+  if (state.flow === 'returning') { afterIdentified(origin); return; }
+  submitNewVisitor(quickEntry, origin);
+}
 
 async function submitNewVisitor(quickEntry, origin) {
   if (state.busy) return;
   busy(true, 'Saving your sign-in…');
   let descriptor = state.photoDescriptor;
-  if (quickEntry && !descriptor) {
+  if (quickEntry && !descriptor && state.photo) {
     try { descriptor = await face.describe(state.photo.canvas); } catch { descriptor = null; }
   }
   const a = state.answers;
   const res = await api('register', {
     first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: a.purpose,
-    citizenship: a.citizenship, country: a.citizenship === US_CITIZEN ? 'United States' : a.country,
-    agreed: !!a.agreed, quickEntry, photo: state.photo.dataUrl, descriptor: quickEntry ? descriptor : null,
+    agreed: !!a.agreed, quickEntry, photo: state.photo?.dataUrl || '', descriptor: quickEntry ? descriptor : null,
+    answers: answersForRecord(), flags: state.result?.flags || [], override: state.override || undefined,
   });
   busy(false);
   if (!res.ok) { formError(errorText(res)); return; }
   state.visitor = res.visitor;
   state.method = 'new visitor';
   if (quickEntry && descriptor) rememberSample(res.visitor, descriptor);
-  show('badge', { origin });
+  // Every-visit flags already went in with the registration.
+  state.result = state.result ? { ...state.result, flags: [] } : null;
+  afterIdentified(origin);
 }
+
+/** The visitor is known: finish with a badge tap, or sign them straight in when there are no badges. */
+async function afterIdentified(origin) {
+  if (settings().badges) { show('badge', { origin }); return; }
+  busy(true, 'Signing you in…');
+  const res = await api('checkIn', {
+    visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
+  });
+  busy(false);
+  if (!res.ok) { toast(errorText(res)); return; }
+  showDone('');
+}
+
+function showDone(badge) {
+  $('[data-done-title]').textContent = state.method === 'new visitor'
+    ? `You're all set, ${state.visitor.first}!`
+    : `Welcome back, ${state.visitor.first}!`;
+  const b = $('[data-done-badge]');
+  b.textContent = badge ? `Badge ${badge}` : '';
+  b.hidden = !badge;
+  show('done');
+  if (state.result?.flags?.length || state.override) setTimeout(refreshAttention, 1500);
+}
+
+// ------------------------------------------------------------------ declined visitors
+
+async function submitDecline() {
+  if (state.busy) return;
+  busy(true, 'One moment…');
+  const a = state.answers, v = state.visitor;
+  const res = await api('recordDecline', {
+    first: a.first || v?.first, last: a.last || v?.last, company: a.company || v?.company,
+    visiting: a.visiting, purpose: a.purpose, visitorId: v?.id || '', method: state.flow === 'returning' ? state.method : 'new visitor',
+    photo: state.photo?.dataUrl || '', reasons: state.result.reasons,
+  });
+  busy(false);
+  if (!res.ok) { formError(errorText(res)); return; }
+  if (res.passed) {
+    // An admin already let this person in: carry on as normal.
+    continueAfterOverride({ by: res.by, reason: res.reason });
+    toast('Welcome! A member of staff has already approved your visit.');
+    return;
+  }
+  state.declineId = res.declineId;
+  show('declined');
+  setTimeout(refreshAttention, 1500);
+}
+
+/** A declined visitor was let in: skip the rest of the questions and finish signing in. */
+function continueAfterOverride(override) {
+  state.override = override;
+  state.result = { declined: false, reasons: [], flags: [] };
+  const lastQ = state.steps.map((s) => s.startsWith('q:')).lastIndexOf(true);
+  const rest = stepsAfterQuestions().filter((s) => s !== 'photo' || !state.photo);
+  state.steps = [...state.steps.slice(0, lastQ + 1), ...rest];
+  if (!rest.length) { finishQuestions(false, { x: innerWidth / 2, y: innerHeight / 2 }); return; }
+  state.step = lastQ + 1;
+  if (state.screen !== 'form') { state.resume = true; show('form'); } else renderStep();
+}
+
+$('[data-staff-override]').addEventListener('click', () => {
+  const first = state.answers.first || state.visitor?.first || 'this visitor';
+  openPin({
+    title: 'Staff override',
+    hint: `Enter the admin PIN to let ${first} in.`,
+    async onSuccess(token) {
+      const reason = await askReason({
+        title: `Let ${first} in?`,
+        text: "They'll finish signing in now. Your name and the reason are saved with the visit.",
+      });
+      if (reason === null) return;
+      busy(true, 'One moment…');
+      const res = await api('adminAllow', { token, visitId: state.declineId, reason });
+      busy(false);
+      if (!res.ok) { toast(errorText(res)); return; }
+      continueAfterOverride({ by: res.by || settings().admin.name || 'Admin', reason });
+    },
+  });
+});
+
+/** Asks a staff member why (optional). Resolves with the reason, or null if cancelled. */
+function askReason({ title, text }) {
+  const ov = $('[data-overlay="reason"]');
+  const input = $('input[name="reason"]', ov);
+  $('[data-reason-title]').textContent = title;
+  $('[data-reason-text]').textContent = text;
+  input.value = '';
+  ov.hidden = false;
+  return new Promise((resolve) => {
+    const done = (value) => {
+      kb.close();
+      ov.hidden = true;
+      $('[data-reason-ok]').onclick = null;
+      $('[data-reason-cancel]').onclick = null;
+      resolve(value);
+    };
+    $('[data-reason-ok]').onclick = () => done(input.value.trim());
+    $('[data-reason-cancel]').onclick = () => done(null);
+  });
+}
+$('[data-reason-chips]').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  const input = $('[data-overlay="reason"] input[name="reason"]');
+  input.value = chip.textContent;
+  kb.close();
+});
 
 // ------------------------------------------------------------------ returning visitor
 //
@@ -412,7 +737,7 @@ function resetFind() {
   state.faceHit = null;
   state.faceFrames = [];
   setTimeout(() => { if (state.screen === 'find') kb.open($('input[name="ffirst"]')); }, 450);
-  recognizeInBackground();
+  if (quickEntryOn()) recognizeInBackground();
 }
 
 function camStatus(cls, text) {
@@ -485,8 +810,16 @@ $('[data-face-yes]').addEventListener('click', (e) => {
   state.visitor = { id: p.id, first: p.first, last: p.last, company: p.company, quickEntry: true };
   state.method = 'returning (face)';
   saveSample('return-face');
-  show('badge', { origin: centerOf(e.currentTarget) });
+  continueReturning(centerOf(e.currentTarget));
 });
+
+/** Returning visitors answer the every-visit questions (if any), then finish. */
+function continueReturning(origin) {
+  if (!everyVisitQuestions().length) { afterIdentified(origin); return; }
+  state.flow = 'returning';
+  state.resume = false;
+  show('form');
+}
 
 // Matches appear as they type; "Find me" also says so when nobody matches.
 let liveSearch = null;
@@ -517,7 +850,7 @@ async function findMe({ live = false } = {}) {
     $('[data-suggest]').innerHTML = '';
     box.innerHTML = live ? '' : `<div class="no-match"><strong>We couldn't find you.</strong> Check the spelling, or sign in as a new visitor. It only takes two minutes.
       <div class="quick-actions"><button type="button" class="btn-primary" data-new-instead>Sign in as a new visitor</button></div></div>`;
-    $('[data-new-instead]', box)?.addEventListener('click', () => show('form'));
+    $('[data-new-instead]', box)?.addEventListener('click', () => { state.flow = 'new'; show('form'); });
     return;
   }
   const shown = box.dataset.ids;
@@ -547,8 +880,8 @@ function chooseMatch(m, origin) {
   state.recognition++;
   state.visitor = m;
   state.method = 'returning (name)';
-  if (m.quickEntry) { saveSample('return-name'); show('badge', { origin }); return; }
-  if (!state.sample) { show('badge', { origin }); return; }
+  if (m.quickEntry) { saveSample('return-name'); continueReturning(origin); return; }
+  if (!state.sample || !quickEntryOn()) { continueReturning(origin); return; }
   $('[data-optin-title]').textContent = `Hi, ${m.first}!`;
   show('optin');
 }
@@ -561,8 +894,57 @@ $$('[data-optin]').forEach((b) => b.addEventListener('click', async () => {
     if (res.ok) { state.visitor.quickEntry = true; saveSample('opt-in'); }
   }
   state.sample = null;
-  show('badge', { origin: centerOf(b) });
+  continueReturning(centerOf(b));
 }));
+
+// ------------------------------------------------------------------ signing out without a badge
+
+let leaveSearch = null;
+let leaveSeq = 0;
+function resetLeave() {
+  $$('[data-screen="leave"] input').forEach((i) => { i.value = ''; });
+  $('[data-leave-matches]').innerHTML = '';
+  $('[data-leave-error]').textContent = '';
+  setTimeout(() => { if (state.screen === 'leave') kb.open($('input[name="lfirst"]')); }, 450);
+}
+$$('[data-screen="leave"] input').forEach((input) => input.addEventListener('input', () => {
+  clearTimeout(leaveSearch);
+  leaveSearch = setTimeout(() => findOpen({ live: true }), 500);
+}));
+$('[data-leave-go]').addEventListener('click', () => findOpen());
+
+async function findOpen({ live = false } = {}) {
+  const v = (n) => $(`input[name="${n}"]`).value.trim();
+  if (live && (v('lfirst').length < 2 || v('llast').length < 2)) return;
+  if (!live) {
+    kb.close();
+    if (!v('lfirst') || !v('llast')) { $('[data-leave-error]').textContent = 'Please enter your first and last name.'; return; }
+  }
+  const seq = ++leaveSeq;
+  const res = await api('findOpenVisits', { first: v('lfirst'), last: v('llast') });
+  if (seq !== leaveSeq || state.screen !== 'leave') return;
+  const box = $('[data-leave-matches]');
+  if (!res.ok) { if (!live) $('[data-leave-error]').textContent = errorText(res); return; }
+  if (!res.matches.length) {
+    box.innerHTML = live ? '' : '<div class="no-match"><strong>We couldn\'t find you signed in.</strong> Check the spelling, or see the front desk.</div>';
+    return;
+  }
+  box.innerHTML = `<p class="hint">${res.matches.length > 1 ? 'Which one is you?' : 'Is this you?'}</p>` + res.matches.map((m, i) => `
+    <button type="button" class="match" data-leave-match="${i}">
+      <span class="avatar">${esc(initials(m))}</span>
+      <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)} · signed in ${esc(timeOf(m.since))}</span></span>
+      <span class="go">Sign me out ›</span>
+    </button>`).join('');
+  $$('[data-leave-match]', box).forEach((b) => b.addEventListener('click', async () => {
+    const m = res.matches[Number(b.dataset.leaveMatch)];
+    busy(true, 'Signing you out…');
+    const out = await api('kioskSignOut', { visitId: m.visitId });
+    busy(false);
+    if (!out.ok) { $('[data-leave-error]').textContent = errorText(out); return; }
+    show('welcome');
+    showSignedOut(out);
+  }));
+}
 
 // ------------------------------------------------------------------ badge taps
 
@@ -578,6 +960,8 @@ function onTap(tag, typed) {
   touch();
   if (!tag || state.busy) return;
   if (!$('[data-overlay="pin"]').hidden) return;
+  if (state.screen === 'setup') { setupTap(tag); return; }
+  if (!settings().badges) { toast("This kiosk doesn't use badges. Sign in and out on the screen."); return; }
   if (state.screen === 'admin') { adminTap(tag); return; }
   if (state.screen === 'welcome') { welcomeTap(tag); return; }
   if (state.screen === 'badge') { badgeTap(tag); return; }
@@ -608,7 +992,10 @@ async function badgeTap(tag) {
   scene.classList.add('reading');
   status.textContent = 'Reading your badge…';
   const [res] = await Promise.all([
-    api('assignBadge', { visitorId: state.visitor.id, tag, method: state.method }),
+    api('assignBadge', {
+      visitorId: state.visitor.id, tag, method: state.method,
+      flags: state.result?.flags || [], override: state.override || undefined,
+    }),
     sleep(700), // long enough to see the reader at work
   ]);
   state.busy = false;
@@ -628,11 +1015,7 @@ async function badgeTap(tag) {
   scene.classList.add('success');
   status.textContent = `Badge ${res.badge} is yours!`;
   await sleep(1500);
-  $('[data-done-title]').textContent = state.method === 'new visitor'
-    ? `You're all set, ${state.visitor.first}!`
-    : `Welcome back, ${state.visitor.first}!`;
-  $('[data-done-badge]').textContent = `Badge ${res.badge}`;
-  show('done');
+  showDone(res.badge);
 }
 
 async function welcomeTap(tag) {
@@ -647,8 +1030,11 @@ async function welcomeTap(tag) {
 
 function showSignedOut(res) {
   const ov = $('[data-overlay="signout"]');
+  const org = settings().org.name;
   $('[data-signout-title]').textContent = `Goodbye, ${res.first}!`;
-  $('[data-signout-text]').textContent = `You're signed out. Please leave badge ${res.badge} at the front desk. Thanks for visiting Shock Tech.`;
+  $('[data-signout-text]').textContent = res.badge
+    ? `You're signed out. Please leave badge ${res.badge} at the front desk. Thanks for visiting${org ? ` ${org}` : ''}.`
+    : `You're signed out. Thanks for visiting${org ? ` ${org}` : ''}.`;
   const undo = $('[data-undo]');
   undo.hidden = false;
   undo.textContent = 'Not you? Undo';
@@ -677,9 +1063,14 @@ $('[data-overlay="signout"]').addEventListener('click', (e) => {
 // ------------------------------------------------------------------ admin
 
 let pin = '';
-function openPin() {
+let pinOpts = {};
+/** The PIN pad. With opts.onSuccess, a correct PIN calls it with the admin token instead of opening the admin screen. */
+function openPin(opts = {}) {
   pin = '';
+  pinOpts = opts;
   renderPin();
+  $('[data-pin-title]').textContent = opts.title || 'Admin';
+  $('[data-pin-hint]').textContent = opts.hint || 'Enter the admin PIN';
   $('[data-pin-error]').textContent = '';
   $('[data-overlay="pin"]').hidden = false;
 }
@@ -698,11 +1089,13 @@ async function pinPress(k) {
     pin = '';
     renderPin();
     if (!res.ok) {
-      $('[data-pin-error]').textContent = res.error === 'locked' ? 'Too many tries. Wait 10 minutes.' : res.error === 'pin' ? 'Wrong PIN.' : errorText(res);
+      $('[data-pin-error]').textContent = res.error === 'locked' ? 'Too many tries. Wait 10 minutes.'
+        : res.error === 'pin' ? 'Wrong PIN.' : res.error === 'no_pin' ? 'No admin PIN has been set yet.' : errorText(res);
       return;
     }
-    state.adminToken = res.token;
     $('[data-overlay="pin"]').hidden = true;
+    if (pinOpts.onSuccess) { pinOpts.onSuccess(res.token); return; }
+    state.adminToken = res.token;
     show('admin');
     return;
   }
@@ -755,6 +1148,7 @@ $('[data-admin-exit]').addEventListener('click', exitAdmin);
 
 $$('[data-admin-tab]').forEach((t) => t.addEventListener('click', () => adminTab(t.dataset.adminTab)));
 $('[data-admin-refresh]').addEventListener('click', () => adminTab('inside'));
+$('[data-attn-refresh]').addEventListener('click', () => adminTab('attention'));
 
 function adminTab(name) {
   state.adminMode = null;
@@ -762,22 +1156,25 @@ function adminTab(name) {
   $$('[data-admin-tab]').forEach((t) => t.classList.toggle('active', t.dataset.adminTab === name));
   $$('[data-admin-pane]').forEach((p) => { p.hidden = p.dataset.adminPane !== name; });
   if (name === 'inside') loadInside();
-  else loadBadges();
+  else if (name === 'attention') loadAttention();
+  else if (name === 'badges') loadBadges();
+  else loadSettingsPane();
 }
 
 async function loadInside() {
   const list = $('[data-inside-list]');
   list.innerHTML = '<div class="empty">Loading…</div>';
+  refreshAttention();
   const res = await adminApi('adminInside');
   if (!res.ok) { list.innerHTML = `<div class="empty">${esc(errorText(res))}</div>`; return; }
   $('[data-inside-count]').textContent = res.inside.length;
   if (!res.inside.length) { list.innerHTML = '<div class="empty">Nobody is signed in right now.</div>'; return; }
   list.innerHTML = res.inside.sort((a, b) => String(a.last).localeCompare(String(b.last))).map((v) => `
     <div class="admin-row">
-      <span class="badge-no">${esc(v.badge)}</span>
+      <span class="badge-no">${esc(v.badge || '—')}</span>
       <div class="who"><strong>${esc(v.first)} ${esc(v.last)}</strong>
         <span class="meta">${esc(v.company)} · visiting ${esc(v.visiting || '—')} · since ${esc(timeOf(v.since))}</span></div>
-      ${v.kind === 'Foreign national' ? '<span class="pill foreign">Foreign national</span>' : ''}
+      ${v.kind && v.kind !== 'Visitor' ? `<span class="pill ${/override/i.test(v.kind) ? 'override' : 'foreign'}">${esc(v.kind)}</span>` : ''}
       <div class="actions"><button type="button" data-signout="${esc(v.visitId)}">Sign out</button></div>
     </div>`).join('');
   fx.cascade(list, { step: 40 });
@@ -786,6 +1183,46 @@ async function loadInside() {
     toast(r.ok ? 'Signed out.' : errorText(r));
     loadInside();
   })));
+}
+
+async function loadAttention() {
+  const list = $('[data-attn-list]');
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const res = await adminApi('adminAttention');
+  if (!res.ok) { list.innerHTML = `<div class="empty">${esc(errorText(res))}</div>`; return; }
+  refreshAttention();
+  if (!res.items.length) { list.innerHTML = '<div class="empty">Nothing needs a look right now.</div>'; return; }
+  list.innerHTML = res.items.map((it, i) => `
+    <div class="admin-row attn-row">
+      ${it.photo && it.photo.startsWith('data:') ? `<img class="attn-photo" src="${esc(it.photo)}" alt="">` : `<span class="badge-no">${esc(initials(it))}</span>`}
+      <div class="who"><strong>${esc(it.first)} ${esc(it.last)}</strong>
+        <span class="meta">${esc(it.company)}${it.visiting ? ` · visiting ${esc(it.visiting)}` : ''} · ${esc(timeOf(it.when))}${it.inside ? ' · inside now' : ''}</span>
+        <span class="reason">${esc(it.screening)}</span>
+        ${it.photo && !it.photo.startsWith('data:') ? `<span class="meta">Photo saved in Google Drive</span>` : ''}</div>
+      <span class="pill ${it.kind}">${esc(it.label)}</span>
+      <div class="actions">
+        ${it.kind === 'declined' && !it.allowed ? `<button type="button" data-allow="${i}">Let in</button>` : ''}
+        <button type="button" data-review="${i}">Mark reviewed</button>
+      </div>
+    </div>`).join('');
+  fx.cascade(list, { step: 40 });
+  $$('[data-review]', list).forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const r = await adminApi('adminReview', { visitId: res.items[Number(b.dataset.review)].visitId });
+    if (!r.ok) toast(errorText(r));
+    loadAttention();
+  }));
+  $$('[data-allow]', list).forEach((b) => b.addEventListener('click', async () => {
+    const it = res.items[Number(b.dataset.allow)];
+    const reason = await askReason({
+      title: `Let ${it.first} ${it.last} in?`,
+      text: `For the next two hours, ${it.first} can sign in normally at the kiosk. Your name and the reason are saved with the record.`,
+    });
+    if (reason === null) return;
+    const r = await adminApi('adminAllow', { visitId: it.visitId, reason });
+    toast(r.ok ? `${it.first} can sign in now.` : errorText(r));
+    loadAttention();
+  }));
 }
 
 async function loadBadges() {
@@ -868,6 +1305,75 @@ async function adminTap(tag) {
   toast(b ? `That's badge ${b.badge}${b.holder ? `, held by ${b.holder}` : ''}.` : "That tag isn't linked to a badge.");
 }
 
+// ------------------------------------------------------------------ admin settings
+
+const SETTING_ROWS = [
+  ['company', 'Company and colors', (s) => [s.org.name, s.org.tagline].filter(Boolean).join(' · ')],
+  ['admin', 'Admin login', (s) => `${s.admin.name || 'Admin'} · PIN set`],
+  ['logo', 'Logo', (s) => (s.org.logo ? 'Your logo' : 'Text logo with your company name')],
+  ['badges', 'Visitor badges', (s) => (s.badges ? 'Visitors tap an NFC/RFID badge' : 'No badges: sign in and out on screen')],
+  ['screening', 'Screening questions', (s) => {
+    const qs = activeQuestions(s);
+    return qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}: ${qs.map((q) => q.label).join(', ')}` : 'No extra questions';
+  }],
+  ['touches', 'Photos, reasons and rules', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules`],
+];
+
+function loadSettingsPane() {
+  const s = settings();
+  $('[data-settings-rows]').innerHTML = SETTING_ROWS.map(([step, title, sum]) => `
+    <div class="set-row"><div><strong>${esc(title)}</strong><span>${esc(sum(s))}</span></div>
+      <button type="button" data-edit="${step}">Edit</button></div>`).join('');
+  $$('[data-edit]').forEach((b) => b.addEventListener('click', () => openSetup({ edit: b.dataset.edit, token: state.adminToken })));
+  const info = $('[data-storage-info]');
+  const actions = $('[data-storage-actions]');
+  const secret = $('[data-connect-link]');
+  secret.hidden = true;
+  if (MODE === 'cloud') {
+    info.textContent = `Every sign-in goes to your Google Sheet${CONFIG.BUILT_IN ? ' (built into this app)' : ''}. Visitor photos are in your Google Drive.`
+      + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
+    actions.innerHTML = `${CONFIG.BUILT_IN ? '' : '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>'}
+      <button type="button" class="btn-secondary" data-copy-latest>Copy the latest Apps Script code</button>`;
+    $('[data-connect-another]', actions)?.addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to show the private link', () => {
+      const link = `${location.origin}${location.pathname}?api=${encodeURIComponent(CONFIG.API_URL)}&key=${encodeURIComponent(CONFIG.KIOSK_KEY)}`;
+      secret.hidden = false;
+      secret.innerHTML = `Open this link once on the other tablet. It connects to the same sheet and settings. Keep it private: it works like a password.<br><code>${esc(link)}</code>`;
+      e.currentTarget.disabled = false;
+    }));
+    $('[data-copy-latest]', actions).addEventListener('click', async () => {
+      const { BACKEND_CODE } = await import('./backend-code.js');
+      try { await navigator.clipboard.writeText(BACKEND_CODE); toast('Copied. Paste it over the code in Apps Script, then deploy a new version.'); } catch { toast("Copying isn't allowed here. Use apps-script/Code.gs from the project instead."); }
+    });
+  } else {
+    info.textContent = DEMO ? 'Demo mode: sample data, kept only in this browser.'
+      : 'Records and photos are kept privately on this tablet. To switch to Google Sheets, choose "Start over" and pick Google Sheets (records already on this tablet stay here).';
+    actions.innerHTML = '';
+  }
+}
+
+$('[data-export-settings]').addEventListener('click', async () => {
+  const { exportable } = await import('./settings.js');
+  const blob = new Blob([JSON.stringify(exportable(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(settings().org.name || 'kiosk').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-kiosk-settings.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast('Settings exported.');
+});
+
+$('[data-start-over]').addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again: this tablet starts setup again', async () => {
+  const { forgetLocal } = await import('./settings.js');
+  const { eraseTablet } = await import('./api.js');
+  const { forgetConnection } = await import('../config.js');
+  if (MODE !== 'cloud') await eraseTablet();
+  forgetLocal();
+  if (!CONFIG.BUILT_IN) forgetConnection();
+  location.replace(location.pathname);
+}));
+
 /** Destructive buttons need a second tap within 3 s (no browser dialogs on a kiosk). */
 function confirmTap(btn, label, action) {
   if (btn.classList.contains('confirm')) { btn.disabled = true; action(); return; }
@@ -897,9 +1403,10 @@ function stopIdle() {
 setInterval(() => {
   if (state.busy || idleCountdown) return;
   const idle = Date.now() - state.lastTouch;
-  if (state.screen === 'welcome') return;
+  if (state.screen === 'welcome' || state.screen === 'setup') return;
   if (state.screen === 'admin') { if (idle > 3 * 60 * 1000) exitAdmin(); return; }
   if (state.screen === 'done') { if (idle > 15 * 1000) show('welcome'); return; }
+  if (state.screen === 'declined') { if (idle > 45 * 1000 && $('[data-overlay="pin"]').hidden && $('[data-overlay="reason"]').hidden) show('welcome'); return; }
   const limit = state.screen === 'badge' ? CONFIG.BADGE_IDLE_MS : CONFIG.IDLE_MS;
   if (idle < limit) return;
   let n = 10;
@@ -908,7 +1415,7 @@ setInterval(() => {
   idleCountdown = setInterval(() => {
     n -= 1;
     $('[data-idle-count]').textContent = n;
-    if (n <= 0) { stopIdle(); show('welcome'); }
+    if (n <= 0) { stopIdle(); $('[data-overlay="reason"]').hidden = true; $('[data-overlay="pin"]').hidden = true; show('welcome'); }
   }, 1000);
 }, 1000);
 
@@ -918,7 +1425,8 @@ setInterval(() => {
   const h = new Date().getHours();
   if (h === CONFIG.NIGHTLY_RELOAD_HOUR && state.screen === 'welcome' && Date.now() - loadedAt > 2 * 3600 * 1000) location.reload();
 }, 15 * 1000);
-setInterval(() => { if (state.screen === 'welcome') refreshFaceIndex(); }, 5 * 60 * 1000);
+setInterval(() => { if (state.screen === 'welcome') { refreshFaceIndex(); refreshCloudSettings(); } }, 5 * 60 * 1000);
+setInterval(() => { if (state.screen === 'welcome') refreshAttention(); }, 2 * 60 * 1000);
 
 // Keep the screen awake where the browser allows it.
 let wakeLock = null;
@@ -960,8 +1468,55 @@ if (DEMO) {
 
 // ------------------------------------------------------------------ start
 
-document.body.dataset.view = state.screen;
-fx.cascade(screenEl('welcome'), { delay: 150, step: 110 });
-tickClock();
-refreshFaceIndex();
-window.addEventListener('load', () => { face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
+/** Settings saved in the Google Sheet win, so every tablet on the same sheet looks the same. */
+async function refreshCloudSettings() {
+  if (MODE !== 'cloud') return false;
+  const res = await api('getSettings');
+  if (!res.ok || !res.settings) return false;
+  useSettings({ ...res.settings, storage: 'cloud', org: { ...res.settings.org, logo: res.logo || '' } }, { cache: true });
+  applySettings();
+  return true;
+}
+
+function startKiosk() {
+  applySettings();
+  document.body.dataset.view = state.screen;
+  $$('.screen').forEach((s) => s.classList.toggle('active', s.dataset.screen === 'welcome'));
+  state.screen = 'welcome';
+  document.body.dataset.view = 'welcome';
+  fx.cascade(screenEl('welcome'), { delay: 150, step: 110 });
+  tickClock();
+  refreshFaceIndex();
+  refreshAttention();
+}
+
+initSetup({
+  kb, show, toast, busy, confirmTap, esc,
+  /** Setup finished (or an edit was saved): show the kiosk with the new settings. */
+  done({ reload, toAdmin }) {
+    if (reload) { location.replace(location.pathname); return; }
+    applySettings();
+    refreshFaceIndex();
+    if (toAdmin) { show('admin'); adminTab('settings'); } else show('welcome');
+  },
+});
+
+(async () => {
+  if (DEMO) useSettings(demoSettings());
+  else if (MODE === 'cloud') {
+    const cached = loadCache();
+    if (cached) useSettings(cached);
+    applySettings();
+    await refreshCloudSettings();
+  }
+  applySettings();
+  if (!settings().setupComplete) {
+    document.body.dataset.view = 'setup';
+    $$('.screen').forEach((s) => s.classList.toggle('active', s.dataset.screen === 'setup'));
+    state.screen = 'setup';
+    openSetup({});
+  } else {
+    startKiosk();
+  }
+  window.addEventListener('load', () => { if (quickEntryOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
+})();

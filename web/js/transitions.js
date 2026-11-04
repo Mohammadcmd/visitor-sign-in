@@ -310,7 +310,7 @@ export async function step(from, to, back = false) {
   if (current === mine) settle();
 }
 
-/** Celebration burst in Shock Tech's colors. */
+/** Celebration burst in the brand colors. */
 export function confetti(origin) {
   if (reduced()) return;
   const canvas = document.createElement('canvas');

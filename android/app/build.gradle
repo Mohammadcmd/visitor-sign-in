@@ -1,10 +1,12 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.shocktech.visitorkiosk"
+    namespace = "com.visitorsignin.kiosk"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.shocktech.visitorkiosk"
+        // KIOSK_APP_ID lets a business keep its own app id, so tablets that already
+        // have an earlier build installed take new versions as updates.
+        applicationId System.getenv("KIOSK_APP_ID") ?: "com.visitorsignin.kiosk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

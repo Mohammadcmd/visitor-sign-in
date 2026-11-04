@@ -1,6 +1,6 @@
 {
-  "name": "Shock Tech Visitor Sign-In",
-  "short_name": "Shock Tech Visitors",
+  "name": "Visitor Sign-In",
+  "short_name": "Visitor Sign-In",
   "start_url": "./",
   "display": "fullscreen",
   "orientation": "any",

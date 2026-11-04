@@ -1,13 +1,19 @@
-// Talks to the Apps Script backend, or to an in-browser stand-in in demo mode.
+// Talks to the Google Sheets backend (apps-script/Code.gs), or keeps everything
+// on this tablet. Both answer the same actions with the same JSON, so the rest
+// of the kiosk never needs to know which one it's using.
 import { CONFIG } from '../config.js';
 import { nameKey, companyWords, sameCompany, near, normalizeTag } from './match.js';
+import { settings, saveLocal, hashPin, useSettings } from './settings.js';
 
-export const DEMO = !CONFIG.API_URL;
+export const MODE = CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
+export const DEMO = MODE === 'demo';
+export const ON_TABLET = MODE !== 'cloud';
+export const BACKEND_VERSION = 2;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];
 const TIMEOUT_MS = 20000;
-const OUTBOX = 'shocktech-kiosk-outbox';
+const OUTBOX = 'kiosk-outbox';
 const OUTBOX_MAX = 40;
 
 /** Tells the page whether the backend is reachable (for the "Offline" indicator). */
@@ -17,21 +23,22 @@ function reportNet(ok) {
 
 const requestId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
-async function send(action, args, rid) {
+async function send(url, key, action, args, rid) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
     // text/plain keeps this a "simple" request, so the browser skips the CORS
     // preflight that Apps Script can't answer.
-    const res = await fetch(CONFIG.API_URL, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ key: CONFIG.KIOSK_KEY, action, args, rid }),
+      body: JSON.stringify({ key, action, args, rid }),
       redirect: 'follow',
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { throw new Error(/<html/i.test(text) ? 'not_json_html' : 'not_json'); }
   } finally {
     clearTimeout(timer);
   }
@@ -43,12 +50,12 @@ async function send(action, args, rid) {
  * the first result instead of writing twice.
  */
 export async function call(action, args = {}, rid = requestId()) {
-  if (DEMO) return demo(action, args);
+  if (ON_TABLET) return local(action, args);
   let lastErr;
   for (const wait of RETRY_WAITS) {
     if (wait) await sleep(wait);
     try {
-      const out = await send(action, args, rid);
+      const out = await send(CONFIG.API_URL, CONFIG.KIOSK_KEY, action, args, rid);
       reportNet(true);
       return out;
     } catch (err) {
@@ -59,12 +66,17 @@ export async function call(action, args = {}, rid = requestId()) {
   throw lastErr;
 }
 
+/** One call to a backend that isn't saved yet, so the setup wizard can test a connection. */
+export function callBackend(url, key, action, args = {}) {
+  return send(url, key, action, args, requestId());
+}
+
 /**
  * For calls nobody waits on (a new face photo, say): kept on the tablet and
  * sent whenever the backend is reachable, so a Wi-Fi drop loses nothing.
  */
 export function queue(action, args) {
-  if (DEMO) { demo(action, args); return; }
+  if (ON_TABLET) { local(action, args); return; }
   const box = readOutbox();
   box.push({ action, args, rid: requestId() });
   writeOutbox(box.slice(-OUTBOX_MAX));
@@ -73,7 +85,7 @@ export function queue(action, args) {
 
 let flushing = false;
 export async function flushOutbox() {
-  if (DEMO || flushing) return;
+  if (ON_TABLET || flushing) return;
   flushing = true;
   try {
     for (let box = readOutbox(); box.length; box = readOutbox()) {
@@ -91,7 +103,18 @@ export async function flushOutbox() {
 }
 
 function readOutbox() {
-  try { return JSON.parse(localStorage.getItem(OUTBOX)) || []; } catch { return []; }
+  try {
+    const box = JSON.parse(localStorage.getItem(OUTBOX)) || [];
+    // Items waiting from before the kiosk became configurable.
+    const legacy = JSON.parse(localStorage.getItem('shocktech-kiosk-outbox'));
+    if (Array.isArray(legacy) && legacy.length) {
+      localStorage.removeItem('shocktech-kiosk-outbox');
+      const merged = legacy.concat(box);
+      localStorage.setItem(OUTBOX, JSON.stringify(merged));
+      return merged;
+    }
+    return box;
+  } catch { return []; }
 }
 
 function writeOutbox(box) {
@@ -103,60 +126,182 @@ function writeOutbox(box) {
   }
 }
 
-if (!DEMO) {
+if (!ON_TABLET) {
   window.addEventListener('online', flushOutbox);
   setInterval(flushOutbox, 30 * 1000);
   setTimeout(flushOutbox, 3000);
 }
 
-// ------------------------------------------------------------------ demo mode
+// ------------------------------------------------------------------ photos on this tablet
 
-const STORE = 'shocktech-kiosk-demo-v1';
+/** Photos are big, so they live in IndexedDB rather than localStorage. */
+export const photos = (() => {
+  let dbp = null;
+  function open() {
+    if (!dbp) {
+      dbp = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DEMO ? 'kiosk-demo-photos' : 'kiosk-photos', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('photos');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      dbp.catch(() => { dbp = null; });
+    }
+    return dbp;
+  }
+  async function run(mode, fn) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('photos', mode);
+      const req = fn(tx.objectStore('photos'));
+      tx.oncomplete = () => resolve(req ? req.result : undefined);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  return {
+    put: (k, v) => run('readwrite', (st) => st.put(v, k)).catch(() => {}),
+    get: (k) => run('readonly', (st) => st.get(k)).then((v) => v || '').catch(() => ''),
+    clear: () => run('readwrite', (st) => st.clear()).catch(() => {}),
+  };
+})();
+
+// ------------------------------------------------------------------ on this tablet (and demo mode)
+//
+// Mirrors apps-script/Code.gs action for action, so a kiosk kept on the tablet
+// behaves exactly like one connected to Google Sheets.
+
+const STORE = DEMO ? 'kiosk-demo-v1' : 'kiosk-local-v1';
 const DEMO_PIN = '123456';
-const US_PERSON = ['U.S. citizen', 'Lawful permanent resident (green card holder)',
-  'Protected individual (asylee or refugee)'];
+const ATTENTION_DAYS = 14;
+const PASS_MS = 2 * 60 * 60 * 1000;
 
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
-    if (s && s.badges) return s;
+    if (s && s.badges) return { passes: [], ...s };
   } catch { /* fall through to a fresh store */ }
   return {
-    visitors: [], visits: [], faces: [], photos: {},
-    badges: [1, 2, 3, 4, 5].map((n) => ({ badge: `V${n}`, tag: `DEMO000${n}`, status: 'available' })),
+    visitors: [], visits: [], faces: [], passes: [],
+    badges: DEMO ? [1, 2, 3, 4, 5].map((n) => ({ badge: `V${n}`, tag: `DEMO000${n}`, status: 'available' })) : [],
   };
 }
 
 function save(s) {
   try { localStorage.setItem(STORE, JSON.stringify(s)); } catch {
-    // Photos can overflow storage; keep the records and drop stored photos.
-    s.photos = {};
-    try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* demo only */ }
+    // Keep the newest records if storage fills up; photos are elsewhere, so this is rare.
+    s.visits = s.visits.slice(-2000);
+    try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* nothing more to drop */ }
   }
 }
 
-const rid = (p) => p + Math.random().toString(36).slice(2, 10).toUpperCase();
-const now = () => new Date().toISOString();
+/** Forgets every visitor, visit and badge on this tablet (Admin → Settings → Start over). */
+export async function eraseTablet() {
+  try { localStorage.removeItem(STORE); } catch { /* nothing stored */ }
+  await photos.clear();
+}
 
-async function demo(action, a) {
-  await new Promise((r) => setTimeout(r, 250));
-  const s = load();
-  const out = demoAction(s, action, a);
-  save(s);
-  return out;
+let tail = Promise.resolve();
+async function local(action, a) {
+  // One action at a time, like the backend's script lock.
+  const run = tail.then(async () => {
+    await sleep(DEMO ? 250 : 40);
+    const s = load();
+    const out = await localAction(s, action, a || {});
+    save(s);
+    return out;
+  });
+  tail = run.catch(() => {});
+  return run;
+}
+
+const randomId = (p) => p + Math.random().toString(36).slice(2, 10).toUpperCase();
+const now = () => new Date().toISOString();
+const clean = (v, max = 120) => String(v ?? '').replace(/\s+/g, ' ').trim().replace(/^[=+\-@\s]+/, '').slice(0, max);
+const tokens = new Map();
+let pinFails = { n: 0, until: 0 };
+
+function newToken() {
+  const t = randomId('T') + randomId('');
+  tokens.set(t, Date.now() + 15 * 60 * 1000);
+  return t;
+}
+function checkToken(t) {
+  const exp = tokens.get(t);
+  if (!exp || exp < Date.now()) { tokens.delete(t); return false; }
+  tokens.set(t, Date.now() + 15 * 60 * 1000);
+  return true;
+}
+
+function cleanAnswers(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 30)
+    .map((x) => ({ label: clean(x && x.label, 60), value: clean(x && x.value) })).filter((x) => x.label);
+}
+function cleanFlags(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 20)
+    .map((x) => ({ label: clean(x && x.label, 60), answer: clean(x && x.answer), flagLabel: clean(x && x.flagLabel, 40) }))
+    .filter((x) => x.label);
+}
+const reasonList = (flags) => flags.map((f) => `${f.label} = ${f.answer}`).join('; ') || 'screening answer';
+function screeningText(flags, override) {
+  if (override) {
+    const by = clean(override.by) || settings().admin.name || 'Admin';
+    const reason = clean(override.reason);
+    return `Overridden by ${by}${reason ? `: ${reason}` : ''}`;
+  }
+  if (flags.length) return `Flagged: ${[...new Set(flags.map((f) => f.flagLabel || f.label))].join(', ')}`;
+  return 'Clear';
+}
+function kindOf(screening) {
+  const m = /^Flagged: ([^,]+)/.exec(screening || '');
+  if (m) return m[1];
+  if (/^Overridden/.test(screening || '')) return 'Visitor (override)';
+  return 'Visitor';
+}
+const passKey = (first, last) => `${nameKey(first)}|${nameKey(last)}`;
+function takePass(s, first, last) {
+  s.passes = (s.passes || []).filter((p) => p.until > Date.now());
+  const i = s.passes.findIndex((p) => p.key === passKey(first, last));
+  return i < 0 ? null : s.passes.splice(i, 1)[0];
+}
+function attention(s) {
+  const since = Date.now() - ATTENTION_DAYS * 86400000;
+  return s.visits.filter((v) => !v.reviewed && /^(declined|flagged)/i.test(v.screening || '') && new Date(v.signedIn).getTime() >= since);
 }
 
 function signOut(s, visit, by) {
   visit.signedOut = now();
   visit.signedOutBy = by;
   const b = s.badges.find((x) => x.badge === visit.badge);
-  if (b && b.visitId === visit.id) Object.assign(b, { status: 'available', holder: '', visitorId: '', visitId: '', since: '' });
+  if (visit.badge && b && b.visitId === visit.id) Object.assign(b, { status: 'available', holder: '', visitorId: '', visitId: '', since: '' });
 }
 
-function demoAction(s, action, a) {
+function startVisit(s, v, a, badgeNo, replacedBy) {
+  const open = s.visits.find((x) => x.visitorId === v.id && !x.signedOut);
+  if (open) signOut(s, open, replacedBy);
+  const flags = cleanFlags(a.flags);
+  const screening = flags.length || a.override ? screeningText(flags, a.override) : (v.screening || 'Clear');
+  const visit = {
+    id: randomId('S'), visitorId: v.id, first: v.first, last: v.last, company: v.company,
+    visiting: clean(a.visiting) || v.visiting, purpose: clean(a.purpose) || v.purpose,
+    kind: kindOf(screening), badge: badgeNo,
+    method: (clean(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
+    signedIn: now(), screening,
+  };
+  s.visits.push(visit);
+  v.visits = (v.visits || 0) + 1;
+  v.lastVisit = new Date().toLocaleDateString();
+  return visit;
+}
+
+async function localAction(s, action, a) {
+  const st = settings();
   const byTag = (t) => s.badges.find((b) => normalizeTag(b.tag) === normalizeTag(t) && normalizeTag(t));
   switch (action) {
-    case 'ping': return { ok: true };
+    case 'ping': return {
+      ok: true, version: BACKEND_VERSION, setupComplete: st.setupComplete,
+      hasPin: DEMO || !!st.admin.pinHash, attention: attention(s).length,
+    };
+    case 'getSettings': return { ok: true, settings: st, logo: st.org.logo };
     case 'faceIndex': return {
       ok: true,
       people: s.visitors.filter((v) => v.quickEntry).map((v) => ({
@@ -165,12 +310,40 @@ function demoAction(s, action, a) {
       })).filter((p) => p.descriptors.length),
     };
     case 'register': {
-      const v = { id: rid('P'), ...a, registered: now(), visits: 0 };
-      delete v.photo; delete v.descriptor;
+      const v = {
+        id: randomId('P'), first: clean(a.first), last: clean(a.last), company: clean(a.company) || 'N/A',
+        visiting: clean(a.visiting), purpose: clean(a.purpose), agreed: a.agreed === true, quickEntry: a.quickEntry === true,
+        registered: now(), visits: 0, lastVisit: '',
+      };
+      const missing = ['first', 'last'].filter((k) => !v[k]);
+      if (st.form.askHost && !v.visiting) missing.push('visiting');
+      if (st.form.askPurpose && !v.purpose) missing.push('purpose');
+      if (st.form.rules.length && !v.agreed) missing.push('agreed');
+      if (!a.photo && st.photos === 'all') missing.push('photo');
+      if (missing.length) return { ok: false, error: 'missing', fields: missing };
+      v.answers = cleanAnswers(a.answers);
+      const flags = cleanFlags(a.flags);
+      const pass = takePass(s, v.first, v.last);
+      v.screening = screeningText(flags, a.override || pass);
       s.visitors.push(v);
-      s.photos[v.id] = [a.photo];
-      if (a.quickEntry && a.descriptor) s.faces.push({ visitorId: v.id, descriptor: a.descriptor });
-      return { ok: true, visitor: { id: v.id, first: v.first, last: v.last, company: v.company, quickEntry: !!v.quickEntry } };
+      if (a.photo) await photos.put(`visitor:${v.id}`, a.photo);
+      if (v.quickEntry && Array.isArray(a.descriptor)) s.faces.push({ visitorId: v.id, descriptor: a.descriptor });
+      return { ok: true, visitor: { id: v.id, first: v.first, last: v.last, company: v.company, quickEntry: v.quickEntry, kind: kindOf(v.screening) } };
+    }
+    case 'recordDecline': {
+      const first = clean(a.first), last = clean(a.last);
+      if (!first || !last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
+      const pass = takePass(s, first, last);
+      if (pass) return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
+      const id = randomId('D');
+      if (a.photo) await photos.put(`decline:${id}`, a.photo);
+      s.visits.push({
+        id, visitorId: clean(a.visitorId), first, last, company: clean(a.company) || 'N/A',
+        visiting: clean(a.visiting), purpose: clean(a.purpose), kind: 'Declined', badge: '',
+        method: clean(a.method) || 'new visitor', signedIn: now(), signedOut: now(), signedOutBy: 'Declined at the kiosk',
+        screening: `Declined: ${reasonList(cleanFlags(a.reasons))}`, photo: a.photo ? `decline:${id}` : '',
+      });
+      return { ok: true, declineId: id };
     }
     case 'findVisitor': {
       const f = nameKey(a.first), l = nameKey(a.last), c = companyWords(a.company);
@@ -180,6 +353,15 @@ function demoAction(s, action, a) {
         matches: s.visitors.filter((v) => near(nameKey(v.first), f) && near(nameKey(v.last), l)
           && (!c.length || sameCompany(companyWords(v.company), c))).slice(0, 5)
           .map((v) => ({ id: v.id, first: v.first, last: v.last, company: v.company, quickEntry: !!v.quickEntry, lastVisit: v.lastVisit || '' })),
+      };
+    }
+    case 'findOpenVisits': {
+      const f = nameKey(a.first), l = nameKey(a.last);
+      if (!f || !l) return { ok: false, error: 'fullname' };
+      return {
+        ok: true,
+        matches: s.visits.filter((v) => !v.signedOut && near(nameKey(v.first), f) && near(nameKey(v.last), l)).slice(0, 5)
+          .map((v) => ({ visitId: v.id, first: v.first, last: v.last, company: v.company, since: v.signedIn, badge: v.badge || '' })),
       };
     }
     case 'addFaceSample': {
@@ -205,17 +387,14 @@ function demoAction(s, action, a) {
       if (b.status === 'in use') {
         return b.visitorId === v.id ? { ok: true, badge: b.badge, already: true } : { ok: false, error: 'badge_in_use', badge: b.badge };
       }
-      const open = s.visits.find((x) => x.visitorId === v.id && !x.signedOut);
-      if (open) signOut(s, open, `Switched to badge ${b.badge}`);
-      const visit = {
-        id: rid('S'), visitorId: v.id, first: v.first, last: v.last, company: v.company,
-        visiting: v.visiting, kind: US_PERSON.includes(v.citizenship) ? 'Visitor' : 'Foreign national',
-        badge: b.badge, method: a.method, signedIn: now(),
-      };
-      s.visits.push(visit);
+      const visit = startVisit(s, v, a, b.badge, `Switched to badge ${b.badge}`);
       Object.assign(b, { status: 'in use', holder: `${v.first} ${v.last}`, visitorId: v.id, visitId: visit.id, since: visit.signedIn });
-      v.visits += 1; v.lastVisit = new Date().toLocaleDateString();
       return { ok: true, badge: b.badge, visitId: visit.id };
+    }
+    case 'checkIn': {
+      const v = s.visitors.find((x) => x.id === a.visitorId);
+      if (!v) return { ok: false, error: 'not_found' };
+      return { ok: true, visitId: startVisit(s, v, a, '', 'Signed in again').id };
     }
     case 'tapAtWelcome': {
       const b = byTag(a.tag);
@@ -224,29 +403,93 @@ function demoAction(s, action, a) {
       const visit = s.visits.find((x) => x.id === b.visitId);
       const name = b.holder, visitId = b.visitId, badge = b.badge;
       if (visit) signOut(s, visit, 'Badge tap at kiosk');
+      else Object.assign(b, { status: 'available', holder: '', visitorId: '', visitId: '', since: '' });
       return { ok: true, result: 'signed_out', badge, name, first: visit ? visit.first : name, visitId };
+    }
+    case 'kioskSignOut': {
+      const visit = s.visits.find((x) => x.id === a.visitId);
+      if (!visit || visit.signedOut) return { ok: false, error: 'not_found' };
+      signOut(s, visit, 'Signed out at kiosk');
+      return { ok: true, first: visit.first, badge: visit.badge || '', visitId: visit.id };
     }
     case 'undoSignOut': {
       const visit = s.visits.find((x) => x.id === a.visitId);
       if (!visit || !visit.signedOut) return { ok: false, error: 'not_found' };
+      if (Date.now() - new Date(visit.signedOut).getTime() > 90 * 1000) return { ok: false, error: 'too_late' };
+      if (!visit.badge) { visit.signedOut = ''; visit.signedOutBy = ''; return { ok: true }; }
       const b = s.badges.find((x) => x.badge === visit.badge);
       if (!b || b.status === 'in use') return { ok: false, error: 'badge_in_use' };
       visit.signedOut = ''; visit.signedOutBy = '';
       Object.assign(b, { status: 'in use', holder: `${visit.first} ${visit.last}`, visitorId: visit.visitorId, visitId: visit.id, since: visit.signedIn });
       return { ok: true };
     }
-    case 'adminLogin':
-      return a.pin === DEMO_PIN ? { ok: true, token: 'demo', ttl: 900 } : { ok: false, error: 'pin' };
+    case 'adminLogin': {
+      if (pinFails.until > Date.now()) return { ok: false, error: 'locked' };
+      const good = DEMO ? a.pin === DEMO_PIN : !!st.admin.pinHash && (await hashPin(String(a.pin || ''))) === st.admin.pinHash;
+      if (!good) {
+        pinFails.n += 1;
+        if (pinFails.n >= 10) pinFails = { n: 0, until: Date.now() + 10 * 60 * 1000 };
+        return { ok: false, error: DEMO || st.admin.pinHash ? 'pin' : 'no_pin' };
+      }
+      pinFails = { n: 0, until: 0 };
+      return { ok: true, token: newToken(), ttl: 900 };
+    }
+    case 'adminSetPin': {
+      const pin = String(a.pin || '');
+      if (!/^\d{6,8}$/.test(pin)) return { ok: false, error: 'pin_format' };
+      if ((DEMO || st.admin.pinHash) && !checkToken(a.token)) return { ok: false, error: 'admin' };
+      if (!DEMO) saveLocal({ ...st, admin: { ...st.admin, pinHash: await hashPin(pin) } });
+      return { ok: true, token: newToken(), ttl: 900 };
+    }
   }
-  if (a.token !== 'demo') return { ok: false, error: 'admin' };
+  if (!checkToken(a.token)) return { ok: false, error: 'admin' };
   switch (action) {
     case 'adminInside': return {
       ok: true,
       inside: s.visits.filter((v) => !v.signedOut).map((v) => ({
         visitId: v.id, first: v.first, last: v.last, company: v.company, visiting: v.visiting,
-        kind: v.kind, badge: v.badge, since: v.signedIn,
+        kind: v.kind, badge: v.badge || '', since: v.signedIn, screening: v.screening || '',
       })),
     };
+    case 'adminAttention': {
+      const items = attention(s).slice().reverse().slice(0, 50);
+      const out = [];
+      for (const v of items) {
+        const declined = /^declined/i.test(v.screening);
+        out.push({
+          visitId: v.id, first: v.first, last: v.last, company: v.company, visiting: v.visiting, purpose: v.purpose,
+          when: v.signedIn, kind: declined ? 'declined' : 'flagged', label: declined ? 'Declined' : v.kind,
+          screening: v.screening, photo: v.photo ? await photos.get(v.photo) : '', inside: !v.signedOut,
+          allowed: / allowed by /i.test(v.screening),
+        });
+      }
+      return { ok: true, items: out };
+    }
+    case 'adminReview': {
+      const v = s.visits.find((x) => x.id === a.visitId);
+      if (!v) return { ok: false, error: 'not_found' };
+      v.reviewed = `Reviewed by ${st.admin.name || 'Admin'}`;
+      return { ok: true };
+    }
+    case 'adminAllow': {
+      const v = s.visits.find((x) => x.id === a.visitId);
+      if (!v || !/^declined/i.test(v.screening)) return { ok: false, error: 'not_found' };
+      const by = st.admin.name || 'Admin', reason = clean(a.reason);
+      s.passes = (s.passes || []).filter((p) => p.until > Date.now() && p.key !== passKey(v.first, v.last));
+      s.passes.push({ key: passKey(v.first, v.last), by, reason, until: Date.now() + PASS_MS });
+      v.screening += `. Allowed by ${by}${reason ? `: ${reason}` : ''}`;
+      v.reviewed = `Reviewed by ${by}`;
+      return { ok: true, by };
+    }
+    case 'adminSaveSettings': {
+      const next = { ...a.settings, admin: { ...(a.settings || {}).admin, pinHash: st.admin.pinHash } };
+      next.org = { ...(next.org || {}) };
+      if (a.logo === '') next.org.logo = '';
+      else if (typeof a.logo === 'string' && a.logo) next.org.logo = a.logo;
+      else next.org.logo = st.org.logo;
+      if (DEMO) useSettings(next); else saveLocal(next);
+      return { ok: true };
+    }
     case 'adminBadges': return { ok: true, badges: s.badges.map((b) => ({ badge: b.badge, tag: b.tag || '', status: b.status, holder: b.holder || '', since: b.since || '' })) };
     case 'adminSignOut': {
       const v = s.visits.find((x) => x.id === a.visitId);

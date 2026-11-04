@@ -1,6 +1,6 @@
 # Project history
 
-How the Shock Tech visitor sign-in kiosk came together: what was asked for, what was decided, and why. This is the design record. For setup, see the [main README](../README.md) and [android/README.md](../android/README.md).
+How the visitor sign-in kiosk came together, first for Shock Tech and then for any business: what was asked for, what was decided, and why. This is the design record. For setup, see the [main README](../README.md) and [android/README.md](../android/README.md).
 
 ## Starting point
 
@@ -83,15 +83,32 @@ We used it as inspiration, not as a blueprint.
    - scaling for small screens, a lite mode for slow tablets
    - a GitHub Actions APK build
 
+## Making it work for any business
+
+The second brief: *create a setup screen and generalize the whole process so it's not Shock Tech specific.* The ideas that came with it: ask for the company name, create an admin login and PIN, upload a PNG logo with no background, set up the NFC/RFID cards, then connect a spreadsheet; offer local or cloud storage; make it look professional and informative. Then one more: *let visitors be declined.* Ask during onboarding whether the business wants extra questions; if someone answers something like "not a U.S. citizen", take them through the photo, politely decline them, notify the admins and record it, with a way to override.
+
+A separate, simpler configurable kiosk was first built at the repository root. Once the Shock Tech kiosk landed in the same repository, we folded everything into it instead (option 2 of three offered), so there is one app with face recognition, the Android app and the transitions, and the root kiosk was retired.
+
+Decisions:
+
+- **Settings, not code.** Everything Shock Tech-specific became a setting (`web/js/settings.js`): name, tagline, logo, color, host question, visit reasons, rules, screening questions, decline message, photos, quick entry, badges. The whole palette is derived from one brand color, so any color looks deliberate; the default blue reproduces the original palette. No logo gets a generated text logo.
+- **The wizard** (`web/js/setup.js`) runs on first start and reopens single sections from Admin → Settings. It validates as it goes (PIN strength, logo transparency, the Apps Script URL, question rules) and explains problems in plain words. A summary and next steps end it.
+- **Two places for records with the same API.** "On this tablet" is a full local implementation of every backend action (localStorage plus IndexedDB for photos), so the rest of the kiosk doesn't know the difference. "Google Sheets" uses the Apps Script backend, which the wizard hands over (copy or download) from a bundled copy kept in sync by `scripts/sync-backend.mjs`.
+- **No secrets to type.** The first kiosk to connect claims the sheet with a random key (trust on first use); the PIN is set from the kiosk and only its hash is stored. Settings live in a hidden Settings tab, so every tablet on the sheet looks the same. More tablets join with a private link.
+- **Screening questions** have a rule each: an answer can decline (photo, polite message, alert, record) or let in and flag. Questions can be asked once or every visit. Overrides are explicit and attributed: "Staff override" on the decline screen, or "Let in" from Needs attention for two hours. Alerts appear as a dot on the welcome screen, a Needs attention tab, and optional emails with the photo.
+- **Badges optional.** Without badges, visitors are signed in straight away and sign out with "Leaving?".
+- **Shock Tech keeps its kiosk.** `docs/presets/shock-tech.json` restores its look and questions; its sheet, old column names and PIN keep working; `KIOSK_APP_ID` lets its tablets update in place.
+
 ## Where things are
 
 | Thing | Location |
 |---|---|
-| Kiosk | `web/` |
+| Kiosk | `web/` (setup wizard: `web/js/setup.js`, settings: `web/js/settings.js`) |
 | Android app | `android/` (guide: `android/README.md`), built with `scripts/build-android.mjs` |
-| Backend | `apps-script/Code.gs`; tests in `tests/` |
+| Backend | `apps-script/Code.gs`, bundled into the wizard by `scripts/sync-backend.mjs`; tests in `tests/` |
+| Shock Tech preset | `docs/presets/` |
 | Demo videos | `media/` |
-| Ready-to-install demo APK | `downloads/` (demo mode, not connected to a Sheet) |
+| Earlier demo APK | `downloads/` (the Shock Tech-only build, demo mode) |
 | Demo video recording kit | `tools/demo-video/` |
 | Original reference spec | `docs/reference/` |
 
@@ -101,8 +118,7 @@ Not built yet, in rough order of value:
 
 1. Notify the host when their visitor arrives (email or text).
 2. Emergency roll call: everyone in the building, with photos, in one tap.
-3. A foreign-national hold until an approver okays the visit (ITAR).
-4. Expected visitors, pre-registered by staff.
-5. An end-of-day sweep for anyone still signed in, and badges not returned.
-6. Spanish and other languages.
-7. A daily summary email.
+3. Expected visitors, pre-registered by staff.
+4. An end-of-day sweep for anyone still signed in, and badges not returned.
+5. Spanish and other languages.
+6. A daily summary email.

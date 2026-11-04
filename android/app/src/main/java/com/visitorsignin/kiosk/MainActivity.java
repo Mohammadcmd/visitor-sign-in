@@ -1,4 +1,4 @@
-package com.shocktech.visitorkiosk;
+package com.visitorsignin.kiosk;
 
 import android.os.Bundle;
 import android.view.WindowManager;
