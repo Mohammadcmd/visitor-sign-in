@@ -7,9 +7,10 @@ import * as face from './face.js';
 import * as fx from './transitions.js';
 import {
   settings, useSettings, loadCache, applyTheme, logoFor, fill, activeQuestions, everyVisitQuestions,
-  quickEntryOn, splitOption, demoSettings,
+  quickEntryOn, splitOption, demoSettings, hostMatches, timeLabel,
 } from './settings.js';
 import { initSetup, openSetup, setupTap } from './setup.js';
+import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -31,6 +32,7 @@ const state = {
   qa: {},                 // screening answers by question id
   qf: {},                 // follow-up answers by question id
   result: null,           // { declined, reasons, flags } once the questions are answered
+  hostNotified: '',       // the host's name when the backend emailed them
   declineId: '',
   override: null,         // { by, reason } after a staff member let a declined visitor in
   resume: false,
@@ -122,6 +124,7 @@ function errorText(res) {
     case 'badge_retired': return `Badge ${res.badge} is out of service. Please use a different badge.`;
     case 'missing': return 'Some answers are missing. Please go back and check.';
     case 'kiosk_key': case 'not_connected': return 'This kiosk is not connected correctly. Please see the front desk.';
+    case 'unknown_action': return 'This needs the latest Apps Script code. Admin → Settings → Copy the latest Apps Script code, then deploy a new version.';
     default: return 'Something went wrong. Please see the front desk.';
   }
 }
@@ -221,7 +224,7 @@ const ENTER = {
   welcome() {
     face.stopCamera();
     Object.assign(state, {
-      visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null,
+      visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null, hostNotified: '',
       resume: false, photo: null, photoDescriptor: null, sample: null, flow: 'new',
     });
     stopIdle();
@@ -353,6 +356,7 @@ function resetForm() {
   $$('[data-screen="form"] .option').forEach((o) => { o.classList.remove('on'); o.setAttribute('aria-checked', 'false'); });
   $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.remove('on'));
   $$('[data-followup]').forEach((f) => { f.hidden = true; });
+  renderHostSuggest('');
   $('[data-agree]').setAttribute('aria-checked', 'false');
   clearPhoto();
   renderStep({ instant: true });
@@ -487,6 +491,26 @@ document.addEventListener('input', (e) => {
   if (!input.closest('[data-screen="form"]')) return;
   state.answers[input.name] = input.value;
   if (input.name === 'purpose') $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.toggle('on', c.textContent === input.value));
+  if (input.name === 'visiting') renderHostSuggest(input.value);
+});
+
+/** People from the setup's host list whose name matches what the visitor is typing. */
+function renderHostSuggest(typed) {
+  const box = $('[data-host-suggest]');
+  const hits = hostMatches(typed);
+  box.innerHTML = hits.map((h) => `<button type="button" class="chip host-chip" data-host="${esc(h.name)}"><span class="avatar">${esc(initials({ first: h.name.split(/\s+/)[0], last: h.name.split(/\s+/).slice(1).join(' ') }))}</span>${esc(h.name)}</button>`).join('');
+  box.hidden = !hits.length;
+}
+$('[data-host-suggest]').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-host]');
+  if (!chip) return;
+  const input = $('input[name="visiting"]');
+  input.value = chip.dataset.host;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  renderHostSuggest('');
+  // Move on to the next field, as if they'd finished typing.
+  const purpose = $('input[name="purpose"]');
+  if (settings().form.askPurpose && !purpose.value) kb.open(purpose); else kb.close();
 });
 document.addEventListener('paste', (e) => {
   if (!kb.input) return;
@@ -618,9 +642,11 @@ async function afterIdentified(origin) {
   busy(true, 'Signing you in…');
   const res = await api('checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
+    visiting: state.answers.visiting, purpose: state.answers.purpose,
   });
   busy(false);
   if (!res.ok) { toast(errorText(res)); return; }
+  state.hostNotified = res.hostNotified || '';
   showDone('');
 }
 
@@ -631,6 +657,9 @@ function showDone(badge) {
   const b = $('[data-done-badge]');
   b.textContent = badge ? `Badge ${badge}` : '';
   b.hidden = !badge;
+  const host = $('[data-done-host]');
+  host.textContent = state.hostNotified ? `We've let ${state.hostNotified} know you're here.` : '';
+  host.hidden = !state.hostNotified;
   show('done');
   if (state.result?.flags?.length || state.override) setTimeout(refreshAttention, 1500);
 }
@@ -995,6 +1024,7 @@ async function badgeTap(tag) {
     api('assignBadge', {
       visitorId: state.visitor.id, tag, method: state.method,
       flags: state.result?.flags || [], override: state.override || undefined,
+      visiting: state.answers.visiting, purpose: state.answers.purpose,
     }),
     sleep(700), // long enough to see the reader at work
   ]);
@@ -1011,6 +1041,7 @@ async function badgeTap(tag) {
     return;
   }
   // Accepted: the ring completes in green, the check draws and the badge number appears, then the screen flips over.
+  state.hostNotified = res.hostNotified || '';
   $('[data-badge-no]').textContent = res.badge;
   scene.classList.add('success');
   status.textContent = `Badge ${res.badge} is yours!`;
@@ -1128,8 +1159,6 @@ async function adminApi(action, args = {}) {
 
 // Present only inside the Android app (see android/). Kiosk mode keeps the
 // tablet locked to this app; admins can unlock it to reach Android settings.
-const Native = window.Capacitor?.isNativePlatform?.() ? window.Capacitor : null;
-const Kiosk = Native?.registerPlugin?.('Kiosk');
 if (Kiosk) {
   const unlock = $('[data-kiosk-unlock]');
   unlock.hidden = false;
@@ -1142,6 +1171,7 @@ if (Kiosk) {
 function exitAdmin() {
   state.adminToken = null;
   state.adminMode = null;
+  $('[data-overlay="rollcall"]').hidden = true;
   show('welcome');
 }
 $('[data-admin-exit]').addEventListener('click', exitAdmin);
@@ -1152,11 +1182,13 @@ $('[data-attn-refresh]').addEventListener('click', () => adminTab('attention'));
 
 function adminTab(name) {
   state.adminMode = null;
+  kb.close();
   $('[data-admin-banner]').hidden = true;
   $$('[data-admin-tab]').forEach((t) => t.classList.toggle('active', t.dataset.adminTab === name));
   $$('[data-admin-pane]').forEach((p) => { p.hidden = p.dataset.adminPane !== name; });
   if (name === 'inside') loadInside();
   else if (name === 'attention') loadAttention();
+  else if (name === 'history') loadHistory();
   else if (name === 'badges') loadBadges();
   else loadSettingsPane();
 }
@@ -1198,7 +1230,7 @@ async function loadAttention() {
       <div class="who"><strong>${esc(it.first)} ${esc(it.last)}</strong>
         <span class="meta">${esc(it.company)}${it.visiting ? ` · visiting ${esc(it.visiting)}` : ''} · ${esc(timeOf(it.when))}${it.inside ? ' · inside now' : ''}</span>
         <span class="reason">${esc(it.screening)}</span>
-        ${it.photo && !it.photo.startsWith('data:') ? `<span class="meta">Photo saved in Google Drive</span>` : ''}</div>
+        ${it.photo && !it.photo.startsWith('data:') ? `<span class="meta drive-note">Photo saved in Google Drive</span>` : ''}</div>
       <span class="pill ${it.kind}">${esc(it.label)}</span>
       <div class="actions">
         ${it.kind === 'declined' && !it.allowed ? `<button type="button" data-allow="${i}">Let in</button>` : ''}
@@ -1206,6 +1238,18 @@ async function loadAttention() {
       </div>
     </div>`).join('');
   fx.cascade(list, { step: 40 });
+  // Photos kept in Google Drive are fetched one at a time.
+  (async () => {
+    for (const [i, it] of res.items.entries()) {
+      if (!it.photo || it.photo.startsWith('data:')) continue;
+      const p = await api('adminPhoto', { token: state.adminToken, visitId: it.visitId });
+      if (!p.ok) break;
+      const row = $$('.attn-row', list)[i];
+      if (!p.photo || !row || !row.isConnected) continue;
+      row.querySelector('.badge-no')?.replaceWith(Object.assign(document.createElement('img'), { className: 'attn-photo', src: p.photo, alt: '' }));
+      row.querySelector('.drive-note')?.remove();
+    }
+  })();
   $$('[data-review]', list).forEach((b) => b.addEventListener('click', async () => {
     b.disabled = true;
     const r = await adminApi('adminReview', { visitId: res.items[Number(b.dataset.review)].visitId });
@@ -1224,6 +1268,173 @@ async function loadAttention() {
     loadAttention();
   }));
 }
+
+// ------------------------------------------------------------------ admin history and export
+
+const hist = { days: 7, q: '', visits: [] };
+const HISTORY_SHOWN = 300;
+
+async function loadHistory() {
+  const list = $('[data-history-list]');
+  const note = $('[data-history-note]');
+  $$('[data-history-range] button').forEach((b) => {
+    const on = Number(b.dataset.value) === hist.days;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  $('[data-export-visitors]').hidden = MODE === 'cloud';
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const res = await adminApi('adminHistory', { days: hist.days, q: hist.q });
+  if (!res.ok) { list.innerHTML = `<div class="empty">${esc(errorText(res))}</div>`; note.textContent = ''; return; }
+  hist.visits = res.visits;
+  const span = { 1: 'today', 7: 'in the last 7 days', 30: 'in the last 30 days', 365: 'in the last year' }[hist.days];
+  const n = res.visits.length;
+  note.textContent = `${n ? n.toLocaleString() : 'No'} visit${n === 1 ? '' : 's'} ${span}${hist.q ? ` matching "${hist.q}"` : ''}.`
+    + (n > HISTORY_SHOWN ? ` Showing the latest ${HISTORY_SHOWN}; the export has them all.` : '')
+    + (MODE === 'cloud' ? ' Your Google Sheet keeps every visit.' : '');
+  if (!n) { list.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
+  list.innerHTML = res.visits.slice(0, HISTORY_SHOWN).map((v) => {
+    const declined = /^declined/i.test(v.kind || '') || /^declined/i.test(v.screening || '');
+    const special = v.kind && v.kind !== 'Visitor';
+    return `<div class="admin-row history-row">
+      <span class="when"><strong>${esc(dayOf(v.signedIn))}</strong><span>${esc(clockOf(v.signedIn))}${v.signedOut && !declined ? `–${esc(clockOf(v.signedOut))}` : ''}</span></span>
+      <div class="who"><strong>${esc(v.first)} ${esc(v.last)}</strong>
+        <span class="meta">${esc(v.company)}${v.visiting ? ` · visiting ${esc(v.visiting)}` : ''}${v.purpose ? ` · ${esc(v.purpose)}` : ''}</span>
+        ${v.signedOutBy && !declined && v.signedOutBy !== 'Badge tap at kiosk' && v.signedOutBy !== 'Signed out at kiosk' ? `<span class="meta">Signed out: ${esc(v.signedOutBy)}</span>` : ''}
+        ${v.hostNotified ? `<span class="meta">Host emailed: ${esc(v.hostNotified)}</span>` : ''}</div>
+      ${special ? `<span class="pill ${declined ? 'declined' : /override/i.test(v.kind) ? 'override' : 'foreign'}">${esc(v.kind)}</span>` : ''}
+      ${v.badge ? `<span class="badge-no small">${esc(v.badge)}</span>` : ''}
+      ${!v.signedOut ? '<span class="pill in-use">inside</span>' : ''}
+    </div>`;
+  }).join('');
+  fx.cascade(list, { step: 15 });
+}
+
+function dayOf(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86400000);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function clockOf(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+$('[data-history-range]').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  hist.days = Number(b.dataset.value);
+  loadHistory();
+});
+let historySearch = null;
+$('input[name="h-search"]').addEventListener('input', (e) => {
+  clearTimeout(historySearch);
+  historySearch = setTimeout(() => { hist.q = e.target.value.trim(); loadHistory(); }, 450);
+});
+
+async function exportFile(name, text) {
+  try {
+    const where = await saveFile(name, text, 'text/csv');
+    toast(`Saved ${name} to ${where}.`);
+  } catch (err) {
+    console.error(err);
+    toast("Couldn't save the file on this tablet.");
+  }
+}
+
+$('[data-export-visits]').addEventListener('click', () => {
+  const rows = hist.visits.map((v) => [
+    v.signedIn ? new Date(v.signedIn).toLocaleString() : '', v.signedOut ? new Date(v.signedOut).toLocaleString() : '',
+    v.first, v.last, v.company, v.visiting, v.purpose, v.kind, v.badge, v.method, v.signedOutBy, v.screening, v.hostNotified,
+  ]);
+  if (!rows.length) { toast('No visits to export. Pick a longer period.'); return; }
+  exportFile(`visits-${dateStamp()}.csv`, toCsv(['Signed in', 'Signed out', 'First name', 'Last name', 'Company', 'Visiting', 'Purpose', 'Kind', 'Badge', 'How they signed in', 'Signed out by', 'Screening', 'Host notified'], rows));
+});
+
+$('[data-export-visitors]').addEventListener('click', async () => {
+  const res = await adminApi('adminVisitors');
+  if (!res.ok) { toast(errorText(res)); return; }
+  const labels = [...new Set(res.visitors.flatMap((v) => v.answers.map((a) => a.label)))];
+  const rows = res.visitors.map((v) => [
+    v.first, v.last, v.company, v.visiting, v.purpose,
+    ...labels.map((l) => (v.answers.find((a) => a.label === l) || {}).value || ''),
+    v.registered ? new Date(v.registered).toLocaleString() : '', v.lastVisit, v.visits, v.quickEntry ? 'Yes' : 'No', v.screening,
+  ]);
+  if (!rows.length) { toast('No visitors yet.'); return; }
+  exportFile(`visitors-${dateStamp()}.csv`, toCsv(['First name', 'Last name', 'Company', 'Visiting', 'Purpose', ...labels, 'Registered', 'Last visit', 'Visits', 'Quick entry', 'Screening'], rows));
+});
+
+// ------------------------------------------------------------------ emergency roll call
+
+const roll = { items: [], seen: new Set(), run: 0 };
+
+$('[data-rollcall-open]').addEventListener('click', async () => {
+  kb.close();
+  busy(true, 'Loading everyone inside…');
+  const res = await adminApi('adminInside');
+  busy(false);
+  if (!res.ok) { toast(errorText(res)); return; }
+  const run = ++roll.run;
+  roll.items = res.inside.sort((a, b) => `${a.last} ${a.first}`.localeCompare(`${b.last} ${b.first}`));
+  roll.seen = new Set();
+  $('[data-rollcall-time]').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  renderRoll();
+  $('[data-overlay="rollcall"]').hidden = false;
+  // Faces help most here, so fetch each visitor's photo after the list is up.
+  for (const it of roll.items) {
+    if (run !== roll.run || $('[data-overlay="rollcall"]').hidden) return;
+    const p = await api('adminPhoto', { token: state.adminToken, visitId: it.visitId });
+    if (!p.ok) return;
+    if (!p.photo) continue;
+    it.photo = p.photo;
+    const img = $(`[data-roll="${CSS.escape(it.visitId)}"] .roll-face`);
+    if (img) img.outerHTML = `<img class="roll-face" src="${esc(p.photo)}" alt="">`;
+  }
+});
+
+function renderRoll() {
+  const total = roll.items.length;
+  const done = roll.items.filter((it) => roll.seen.has(it.visitId)).length;
+  $('[data-rollcall-done]').textContent = done;
+  $('[data-rollcall-total]').textContent = total;
+  $('[data-rollcall-progress]').style.width = `${total ? (done / total) * 100 : 100}%`;
+  $('[data-overlay="rollcall"]').classList.toggle('all-done', total > 0 && done === total);
+  const order = [...roll.items].sort((a, b) => roll.seen.has(a.visitId) - roll.seen.has(b.visitId));
+  $('[data-rollcall-list]').innerHTML = total ? order.map((it) => {
+    const seen = roll.seen.has(it.visitId);
+    return `<button type="button" class="roll-card${seen ? ' seen' : ''}" data-roll="${esc(it.visitId)}" aria-pressed="${seen}">
+      ${it.photo ? `<img class="roll-face" src="${esc(it.photo)}" alt="">` : `<span class="roll-face">${esc(initials(it))}</span>`}
+      <span class="roll-who"><strong>${esc(it.first)} ${esc(it.last)}</strong>
+        <span>${esc(it.company)}</span>
+        <span>${it.visiting ? `Visiting ${esc(it.visiting)}` : ''}${it.badge ? `${it.visiting ? ' · ' : ''}Badge ${esc(it.badge)}` : ''}</span></span>
+      <span class="roll-check" aria-hidden="true">✓</span>
+    </button>`;
+  }).join('') : '<div class="empty">Nobody is signed in right now.</div>';
+}
+
+$('[data-rollcall-list]').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-roll]');
+  if (!card) return;
+  const id = card.dataset.roll;
+  if (roll.seen.has(id)) roll.seen.delete(id); else roll.seen.add(id);
+  renderRoll();
+});
+$('[data-rollcall-close]').addEventListener('click', () => {
+  if (roll.seen.size < roll.items.length && !$('[data-rollcall-close]').classList.contains('confirm')) {
+    confirmTap($('[data-rollcall-close]'), `Tap again: ${roll.items.length - roll.seen.size} not accounted for`, () => {});
+    return;
+  }
+  const close = $('[data-rollcall-close]');
+  close.disabled = false;
+  close.classList.remove('confirm');
+  close.textContent = 'Close';
+  roll.run++;
+  $('[data-overlay="rollcall"]').hidden = true;
+});
 
 async function loadBadges() {
   const list = $('[data-badge-list]');
@@ -1316,7 +1527,10 @@ const SETTING_ROWS = [
     const qs = activeQuestions(s);
     return qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}: ${qs.map((q) => q.label).join(', ')}` : 'No extra questions';
   }],
-  ['touches', 'Photos, reasons and rules', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules`],
+  ['hosts', 'Hosts', (s) => (s.hosts.length
+    ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
+    : 'Nobody listed: visitors type any name')],
+  ['touches', 'Photos, reasons, rules and end of day', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}` : 'no automatic sign-out'}`],
 ];
 
 function loadSettingsPane() {
@@ -1353,15 +1567,11 @@ function loadSettingsPane() {
 
 $('[data-export-settings]').addEventListener('click', async () => {
   const { exportable } = await import('./settings.js');
-  const blob = new Blob([JSON.stringify(exportable(), null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${(settings().org.name || 'kiosk').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-kiosk-settings.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  toast('Settings exported.');
+  const name = `${(settings().org.name || 'kiosk').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-kiosk-settings.json`;
+  try {
+    const where = await saveFile(name, JSON.stringify(exportable(), null, 2), 'application/json');
+    toast(`Settings saved to ${where} as ${name}.`);
+  } catch { toast("Couldn't save the file on this tablet."); }
 });
 
 $('[data-start-over]').addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again: this tablet starts setup again', async () => {
@@ -1404,7 +1614,7 @@ setInterval(() => {
   if (state.busy || idleCountdown) return;
   const idle = Date.now() - state.lastTouch;
   if (state.screen === 'welcome' || state.screen === 'setup') return;
-  if (state.screen === 'admin') { if (idle > 3 * 60 * 1000) exitAdmin(); return; }
+  if (state.screen === 'admin') { if (idle > 3 * 60 * 1000 && $('[data-overlay="rollcall"]').hidden) exitAdmin(); return; }
   if (state.screen === 'done') { if (idle > 15 * 1000) show('welcome'); return; }
   if (state.screen === 'declined') { if (idle > 45 * 1000 && $('[data-overlay="pin"]').hidden && $('[data-overlay="reason"]').hidden) show('welcome'); return; }
   const limit = state.screen === 'badge' ? CONFIG.BADGE_IDLE_MS : CONFIG.IDLE_MS;
@@ -1427,6 +1637,40 @@ setInterval(() => {
 }, 15 * 1000);
 setInterval(() => { if (state.screen === 'welcome') { refreshFaceIndex(); refreshCloudSettings(); } }, 5 * 60 * 1000);
 setInterval(() => { if (state.screen === 'welcome') refreshAttention(); }, 2 * 60 * 1000);
+
+// ------------------------------------------------------------------ end-of-day sign-out
+
+const EOD_KEY = 'kiosk-eod-last';
+
+/** The latest end-of-day time that has already passed (today's, or yesterday's). */
+function lastCutoff(hhmm, now = new Date()) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const c = new Date(now);
+  c.setHours(h, m, 0, 0);
+  if (c > now) c.setDate(c.getDate() - 1);
+  return c;
+}
+
+let eodRunning = false;
+async function endOfDayCheck() {
+  const s = settings();
+  if (!s.setupComplete || !s.endOfDay || eodRunning) return;
+  const cutoff = lastCutoff(s.endOfDay);
+  let last = 0;
+  try { last = Number(localStorage.getItem(EOD_KEY)) || 0; } catch { /* private mode */ }
+  if (last >= cutoff.getTime()) return;
+  eodRunning = true;
+  try {
+    const res = await api('endOfDay', { before: cutoff.toISOString() });
+    if (res.ok) {
+      try { localStorage.setItem(EOD_KEY, String(cutoff.getTime())); } catch { /* runs again next time */ }
+      if (res.signedOut && state.screen === 'admin') toast(`End of day: ${res.signedOut} visitor${res.signedOut > 1 ? 's' : ''} signed out.`);
+    }
+  } finally {
+    eodRunning = false;
+  }
+}
+setInterval(endOfDayCheck, 60 * 1000);
 
 // Keep the screen awake where the browser allows it.
 let wakeLock = null;
@@ -1488,6 +1732,7 @@ function startKiosk() {
   tickClock();
   refreshFaceIndex();
   refreshAttention();
+  endOfDayCheck();
 }
 
 initSetup({

@@ -28,7 +28,8 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 | **5. Records** | **On this tablet** (private, nothing to set up) or **Google Sheets** (a live sheet your team can open anywhere, photos in your Google Drive, several tablets on one sheet). |
 | **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
 | **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
-| **8. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons and visitor rules. |
+| **8. Hosts** | Optional. The people visitors come to see, with their email addresses. Their names come up as visitors type. With Google Sheets, each host gets an email the moment their visitor signs in ("Your visitor has arrived"), and the visitor is told "We've let Pat know you're here." |
+| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons, visitor rules, and an optional time each day when everyone still signed in is signed out ("End of day"). |
 
 The last screen sums everything up and lists what to do next. Everything can be changed later: **press and hold the logo on the welcome screen for 2.5 seconds**, enter the PIN, then **Settings**.
 
@@ -38,7 +39,7 @@ Setting up another tablet: export the settings from Admin → Settings and impor
 
 1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start.
 2. **New visitor** or **Returning visitor**.
-3. **New visitors** answer one screen at a time: name; company, who they're visiting and why; your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
+3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why; your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
 4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again.
 5. **Finish:** tap any visitor badge on the reader, or (without badges) they're signed in straight away.
 6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds.
@@ -58,7 +59,9 @@ Answers set to **let in and alert** sign the visitor in, mark the visit (for exa
 Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself after 3 minutes without a touch.
 
 - **Inside now:** everyone signed in, with a Sign out button.
+  - **Roll call**, for an evacuation or drill: everyone on site as cards with their photo, company, host and badge. Tap each person as they're accounted for; the ones still missing stay at the top, with a running count.
 - **Needs attention:** declined and flagged visitors from the last two weeks, with photos and answers. **Let in** or **Mark reviewed**.
+- **History:** every visit and decline from today, the last 7 or 30 days, or the last year, with search by name, company or host. **Export visits (CSV)**, and on this tablet also **Export visitors (CSV)** with every screening answer. In the Android app, exports go to the tablet's Downloads folder.
 - **Badges:** add badges by tapping them, link or relink tags, retire or restore badges.
 - **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
 
@@ -71,7 +74,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 | Tab | Contents |
 |---|---|
 | **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, and a link to the visitor's Drive photo folder. |
-| **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, time out and by whom, and review notes. |
+| **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, which host was emailed, time out and by whom (including "End of day"), and review notes. |
 | **Badges** | Badge number, NFC tag, status (available / in use / retired) and holder. |
 | **Face data** *(hidden)* | Face signatures, only for visitors who opted into quick entry. Turning it off deletes their rows. |
 | **Settings** *(hidden)* | The kiosk settings, shared by every tablet on the sheet. The logo is kept in Drive. |
@@ -99,7 +102,7 @@ The kiosk must be served over **HTTPS** for the camera (any static host: GitHub 
 
 - **Demo:** serve `web/` (`npm start`, then open `http://localhost:8080/?demo`). Sample company and data, a panel that simulates badge taps, admin PIN `123456`, nothing saved.
 - `npm test` runs the backend against an in-memory Google Sheet and Drive, and checks the wizard's copy of the backend is current.
-- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, a decline, a staff override, the admin screen, and a second tablet joining by link.
+- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and host emails, a decline, a staff override, the admin screen (history, CSV exports, roll call), end of day, and other tablets joining.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech

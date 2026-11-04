@@ -5,10 +5,11 @@ import { CONFIG, saveConnection } from '../config.js';
 import { call, callBackend, MODE, BACKEND_VERSION } from './api.js';
 import {
   settings, normalize, saveLocal, useSettings, hashPin, QUESTION_TEMPLATES, fromTemplate, normalizeQuestion,
-  DEFAULT_RULES, DEFAULT_DECLINE, logoFor, wordmark, parseImport, fill, uid,
+  DEFAULT_RULES, DEFAULT_DECLINE, logoFor, wordmark, parseImport, fill, uid, timeLabel,
 } from './settings.js';
 import { normalizeTag } from './match.js';
 import * as fx from './transitions.js';
+import { saveFile } from './files.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -29,6 +30,7 @@ const STEPS = {
   storage: { title: 'Records', hint: 'This tablet or Google Sheets' },
   connect: { title: 'Connect Google Sheets', hint: 'About 5 minutes' },
   screening: { title: 'Screening questions', hint: 'Decline or alert' },
+  hosts: { title: 'Hosts', hint: 'Optional' },
   touches: { title: 'Finishing touches', hint: 'Optional' },
   ready: { title: 'Ready', hint: '' },
 };
@@ -41,6 +43,7 @@ const TIPS = {
   storage: ['Both options are free.', 'With Google Sheets, the tablet keeps working through Wi-Fi drops and sends everything when it\'s back.', 'Switching later means starting setup again on this tablet.'],
   connect: ['Records go straight from the tablet to your own sheet. There are no servers in between.', 'The first tablet to connect becomes the owner. To add more, use Admin → Settings → Connect another tablet.', 'Free Google accounts can send about 100 alert emails a day.'],
   screening: ['Questions asked once are saved with the visitor. Mark a question "Every visit" to ask returning visitors again.', 'Declined visitors only see your general message. Admins see the answers.', 'Every override records the admin\'s name and reason.'],
+  hosts: ['You can add people later in the admin screen → Settings → Hosts.', 'Hosts without an email address are still suggested to visitors.', 'A visitor who types a name that isn\'t on the list can still sign in.'],
   touches: ['Quick entry needs a photo of every new visitor.', 'Quick entry is opt-in for each visitor, and they can ask the front desk to delete it.'],
   ready: ['To open the admin screen, press and hold the logo on the welcome screen for 2.5 seconds.'],
 };
@@ -96,7 +99,7 @@ function buildFlow() {
   if (extra?.joining) return ['connect'];
   const f = ['company', 'admin', 'logo', 'badges', 'storage'];
   if (draft.storage === 'cloud') f.push('connect');
-  f.push('screening', 'touches', 'ready');
+  f.push('screening', 'hosts', 'touches', 'ready');
   return f;
 }
 
@@ -133,6 +136,7 @@ function fillForm() {
   renderConnect();
   renderChoice('[data-screening-choice]', extra.screeningOn ? 'yes' : 'no');
   renderBuilder();
+  renderHosts();
   renderTouches();
 }
 
@@ -171,7 +175,7 @@ function render({ instant = false, back = false } = {}) {
   const backBtn = $('[data-setup-back]');
   const skip = $('[data-setup-skip]');
   backBtn.hidden = !!edit || (idx === 0 && !extra.joining) || name === 'ready';
-  skip.hidden = !!edit || !['logo', 'touches'].includes(name);
+  skip.hidden = !!edit || !['logo', 'hosts', 'touches'].includes(name);
   if (edit) next.textContent = 'Save';
   else if (name === 'ready') next.textContent = 'Open the kiosk';
   else if (flow[idx + 1] === 'ready') next.textContent = 'Finish setup';
@@ -211,6 +215,7 @@ function validate(name) {
     extra.badgeWarned = true;
     return error('No badges registered yet. You can add them later in the admin screen → Badges. Tap Continue again to go on without them.');
   }
+  if (name === 'hosts' && val('s-host-name') && !addHost()) return false;
   if (name === 'connect' && !extra.cloud) return error('Connect to your Google Sheet first, or go back and choose "On this tablet".');
   if (name === 'screening' && extra.screeningOn) {
     const qs = draft.screening.questions;
@@ -541,13 +546,10 @@ async function copyScript() {
 
 async function downloadScript(code) {
   const text = code || (await import('./backend-code.js')).BACKEND_CODE;
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  a.download = 'Code.gs';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  try {
+    const where = await saveFile('Code.gs', text);
+    if (!code) ctx.toast(`Code.gs saved to ${where}.`);
+  } catch { ctx.toast("Couldn't save the file on this tablet. Use Copy the script instead."); }
 }
 
 // ------------------------------------------------------------------ screening questions
@@ -603,6 +605,42 @@ function addQuestion(q) {
   renderBuilder();
 }
 
+// ------------------------------------------------------------------ hosts
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function renderHosts() {
+  const list = draft.hosts;
+  $('[data-host-list]').innerHTML = list.map((h, i) => `<li>
+      <span class="avatar">${esc(h.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</span>
+      <span class="who"><strong>${esc(h.name)}</strong><small>${h.email ? esc(h.email) : 'No email: suggested to visitors only'}</small></span>
+      <button type="button" data-unhost="${i}" aria-label="Remove ${esc(h.name)}">×</button></li>`).join('')
+    || '<li class="empty hint small">Nobody added yet. Visitors can still type any name.</li>';
+  const cloud = draft.storage === 'cloud';
+  const t = $('[data-notify-toggle]');
+  t.hidden = !cloud;
+  t.setAttribute('aria-checked', String(!!draft.notifyHosts));
+  $('[data-notify-local]').hidden = cloud;
+}
+
+/** Adds (or updates) the host typed into the two fields. Returns false and shows why when it can't. */
+function addHost() {
+  const name = val('s-host-name').replace(/\s+/g, ' ');
+  const email = val('s-host-email').toLowerCase();
+  if (!name) return error('Enter the host\'s name.', field('s-host-name'));
+  if (email && !EMAIL_RE.test(email)) return error(`Check this email address: ${email}`, field('s-host-email'));
+  const same = draft.hosts.find((h) => h.name.toLowerCase() === name.toLowerCase());
+  if (same) same.email = email || same.email;
+  else draft.hosts.push({ name, email });
+  draft.hosts.sort((a, b) => a.name.localeCompare(b.name));
+  field('s-host-name').value = '';
+  field('s-host-email').value = '';
+  $('[data-setup-error]').textContent = '';
+  ctx.kb.close();
+  renderHosts();
+  return true;
+}
+
 // ------------------------------------------------------------------ finishing touches
 
 function renderTouches() {
@@ -622,6 +660,11 @@ function renderTouches() {
   qe.disabled = draft.photos !== 'all';
   $('[data-purpose-chips]').innerHTML = draft.form.purposes.map((p, i) => `<button type="button" class="chip" data-unpurpose="${i}">${esc(p)}</button>`).join('')
     || '<span class="hint small">No reasons: visitors type their own.</span>';
+  $$('[data-eod-choice] button').forEach((b) => {
+    const on = b.dataset.value === (draft.endOfDay || '');
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
   $('[data-rules-edit]').innerHTML = draft.form.rules.map((r, i) => `<li>${esc(fill(r, draft))}<button type="button" data-unrule="${i}" aria-label="Remove">×</button></li>`).join('')
     || '<li class="hint small">No rules: the rules step is skipped.</li>';
 }
@@ -641,7 +684,10 @@ function renderReady() {
     ['Records', s.storage === 'cloud' ? `Google Sheets: "${esc(extra.cloud?.sheetName || 'your sheet')}"` : 'On this tablet', s.storage === 'cloud' ? 'Photos go to your Google Drive.' : 'Kept privately on this tablet.'],
     ['Screening', qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}` : 'No extra questions',
       qs.length ? [declines && `${declines} can decline`, flags && `${flags} alert staff`, s.screening.alertEmails && `emails to ${s.screening.alertEmails}`].filter(Boolean).join(' · ') : ''],
+    ['Hosts', s.hosts.length ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}` : 'None listed',
+      s.hosts.length ? (s.storage === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
     ['Photos', { all: 'Every new visitor', declined: 'Declined visitors only', off: 'No photos' }[s.photos], s.quickEntry && s.photos === 'all' ? 'Quick entry is on for returning visitors who opt in.' : ''],
+    ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out', ''],
   ];
   $('[data-summary]').innerHTML = rows.map(([k, v, sub]) => `<li><span class="k">${esc(k)}</span><span class="v">${v}${sub ? `<small>${esc(sub)}</small>` : ''}</span></li>`).join('');
   const steps = [
@@ -753,6 +799,8 @@ function wire() {
     const at = flow[idx];
     flow = buildFlow();
     idx = flow.indexOf(at);
+    renderBuilder();
+    renderHosts();
     render({ instant: true });
   });
 
@@ -878,6 +926,21 @@ function wire() {
     renderTouches();
   });
   $('[data-reset-rules]').addEventListener('click', () => { draft.form.rules = [...DEFAULT_RULES]; renderTouches(); });
+  $('[data-eod-choice]').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    draft.endOfDay = b.dataset.value;
+    renderTouches();
+  });
+
+  $('[data-add-host]').addEventListener('click', addHost);
+  $('[data-host-list]').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-unhost]');
+    if (!b) return;
+    draft.hosts.splice(Number(b.dataset.unhost), 1);
+    renderHosts();
+  });
+  $('[data-notify-toggle]').addEventListener('click', () => { draft.notifyHosts = !draft.notifyHosts; renderHosts(); });
 
   // "Already set up on another tablet?" from the first step: connect straight to the sheet.
   const joinLink = document.createElement('p');

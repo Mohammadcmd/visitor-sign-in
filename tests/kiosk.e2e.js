@@ -103,7 +103,10 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
   await set(page, 'input[name="last"]', last);
   await formNext(page);
   await set(page, 'input[name="company"]', 'Globex');
-  await set(page, 'input[name="visiting"]', 'Pat Kim');
+  await type(page, 'input[name="visiting"]', 'pa');
+  await page.waitForSelector('[data-host-suggest] .chip');
+  await page.click('[data-host-suggest] .chip:has-text("Pat Kim")');
+  ok(await page.$eval('input[name="visiting"]', (e) => e.value) === 'Pat Kim', 'host picked from the suggestions');
   await page.click('[data-chips="purpose"] .chip >> nth=0');
   await formNext(page);
   ok((await step(page)).startsWith('q:'), 'screening question follows the visit details');
@@ -187,11 +190,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await next(page);
     await page.waitForTimeout(600);
 
+    // Hosts: names only on this tablet (no emails without Google Sheets).
+    ok(await page.$eval('[data-sstep="hosts"]', (e) => e.classList.contains('active')), 'hosts step after screening');
+    ok(await page.$eval('[data-notify-toggle]', (e) => e.hidden) && await page.$eval('[data-notify-local]', (e) => !e.hidden), 'host emails need Google Sheets');
+    await set(page, 'input[name="s-host-name"]', 'Pat Kim');
+    await page.click('[data-add-host]');
+    await set(page, 'input[name="s-host-name"]', 'Lee Chen');
+    await set(page, 'input[name="s-host-email"]', 'not-an-email');
+    await next(page);
+    ok(/Check this email/.test(await text(page, '[data-setup-error]')), 'bad host email refused');
+    await set(page, 'input[name="s-host-email"]', 'lee@acme.example');
+    await next(page);
+    await page.waitForTimeout(600);
+    ok(await page.$eval('[data-sstep="touches"]', (e) => e.classList.contains('active')), 'a host typed but not added is added on Continue');
+
     await page.click('[data-photos-choice] [data-value="all"]');
+    await page.click('[data-eod-choice] [data-value="23:59"]');
     await snap(page, 'setup-touches');
     await next(page);
     await page.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
     await snap(page, 'setup-ready');
+    const summary = await text(page, '[data-summary]');
+    ok(/2 people/.test(summary) && /11:59/.test(summary), 'summary lists hosts and the end-of-day time');
     await next(page);
     await waitView(page, 'welcome');
     ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics', 'welcome shows the company');
@@ -267,6 +287,38 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(attn.some((r) => /Cara Smith/.test(r) && /Illness/.test(r)), 'declined visitor needs attention');
     ok(await page.$$eval('[data-attn-list] .attn-photo', (l) => l.length) >= 1, 'declined visitor photo shown');
     await snap(page, 'admin-attention');
+    // History and the CSV export.
+    await page.click('[data-admin-tab="history"]');
+    await page.waitForSelector('[data-history-list] .history-row');
+    ok(await page.$$eval('[data-history-list] .history-row', (l) => l.length) === 4, 'history shows every visit and decline');
+    await snap(page, 'admin-history');
+    const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visits]')]);
+    const csvText = fs.readFileSync(await csv.path(), 'utf8');
+    ok(/^\ufeffSigned in,Signed out,First name/.test(csvText) && /Cara,Smith/.test(csvText) && csvText.trim().split('\r\n').length === 5, 'visits CSV');
+    const [people] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visitors]')]);
+    const peopleText = fs.readFileSync(await people.path(), 'utf8');
+    ok(/Citizenship status/.test(peopleText.split('\r\n')[0]) && /Ana,Lopez/.test(peopleText), 'visitors CSV with the screening answers');
+    await type(page, 'input[name="h-search"]', 'ivanov');
+    await page.waitForFunction(() => document.querySelectorAll('[data-history-list] .history-row').length === 2);
+    ok(true, 'history search finds both of his records (the decline and the visit)');
+
+    // Roll call.
+    await page.click('[data-admin-tab="inside"]');
+    await page.waitForSelector('[data-inside-list] .admin-row');
+    await page.click('[data-rollcall-open]');
+    await page.waitForSelector('[data-overlay="rollcall"]:not([hidden]) .roll-card');
+    await page.waitForFunction(() => document.querySelectorAll('.roll-card img.roll-face').length === 2, null, { timeout: 8000 });
+    ok(true, 'roll call shows each visitor with their photo');
+    await page.click('.roll-card >> nth=0');
+    ok(await text(page, '[data-rollcall-done]') === '1', 'one accounted for');
+    await snap(page, 'rollcall');
+    await page.click('[data-rollcall-close]');
+    ok(/not accounted for/.test(await text(page, '[data-rollcall-close]')), 'closing early asks again');
+    await page.click('.roll-card:not(.seen)');
+    ok(await page.$eval('[data-overlay="rollcall"]', (e) => e.classList.contains('all-done')), 'everyone accounted for');
+    await page.click('[data-rollcall-close]');
+    ok(await page.$eval('[data-overlay="rollcall"]', (e) => e.hidden), 'roll call closed');
+
     await page.click('[data-admin-tab="badges"]');
     await page.waitForSelector('[data-badge-list] .admin-row');
     ok(await page.$$eval('[data-badge-list] .admin-row', (l) => l.length) === 2, 'badges from setup listed');
@@ -288,6 +340,9 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.waitForSelector('[data-overlay="signout"]:not([hidden])');
     ok(/Goodbye, Ana/.test(await text(page, '[data-signout-title]')), 'signed out by badge');
     await snap(page, 'signout');
+    // End of day signs out whoever is left (Boris) and frees his badge.
+    const eod = await page.evaluate(async () => (await import('./js/api.js')).call('endOfDay', { before: new Date().toISOString() }));
+    ok(eod.ok && eod.signedOut === 1, `end of day: ${JSON.stringify(eod)}`);
     ok(!page.errors.length, `no page errors: ${page.errors.join(' | ')}`);
     await page.context().close();
 
@@ -322,6 +377,12 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await cloud.click('[data-template="induction"]');
     await set(cloud, 'input[name="s-alerts"]', 'security@initech.example');
     await next(cloud); await cloud.waitForTimeout(600);
+    ok(await cloud.$eval('[data-notify-toggle]', (e) => !e.hidden && e.getAttribute('aria-checked') === 'true'), 'host emails on with Google Sheets');
+    await set(cloud, 'input[name="s-host-name"]', 'Bill Lumbergh');
+    await set(cloud, 'input[name="s-host-email"]', 'bill@initech.example');
+    await cloud.click('[data-add-host]');
+    await snap(cloud, 'cloud-hosts');
+    await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-photos-choice] [data-value="off"]');
     await next(cloud);
     await cloud.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
@@ -341,7 +402,8 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await set(cloud, 'input[name="last"]', 'Waddams');
     await formNext(cloud);
     await set(cloud, 'input[name="company"]', 'Initech');
-    await set(cloud, 'input[name="visiting"]', 'Bill');
+    await type(cloud, 'input[name="visiting"]', 'Bi');
+    await cloud.click('[data-host-suggest] .chip');
     await set(cloud, 'input[name="purpose"]', 'Meeting');
     await formNext(cloud);
     await cloud.click('[data-screen="form"] .step.active .option[data-value="No"]');
@@ -353,7 +415,9 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await snap(cloud, 'cloud-done');
     const visits = backend.sheets.Visits.rows;
     ok(visits.length === 2 && /Needs induction/.test(visits[1].join('|')), 'flagged visit in the sheet');
-    ok(backend.mail.length === 1 && /Milton/.test(backend.mail[0].subject), 'alert email sent');
+    ok(backend.mail.some((m) => m.to === 'security@initech.example' && /Visitor alert: Milton/.test(m.subject)), 'alert email sent');
+    ok(backend.mail.some((m) => m.to === 'bill@initech.example' && /Your visitor has arrived: Milton Waddams/.test(m.subject)), 'host emailed');
+    ok(/let Bill Lumbergh know/.test(await text(cloud, '[data-done-host]')), 'visitor told their host knows');
     await cloud.click('[data-screen="done"] [data-go="welcome"]');
     await waitView(cloud, 'welcome');
 

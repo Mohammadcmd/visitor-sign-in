@@ -61,6 +61,10 @@ To undo this later: **Settings → Apps → Default apps → Home app**.
 
 The setup wizard registers badges as you tap them. To add more later: hold the logo on the welcome screen for 2.5 seconds, enter the admin PIN, go to **Badges → Add badge**, then tap each card on the reader. They're numbered V1, V2, … in order.
 
+## Exports
+
+CSV exports and the settings backup (admin screen → History and Settings) are saved to the tablet's **Downloads** folder. On Android 9 and older they go to the app's own folder instead (`Android/data/<app id>/files/Download`); the kiosk shows the exact path.
+
 ## Admin: getting out of the kiosk
 
 In the admin screen, **Unlock tablet** (tap twice) releases the pin for 5 minutes so you can reach Android settings. The kiosk locks itself again the next time it's opened.

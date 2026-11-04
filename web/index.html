@@ -212,6 +212,22 @@
           </div>
         </div>
 
+        <div class="step" data-sstep="hosts">
+          <h2>Who do visitors come to see?</h2>
+          <p class="hint">Add the people visitors usually ask for. Their names come up as visitors type, so nobody has to guess the spelling. With Google Sheets, each host also gets an email the moment their visitor signs in.</p>
+          <div class="inline-add host-add">
+            <label class="field"><span>Name</span><input readonly inputmode="none" name="s-host-name" data-cap="words" maxlength="60" autocomplete="off" placeholder="e.g. Pat Kim"></label>
+            <label class="field"><span>Email <em>(optional)</em></span><input readonly inputmode="none" name="s-host-email" data-kb="email" maxlength="120" autocomplete="off" placeholder="pat@example.com"></label>
+            <button type="button" class="btn-secondary" data-add-host>Add</button>
+          </div>
+          <ul class="host-list" data-host-list></ul>
+          <button type="button" class="agree toggle" data-notify-toggle role="switch" aria-checked="true">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Email hosts when their visitor arrives</strong><br><span class="small">"Your visitor has arrived: Ana Lopez from Globex", with the time and badge number. Only for hosts with an email address.</span></span>
+          </button>
+          <p class="note" data-notify-local hidden>Records kept on this tablet can't send emails, so hosts aren't notified. Their names are still suggested to visitors. Choose Google Sheets storage to email hosts.</p>
+        </div>
+
         <div class="step" data-sstep="touches">
           <h2>Finishing touches</h2>
           <p class="hint">These have good defaults, so you can skip this step and change them later.</p>
@@ -235,6 +251,16 @@
           <ol class="rules editable" data-rules-edit></ol>
           <div class="inline-add"><label class="field"><span>Add a rule</span><input readonly inputmode="none" name="s-rule" data-cap="sentence" maxlength="300" autocomplete="off"></label><button type="button" class="btn-secondary" data-add-rule>Add</button></div>
           <button type="button" class="btn-ghost" data-reset-rules>Use the standard rules</button>
+          <h3 class="sub">Sign everyone out at the end of the day</h3>
+          <p class="hint small">Visitors who forget to sign out are signed out at this time, and their badges are freed. The visit records say "End of day".</p>
+          <div class="seg seg-wrap" role="radiogroup" data-eod-choice>
+            <button type="button" role="radio" data-value="">Never</button>
+            <button type="button" role="radio" data-value="17:00">5:00 PM</button>
+            <button type="button" role="radio" data-value="18:00">6:00 PM</button>
+            <button type="button" role="radio" data-value="19:00">7:00 PM</button>
+            <button type="button" role="radio" data-value="20:00">8:00 PM</button>
+            <button type="button" role="radio" data-value="23:59">Midnight</button>
+          </div>
         </div>
 
         <div class="step" data-sstep="ready">
@@ -348,6 +374,7 @@
         <label class="field" data-host-field><span data-host-label>Who are you visiting?</span>
           <input readonly inputmode="none" name="visiting" data-cap="words" maxlength="80" autocomplete="off">
           <small data-host-hint></small></label>
+        <div class="chips host-suggest" data-host-suggest></div>
         <label class="field" data-purpose-field><span>Purpose of your visit</span>
           <input readonly inputmode="none" name="purpose" data-cap="sentence" maxlength="120" autocomplete="off"></label>
         <div class="chips" data-chips="purpose"></div>
@@ -542,6 +569,7 @@
       <h2 data-done-title>You're all set!</h2>
       <p class="done-badge" data-done-badge></p>
       <p class="done-text" data-done-text>Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
+      <p class="done-host" data-done-host hidden></p>
       <p class="done-text small" data-done-leave>When you leave, tap your badge on the reader to sign out.</p>
       <button type="button" class="btn-secondary btn-lg" data-go="welcome">Done</button>
     </div>
@@ -566,6 +594,7 @@
       <nav class="tabs" role="tablist">
         <button type="button" class="tab active" data-admin-tab="inside">Inside now</button>
         <button type="button" class="tab" data-admin-tab="attention">Needs attention <span class="tab-count" data-attn-count hidden></span></button>
+        <button type="button" class="tab" data-admin-tab="history">History</button>
         <button type="button" class="tab" data-admin-tab="badges">Badges</button>
         <button type="button" class="tab" data-admin-tab="settings">Settings</button>
       </nav>
@@ -575,7 +604,10 @@
     <div class="admin-body">
       <div class="admin-pane" data-admin-pane="inside">
         <div class="admin-head"><h2>Inside now <span class="count" data-inside-count></span></h2>
-          <button type="button" class="btn-ghost" data-admin-refresh>Refresh</button></div>
+          <div class="head-actions">
+            <button type="button" class="btn-ghost" data-admin-refresh>Refresh</button>
+            <button type="button" class="btn-primary roll-btn" data-rollcall-open>Roll call</button>
+          </div></div>
         <div class="admin-list" data-inside-list></div>
       </div>
       <div class="admin-pane" data-admin-pane="attention" hidden>
@@ -583,6 +615,24 @@
           <button type="button" class="btn-ghost" data-attn-refresh>Refresh</button></div>
         <p class="hint small admin-hint">Visitors who were declined, or let in with an answer that needs a look, in the last two weeks. "Let in" lets a declined visitor sign in normally for the next two hours.</p>
         <div class="admin-list" data-attn-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="history" hidden>
+        <div class="admin-head"><h2>History</h2>
+          <div class="head-actions">
+            <button type="button" class="btn-secondary" data-export-visits>Export visits (CSV)</button>
+            <button type="button" class="btn-secondary" data-export-visitors hidden>Export visitors (CSV)</button>
+          </div></div>
+        <div class="history-tools">
+          <label class="field"><span>Search</span><input readonly inputmode="none" name="h-search" data-cap="words" maxlength="60" autocomplete="off" placeholder="Name, company or host"></label>
+          <div class="seg" role="radiogroup" data-history-range>
+            <button type="button" role="radio" data-value="1">Today</button>
+            <button type="button" role="radio" data-value="7" class="on">7 days</button>
+            <button type="button" role="radio" data-value="30">30 days</button>
+            <button type="button" role="radio" data-value="365">A year</button>
+          </div>
+        </div>
+        <p class="hint small admin-hint" data-history-note></p>
+        <div class="admin-list" data-history-list></div>
       </div>
       <div class="admin-pane" data-admin-pane="badges" hidden>
         <div class="admin-head"><h2>Badges</h2>
@@ -656,6 +706,20 @@
         <button type="button" class="btn-secondary btn-lg" data-reason-cancel>Cancel</button>
         <button type="button" class="btn-primary btn-lg" data-reason-ok>Let them in</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Emergency roll call: everyone on site, tapped off as they're accounted for -->
+  <div class="overlay rollcall" data-overlay="rollcall" hidden>
+    <div class="rollcall-card">
+      <header class="rollcall-head">
+        <div><p class="eyebrow">Roll call · <span data-rollcall-time></span></p>
+          <h2><span data-rollcall-done>0</span> of <span data-rollcall-total>0</span> accounted for</h2></div>
+        <button type="button" class="btn-secondary btn-lg" data-rollcall-close>Close</button>
+      </header>
+      <div class="rollcall-bar"><i data-rollcall-progress></i></div>
+      <p class="hint small">Tap each visitor once you've seen them. Visitors still missing stay at the top.</p>
+      <div class="rollcall-grid" data-rollcall-list></div>
     </div>
   </div>
 

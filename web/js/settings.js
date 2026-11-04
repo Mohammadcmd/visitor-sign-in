@@ -93,7 +93,21 @@ export const DEFAULTS = Object.freeze({
   screening: { questions: [], declineMessage: DEFAULT_DECLINE, alertEmails: '' },
   photos: 'all',               // 'all' | 'declined' (only declined visitors) | 'off'
   quickEntry: true,            // face recognition for returning visitors (opt-in for each visitor)
+  hosts: [],                   // [{ name, email }]: suggested as visitors type, emailed on arrival (Google Sheets)
+  notifyHosts: true,
+  endOfDay: '',                // 'HH:MM': sign everyone still inside out at this time each day; '' = never
 });
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function hostList(v) {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set();
+  return v.map((h) => ({ name: str(h && h.name, 60), email: str(h && h.email, 120).toLowerCase() }))
+    .map((h) => ({ ...h, email: EMAIL_RE.test(h.email) ? h.email : '' }))
+    .filter((h) => h.name && !seen.has(h.name.toLowerCase()) && seen.add(h.name.toLowerCase()))
+    .slice(0, 300);
+}
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const str = (v, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -167,6 +181,9 @@ export function normalize(input) {
     },
     photos: ['all', 'declined', 'off'].includes(s.photos) ? s.photos : d.photos,
     quickEntry: s.quickEntry !== false,
+    hosts: hostList(s.hosts),
+    notifyHosts: s.notifyHosts !== false,
+    endOfDay: /^([01]\d|2[0-3]):[0-5]\d$/.test(s.endOfDay || '') ? s.endOfDay : '',
   };
   // Quick entry recognizes faces, so it needs a photo of every new visitor.
   if (out.photos !== 'all') out.quickEntry = false;
@@ -246,12 +263,30 @@ export function demoSettings() {
     admin: { name: 'Demo admin' },
     badges: true,
     screening: { questions: [us, fromTemplate(QUESTION_TEMPLATES[1])] },
+    hosts: [{ name: 'Lisa Chen' }, { name: 'Pat Kim' }, { name: 'Tom Alvarez' }],
   });
 }
 
 export const activeQuestions = (s = current) => s.screening.questions.filter((q) => q.text);
 export const everyVisitQuestions = (s = current) => activeQuestions(s).filter((q) => q.every);
 export const quickEntryOn = (s = current) => s.quickEntry && s.photos === 'all';
+
+/** Hosts whose name matches what a visitor has typed so far (any word starting with it). */
+export function hostMatches(typed, s = current) {
+  const q = String(typed || '').trim().toLowerCase();
+  if (q.length < 2) return [];
+  return s.hosts.filter((h) => {
+    const name = h.name.toLowerCase();
+    return name !== q && (name.startsWith(q) || name.split(/\s+/).some((w) => w.startsWith(q)));
+  }).slice(0, 6);
+}
+
+/** "18:00" → "6:00 PM" in the tablet's own format. */
+export function timeLabel(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
 
 export async function hashPin(pin) {
   const bytes = new TextEncoder().encode('visitor-kiosk-pin:' + pin);

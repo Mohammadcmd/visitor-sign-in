@@ -19,7 +19,7 @@ const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
   eq(b.handle({ action: 'claim', key: 'short' }).error, 'bad_key');
   const claim = b.handle({ action: 'claim', key: KEY });
   ok(claim.ok && claim.claimed, 'first kiosk claims the sheet');
-  eq(claim.version, 2);
+  eq(claim.version, 3);
   eq(claim.setupComplete, false);
   eq(claim.hasPin, false);
   eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings']);
@@ -248,6 +248,60 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   eq(row['Citizenship status'], 'U.S. citizen');
   ok(!vis.rows[0].includes('Who are you visiting?'), 'no duplicate host column is added');
   eq(call('findVisitor', { first: 'Lee', last: 'Wong' }).matches.length, 1);
+}
+
+// ------------------------------------------------------------------ host emails, history, photos, end of day
+{
+  const h = loadBackend();
+  h.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => h.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  const base = { setupComplete: true, org: { name: 'Initech' }, admin: { name: 'Sam' }, storage: 'cloud', badges: false, photos: 'all' };
+  call('adminSaveSettings', { token: tok, settings: { ...base, notifyHosts: true, hosts: [{ name: 'Bill Lumbergh', email: 'bill@initech.example' }, { name: 'Peter Gibbons', email: '' }] } });
+  const reg = call('register', { first: 'Milton', last: 'Waddams', company: 'Initech', visiting: 'bill lumberg', purpose: 'Stapler', agreed: true, photo });
+  const mails = h.mail.length;
+  const inn = call('checkIn', { visitorId: reg.visitor.id, method: 'new visitor' });
+  eq(inn.hostNotified, 'Bill Lumbergh', 'host found despite case and a typo');
+  eq(h.mail.length, mails + 1);
+  const m = h.mail.at(-1);
+  eq(m.to, 'bill@initech.example');
+  ok(/Your visitor has arrived: Milton Waddams/.test(m.subject) && /Purpose: Stapler/.test(m.body), 'host email text');
+  ok(/^Bill Lumbergh \(/.test(h.sheets.Visits.objects().at(-1)['Host notified']), 'host email noted on the visit');
+
+  const reg2 = call('register', { first: 'Joanna', last: 'Smith', company: 'Chotchkies', visiting: 'Peter Gibbons', purpose: 'Lunch', agreed: true, photo });
+  eq(call('checkIn', { visitorId: reg2.visitor.id }).hostNotified, '', 'hosts without an email are not notified');
+  call('adminSaveSettings', { token: tok, settings: { ...base, notifyHosts: false, hosts: [{ name: 'Bill Lumbergh', email: 'bill@initech.example' }] } });
+  const before = h.mail.length;
+  call('checkIn', { visitorId: reg.visitor.id });
+  eq(h.mail.length, before, 'host emails can be turned off');
+
+  // History, newest first, with a search.
+  const hist = call('adminHistory', { token: tok, days: 7 });
+  ok(hist.ok && hist.visits.length === 3, JSON.stringify(hist).slice(0, 200));
+  eq(hist.visits[0].first, 'Milton');
+  ok(hist.visits.some((v) => v.signedOutBy === 'Signed in again'), 'replaced visit shows how it ended');
+  eq(call('adminHistory', { token: tok, q: 'chotch' }).visits.map((v) => v.last), ['Smith'], 'history search by company');
+  eq(call('adminHistory', { q: 'x' }).error, 'admin', 'history needs an admin');
+
+  // Photos for the roll call: the visitor's own photo, from their Drive folder.
+  const pic = call('adminPhoto', { token: tok, visitId: hist.visits[0].visitId });
+  eq(pic.photo, photo);
+  const dec = call('recordDecline', { first: 'Bob', last: 'Slydell', company: 'Consulting', photo, reasons: [{ label: 'Illness', answer: 'Yes' }] });
+  eq(call('adminPhoto', { token: tok, visitId: dec.declineId }).photo, photo, 'declined visitor photo');
+  eq(call('adminPhoto', { token: tok, visitId: 'nope' }).error, 'not_found');
+
+  // End of day: signs out visits from before the cutoff only.
+  const visits = h.sheets.Visits;
+  const head = visits.rows[0];
+  const open = visits.rows.slice(1).filter((r) => r[head.indexOf('Visit ID')] && !r[head.indexOf('Signed out')]);
+  eq(open.length, 2);
+  open[0][head.indexOf('Signed in')] = new Date(Date.now() - 3 * 3600 * 1000);
+  const cutoff = new Date(Date.now() - 3600 * 1000).toISOString();
+  eq(call('endOfDay', { before: cutoff }).signedOut, 1, 'only visits before the cutoff');
+  eq(call('endOfDay', { before: cutoff }).signedOut, 0, 'running it again changes nothing');
+  ok(visits.objects().some((r) => r['Signed out by'] === 'End of day'));
+  eq(call('endOfDay', { before: new Date(Date.now() + 86400000).toISOString() }).signedOut, 1, 'a future cutoff means now');
+  eq(call('adminInside', { token: tok }).inside.length, 0);
 }
 
 // ------------------------------------------------------------------ retries

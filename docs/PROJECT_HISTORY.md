@@ -99,6 +99,16 @@ Decisions:
 - **Badges optional.** Without badges, visitors are signed in straight away and sign out with "Leaving?".
 - **Shock Tech keeps its kiosk.** `docs/presets/shock-tech.json` restores its look and questions; its sheet, old column names and PIN keep working; `KIOSK_APP_ID` lets its tablets update in place.
 
+## Hosts, history, roll call and end of day
+
+The next round, picked from the open ideas plus a gap: a kiosk keeping records on the tablet had no way to get them out.
+
+- **Hosts.** An optional wizard step lists the people visitors come to see. Names are suggested as visitors type. With Google Sheets the backend emails the host when their visitor signs in (matching names with the same forgiving rules as the visitor search), notes it on the visit, and the visitor sees "We've let Pat know you're here." Declined visitors never reach the host; staff alerts handle them.
+- **History and CSV export.** A History tab with ranges and search. Exports are CSV with formula-like cells defused. Because a web download does nothing inside the Android app, the app's Kiosk plugin gained `saveFile`, which writes to Downloads.
+- **Roll call.** A full-screen list of everyone inside, with photos fetched one at a time (`adminPhoto`) so the list appears immediately even when photos live in Drive. The same action now shows Drive photos in Needs attention.
+- **End of day.** A daily time when everyone still signed in is signed out. Each kiosk runs it once per cutoff (catching up after being switched off), and the backend action only touches visits from before the cutoff, so two tablets running it is harmless.
+- Backend version 3: kiosks tell admins to update older scripts, and actions an older script doesn't know explain how to update.
+
 ## Where things are
 
 | Thing | Location |
@@ -116,9 +126,8 @@ Decisions:
 
 Not built yet, in rough order of value:
 
-1. Notify the host when their visitor arrives (email or text).
-2. Emergency roll call: everyone in the building, with photos, in one tap.
-3. Expected visitors, pre-registered by staff.
-4. An end-of-day sweep for anyone still signed in, and badges not returned.
-5. Spanish and other languages.
-6. A daily summary email.
+1. Expected visitors, pre-registered by staff.
+2. Text-message host notifications, and notifying hosts in on-tablet mode.
+3. Badges not returned at the end of the day.
+4. Spanish and other languages.
+5. A daily summary email.

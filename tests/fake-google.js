@@ -56,12 +56,14 @@ function fakeGoogle(initialProps = {}) {
   };
 
   function makeFile(blob, folderName) {
-    const id = 'file' + (++fileSeq);
+    const id = '1fakeDriveFile' + String(++fileSeq).padStart(6, '0');
+    const created = new Date(Date.now() + Object.keys(files).length);
     const file = {
       blob, folderName, trashed: false,
       getId: () => id,
       getUrl: () => `https://drive.google.com/file/d/${id}/view`,
       getBlob: () => ({ getContentType: () => blob.type, getBytes: () => blob.bytes }),
+      getDateCreated: () => created,
       setTrashed(t) { file.trashed = t; return file; },
     };
     files[id] = file;
@@ -78,10 +80,13 @@ function fakeGoogle(initialProps = {}) {
       createFolder(n) { const c = folder(n); children.push(c); return c; },
       getFoldersByName(n) { const list = children.filter((c) => c.name === n); return { hasNext: () => list.length > 0, next: () => list.shift() }; },
       createFile(blob) { const file = makeFile(blob, name); f.files.push(file); return file; },
+      getFiles() { const list = f.files.filter((x) => !x.trashed); return { hasNext: () => list.length > 0, next: () => list.shift() }; },
     };
+    allFolders.push(f);
     return f;
   }
   const rootFolders = [];
+  const allFolders = [];
 
   const globals = {
     console,
@@ -95,7 +100,7 @@ function fakeGoogle(initialProps = {}) {
     },
     DriveApp: {
       getFolderById: (id) => {
-        const hit = rootFolders.find((x) => x.getId() === id);
+        const hit = allFolders.find((x) => x.getId() === id);
         if (!hit) throw new Error('No folder ' + id);
         return hit;
       },

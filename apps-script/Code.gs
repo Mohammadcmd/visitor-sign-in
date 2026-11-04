@@ -21,7 +21,7 @@
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
 
-var BACKEND_VERSION = 2;
+var BACKEND_VERSION = 3;
 
 var TABS = {
   visitors: 'Visitors',
@@ -40,7 +40,7 @@ var HEADERS = {
   Visits: [
     'Signed in', 'First Name', 'Last Name', 'Company', 'Visiting', 'Purpose',
     'Kind', 'Badge', 'How they signed in', 'Signed out', 'Signed out by',
-    'Screening', 'Reviewed', 'Photo', 'Visitor ID', 'Visit ID'
+    'Screening', 'Reviewed', 'Photo', 'Host notified', 'Visitor ID', 'Visit ID'
   ],
   Badges: ['Badge', 'NFC tag', 'Status', 'Holder', 'Visitor ID', 'Visit ID', 'Since', 'Note'],
   'Face data': ['Visitor ID', 'Descriptor', 'Captured', 'Source', 'Photo file ID'],
@@ -113,7 +113,7 @@ function doPost(e) {
 
 // Calls that change the sheet. The kiosk retries these after a network hiccup
 // with the same request id, so the first result is remembered and replayed.
-var WRITE_ACTIONS = ['register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
+var WRITE_ACTIONS = ['endOfDay', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
   'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
   'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow'];
 var REPLAY_TTL = 30 * 60;  // seconds
@@ -153,6 +153,7 @@ function dispatch_(req) {
     case 'tapAtWelcome': return withLock_(function () { return tapAtWelcome_(a); });
     case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
+    case 'endOfDay': return withLock_(function () { return endOfDay_(a); });
     case 'adminLogin': return adminLogin_(a);
     case 'adminSetPin': return withLock_(function () { return adminSetPin_(a); });
   }
@@ -163,6 +164,8 @@ function dispatch_(req) {
     case 'adminInside': return adminInside_();
     case 'adminBadges': return adminBadges_();
     case 'adminAttention': return adminAttention_();
+    case 'adminHistory': return adminHistory_(a);
+    case 'adminPhoto': return adminPhoto_(a);
     case 'adminSignOut': return withLock_(function () { return adminSignOut_(a); });
     case 'adminAddBadge': return withLock_(function () { return adminAddBadge_(a); });
     case 'adminLinkTag': return withLock_(function () { return adminLinkTag_(a); });
@@ -432,29 +435,37 @@ function assignBadge_(a) {
     if (b['Visitor ID'] === a.visitorId) return { ok: true, badge: b['Badge'], already: true };
     return { ok: false, error: 'badge_in_use', badge: b['Badge'] };
   }
-  var visitId = startVisit_(person, a, b['Badge'], 'Switched to badge ' + b['Badge']);
+  var started = startVisit_(person, a, b['Badge'], 'Switched to badge ' + b['Badge']);
+  var visitId = started.visitId;
   var p = person.values, now = new Date();
   setCells_(TABS.badges, badge.row, {
     'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
     'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now
   });
-  return { ok: true, badge: b['Badge'], visitId: visitId };
+  return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified };
 }
 
 /** Signs a visitor in without a badge (kiosks set up without visitor badges). */
 function checkIn_(a) {
   var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
   if (!person) return { ok: false, error: 'not_found' };
-  return { ok: true, visitId: startVisit_(person, a, '', 'Signed in again') };
+  var started = startVisit_(person, a, '', 'Signed in again');
+  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified };
 }
 
-/** Creates the Visits row. One open visit per person: a new one replaces the old. */
+/**
+ * Creates the Visits row. One open visit per person: a new one replaces the old.
+ * Returns { visitId, hostNotified } (the host's name when their arrival email went out).
+ */
 function startVisit_(person, a, badgeNo, replacedBy) {
   var open = openVisitFor_(a.visitorId);
   if (open) signOutVisit_(open, replacedBy);
   var p = person.values, now = new Date(), visitId = 'S' + randomCode_(8);
   var flags = cleanFlags_(a.flags);
   var screening = flags.length || a.override ? screeningText_(flags, a.override) : String(p['Screening'] || 'Clear');
+  var visiting = clean_(a.visiting) || p['Who are you visiting?'];
+  var host = notifyHost_(visiting, { first: p['First Name'], last: p['Last Name'], company: p['Company'], purpose: clean_(a.purpose) || p['Purpose of your visit'] }, badgeNo, now);
+  if (host) ensureColumn_(TABS.visits, 'Host notified', 'Visitor ID');
   appendRow_(TABS.visits, {
     'Signed in': now, 'First Name': p['First Name'], 'Last Name': p['Last Name'],
     'Company': p['Company'],
@@ -463,13 +474,34 @@ function startVisit_(person, a, badgeNo, replacedBy) {
     'Kind': kindOf_(screening), 'Badge': badgeNo,
     'How they signed in': (clean_(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
     'Screening': screening,
+    'Host notified': host ? host + ' (' + stamp_(now) + ')' : '',
     'Visitor ID': a.visitorId, 'Visit ID': visitId
   });
   setCells_(TABS.visitors, person.row, {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
   });
-  if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: clean_(a.visiting) || p['Who are you visiting?'] }, flags, '');
-  return visitId;
+  if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
+  return { visitId: visitId, hostNotified: host };
+}
+
+/**
+ * Signs out everyone still signed in from before args.before (an ISO time; at
+ * most now). Kiosks call it at the end-of-day time chosen in setup. Running it
+ * twice, or from two tablets, does no harm.
+ */
+function endOfDay_(a) {
+  var now = new Date(), cutoff = new Date(a.before);
+  if (isNaN(cutoff.getTime()) || cutoff > now) cutoff = now;
+  var rows = readTab_(TABS.visits), done = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r['Visit ID'] || r['Signed out']) continue;
+    var t = new Date(r['Signed in']);
+    if (isNaN(t.getTime()) || t >= cutoff) continue;
+    signOutVisit_({ row: i + 2, values: r }, 'End of day');
+    done++;
+  }
+  return { ok: true, signedOut: done };
 }
 
 /** A badge tapped while the welcome screen shows: sign the holder out. */
@@ -663,6 +695,63 @@ function adminAttention_() {
   return { ok: true, items: items };
 }
 
+/** Visits from the last args.days days (default 30), newest first, optionally filtered by args.q. */
+function adminHistory_(a) {
+  var days = Math.max(1, Math.min(3650, Number(a.days) || 30));
+  var since = new Date().getTime() - days * 86400000;
+  var q = nameKey_(a.q);
+  var out = [];
+  var rows = readTab_(TABS.visits);
+  for (var i = rows.length - 1; i >= 0 && out.length < 2000; i--) {
+    var r = rows[i];
+    if (!r['Visit ID']) continue;
+    var t = new Date(r['Signed in']).getTime();
+    if (isNaN(t) || t < since) continue;
+    if (q && nameKey_([r['First Name'], r['Last Name'], r['Company'], r['Visiting']].join(' ')).indexOf(q) < 0) continue;
+    out.push({
+      visitId: r['Visit ID'], signedIn: iso_(r['Signed in']), signedOut: iso_(r['Signed out']),
+      first: r['First Name'], last: r['Last Name'], company: r['Company'], visiting: r['Visiting'],
+      purpose: r['Purpose'], kind: r['Kind'], badge: String(r['Badge'] || ''),
+      method: r['How they signed in'], signedOutBy: r['Signed out by'], screening: String(r['Screening'] || ''),
+      hostNotified: String(r['Host notified'] || '')
+    });
+  }
+  return { ok: true, visits: out, sheetUrl: book_().getUrl() };
+}
+
+/** One visit's photo as a data URL: the declined visitor's photo, or the visitor's latest photo. */
+function adminPhoto_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit) return { ok: false, error: 'not_found' };
+  var file = null;
+  try {
+    var id = driveId_(visit.values['Photo']);
+    if (id) file = DriveApp.getFileById(id);
+    if (!file) {
+      var person = findRow_(TABS.visitors, 'Visitor ID', visit.values['Visitor ID']);
+      var folderId = person && driveId_(person.values['Photo folder']);
+      if (folderId) {
+        var it = DriveApp.getFolderById(folderId).getFiles(), newest = 0;
+        while (it.hasNext()) {
+          var f = it.next(), when = f.getDateCreated ? f.getDateCreated().getTime() : 0;
+          if (!file || when >= newest) { file = f; newest = when; }
+        }
+      }
+    }
+  } catch (err) {
+    file = null;
+  }
+  if (!file) return { ok: true, photo: '' };
+  var blob = file.getBlob();
+  return { ok: true, photo: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()) };
+}
+
+/** The file or folder id in a Drive link. */
+function driveId_(url) {
+  var m = /\/(?:d|folders)\/([\w-]{10,})/.exec(String(url || '')) || /[?&]id=([\w-]{10,})/.exec(String(url || ''));
+  return m ? m[1] : '';
+}
+
 function adminReview_(a) {
   var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
   if (!visit) return { ok: false, error: 'not_found' };
@@ -852,6 +941,50 @@ function alert_(kind, v, flags, photo) {
     console.warn('Alert email not sent: ' + err);
     return false;
   }
+}
+
+/**
+ * Emails the person a visitor came to see, when the kiosk settings list them
+ * with an email address and host emails are turned on. Returns the host's name, or ''.
+ */
+function notifyHost_(visiting, v, badgeNo, when) {
+  var s = readSettings_() || {};
+  if (!s.notifyHosts || !Array.isArray(s.hosts)) return '';
+  var host = matchHost_(s.hosts, visiting);
+  if (!host) return '';
+  var org = (s.org && clean_(s.org.name)) || 'the';
+  var name = v.first + ' ' + v.last;
+  var lines = [
+    'Hi ' + host.name.split(' ')[0] + ',',
+    '',
+    name + (v.company && v.company !== 'N/A' ? ' from ' + v.company : '') + ' just signed in at the ' + org + ' front desk to see you.',
+    ''
+  ];
+  if (v.purpose) lines.push('Purpose: ' + v.purpose);
+  if (badgeNo) lines.push('Visitor badge: ' + badgeNo);
+  lines.push('Time: ' + stamp_(when));
+  lines.push('');
+  lines.push('Please come and meet them at the front desk.');
+  try {
+    MailApp.sendEmail({ to: host.email, name: org + ' visitor kiosk', subject: 'Your visitor has arrived: ' + name, body: lines.join('\n') });
+    return host.name;
+  } catch (err) {
+    console.warn('Host email not sent: ' + err);
+    return '';
+  }
+}
+
+/** The host whose name matches what the visitor typed (same name rules as visitor search). */
+function matchHost_(hosts, visiting) {
+  var want = nameKey_(visiting);
+  if (!want) return null;
+  var best = null;
+  hosts.forEach(function (h) {
+    if (best || !h || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(h.email || ''))) return;
+    var key = nameKey_(h.name);
+    if (key && (key === want || near_(key, want))) best = { name: clean_(h.name), email: String(h.email).trim() };
+  });
+  return best;
 }
 
 // ---------------------------------------------------------------- matching helpers (same rules as the kiosk)

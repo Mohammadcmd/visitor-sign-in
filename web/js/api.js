@@ -8,7 +8,7 @@ import { settings, saveLocal, hashPin, useSettings } from './settings.js';
 export const MODE = CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
 export const DEMO = MODE === 'demo';
 export const ON_TABLET = MODE !== 'cloud';
-export const BACKEND_VERSION = 2;
+export const BACKEND_VERSION = 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];
@@ -396,6 +396,17 @@ async function localAction(s, action, a) {
       if (!v) return { ok: false, error: 'not_found' };
       return { ok: true, visitId: startVisit(s, v, a, '', 'Signed in again').id };
     }
+    case 'endOfDay': {
+      let cutoff = new Date(a.before);
+      if (Number.isNaN(cutoff.getTime()) || cutoff > new Date()) cutoff = new Date();
+      let done = 0;
+      for (const v of s.visits) {
+        if (v.signedOut || new Date(v.signedIn) >= cutoff) continue;
+        signOut(s, v, 'End of day');
+        done++;
+      }
+      return { ok: true, signedOut: done };
+    }
     case 'tapAtWelcome': {
       const b = byTag(a.tag);
       if (!b) return { ok: true, result: 'unknown' };
@@ -448,7 +459,7 @@ async function localAction(s, action, a) {
       ok: true,
       inside: s.visits.filter((v) => !v.signedOut).map((v) => ({
         visitId: v.id, first: v.first, last: v.last, company: v.company, visiting: v.visiting,
-        kind: v.kind, badge: v.badge || '', since: v.signedIn, screening: v.screening || '',
+        kind: v.kind, badge: v.badge || '', since: v.signedIn, screening: v.screening || '', purpose: v.purpose,
       })),
     };
     case 'adminAttention': {
@@ -464,6 +475,36 @@ async function localAction(s, action, a) {
         });
       }
       return { ok: true, items: out };
+    }
+    case 'adminHistory': {
+      const days = Math.max(1, Math.min(3650, Number(a.days) || 30));
+      const since = Date.now() - days * 86400000;
+      const q = nameKey(a.q);
+      const out = [];
+      for (let i = s.visits.length - 1; i >= 0 && out.length < 2000; i--) {
+        const v = s.visits[i];
+        if (new Date(v.signedIn).getTime() < since) continue;
+        if (q && !nameKey([v.first, v.last, v.company, v.visiting].join(' ')).includes(q)) continue;
+        out.push({
+          visitId: v.id, signedIn: v.signedIn, signedOut: v.signedOut || '', first: v.first, last: v.last,
+          company: v.company, visiting: v.visiting, purpose: v.purpose, kind: v.kind, badge: v.badge || '',
+          method: v.method, signedOutBy: v.signedOutBy || '', screening: v.screening || '', hostNotified: '',
+        });
+      }
+      return { ok: true, visits: out };
+    }
+    case 'adminVisitors': return {
+      ok: true,
+      visitors: s.visitors.map((v) => ({
+        first: v.first, last: v.last, company: v.company, visiting: v.visiting, purpose: v.purpose,
+        answers: v.answers || [], quickEntry: !!v.quickEntry, registered: v.registered, lastVisit: v.lastVisit || '',
+        visits: v.visits || 0, screening: v.screening || '',
+      })),
+    };
+    case 'adminPhoto': {
+      const v = s.visits.find((x) => x.id === a.visitId);
+      if (!v) return { ok: false, error: 'not_found' };
+      return { ok: true, photo: (v.photo && await photos.get(v.photo)) || await photos.get(`visitor:${v.visitorId}`) };
     }
     case 'adminReview': {
       const v = s.visits.find((x) => x.id === a.visitId);
