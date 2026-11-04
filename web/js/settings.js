@@ -97,6 +97,7 @@ export const DEFAULTS = Object.freeze({
   notifyHosts: true,
   endOfDay: '',                // 'HH:MM': sign everyone still inside out at this time each day; '' = never
   dailySummary: false,         // Google Sheets: email the alert addresses a summary at the end-of-day time
+  retentionDays: 0,            // delete visits, visitors and photos older than this (0 = keep everything)
   languages: ['en'],           // languages visitors can choose; English is always first
   translations: {},            // { es: { "English text": "texto" } } for the business's own text
 });
@@ -209,6 +210,7 @@ export function normalize(input) {
     notifyHosts: s.notifyHosts !== false,
     endOfDay: /^([01]\d|2[0-3]):[0-5]\d$/.test(s.endOfDay || '') ? s.endOfDay : '',
     dailySummary: s.dailySummary === true,
+    retentionDays: [30, 90, 180, 365, 730].includes(Number(s.retentionDays)) ? Number(s.retentionDays) : 0,
     languages: ['en', ...(Array.isArray(s.languages) ? VISITOR_LANGS.slice(1).filter((c) => s.languages.includes(c)) : [])],
     translations: translationMap(s.translations),
   };

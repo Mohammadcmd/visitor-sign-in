@@ -36,6 +36,7 @@ function fakeGoogle(initialProps = {}) {
       },
       appendRow(row) { rows.push(row.slice()); },
       deleteRow(r) { rows.splice(r - 1, 1); },
+      deleteRows(r, n) { rows.splice(r - 1, n); },
       insertColumnBefore(c) { rows.forEach((row) => { while (row.length < c - 1) row.push(''); row.splice(c - 1, 0, ''); }); },
       setFrozenRows() {},
       hideSheet() { sh.hidden = true; },
@@ -81,6 +82,8 @@ function fakeGoogle(initialProps = {}) {
       getFoldersByName(n) { const list = children.filter((c) => c.name === n); return { hasNext: () => list.length > 0, next: () => list.shift() }; },
       createFile(blob) { const file = makeFile(blob, name); f.files.push(file); return file; },
       getFiles() { const list = f.files.filter((x) => !x.trashed); return { hasNext: () => list.length > 0, next: () => list.shift() }; },
+      trashed: false,
+      setTrashed(t) { f.trashed = t; return f; },
     };
     allFolders.push(f);
     return f;

@@ -1,0 +1,25 @@
+# Changelog
+
+## 1.0.0 — first release for any business
+
+The kiosk that began as Shock Tech's own visitor sign-in, made configurable for any business.
+
+**Setting up**
+- A setup wizard on first start: company name, tagline and brand color; admin name and PIN; logo (PNG, transparency checked); NFC/RFID visitor badges or none; records on the tablet or in Google Sheets (guided connection); screening questions; hosts; photos, quick entry, visit reasons and rules; end-of-day sign-out, a daily summary email, record retention and languages.
+- Every part can be changed later in Admin → Settings. Settings export and import, and a ready-made Shock Tech preset (`docs/presets/shock-tech.json`).
+
+**Visitors**
+- New and returning visitors, face-recognition quick entry (opt-in), badge tap or on-screen sign-in and sign-out.
+- Screening questions that politely decline (with a photo and a staff alert) or let a visitor in and flag them; staff override on the spot or from the admin screen.
+- Host names suggested as visitors type, and (Google Sheets) an email to the host on arrival.
+- Expected visitors are greeted and their details filled in.
+- Spanish for every visitor screen, with translations for the business's own text.
+
+**Staff**
+- Admin screen: Inside now with an emergency roll call, Expected, Needs attention, History with CSV export, Badges (including badges not returned), Settings with Diagnostics.
+- Google Sheets backend (`apps-script/Code.gs`, version 4): tabs for visitors, visits, badges, expected visitors, face data and settings; photos in Drive; alert, host and daily summary emails.
+- Records are deleted automatically after the period chosen in setup.
+
+**Running it**
+- Android app (kiosk mode, starts on boot), or any browser over HTTPS, with offline start-up.
+- GitHub Actions: tests on every push, an APK on every change, a GitHub Release with the APK for every `v*` tag, and GitHub Pages hosting for the browser kiosk.

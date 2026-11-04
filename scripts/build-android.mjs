@@ -18,7 +18,7 @@
 //
 // Output: dist/visitor-sign-in.apk
 import { execSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,6 +49,12 @@ console.log(api ? 'Connection to the Google Sheet built in.' : 'No connection bu
 const signed = Boolean(process.env.KIOSK_KEYSTORE_BASE64);
 const ks = join(android, 'release.keystore');
 const env = { ...process.env };
+// The app's version comes from package.json: 1.2.3 becomes version code 10203.
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+const [major, minor, patch] = version.split('.').map((n) => parseInt(n, 10) || 0);
+env.KIOSK_VERSION_NAME = version;
+env.KIOSK_VERSION_CODE = String(major * 10000 + minor * 100 + patch);
+console.log(`Version ${version} (code ${env.KIOSK_VERSION_CODE}).`);
 if (signed) {
   writeFileSync(ks, Buffer.from(process.env.KIOSK_KEYSTORE_BASE64, 'base64'), { mode: 0o600 });
   env.KIOSK_KEYSTORE_FILE = ks;

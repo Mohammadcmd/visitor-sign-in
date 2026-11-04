@@ -394,6 +394,48 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   eq(l.handle({ key: KEY, action: 'findVisitor', args: { first: 'jose', last: 'munoz' } }).matches.length, 1, 'accents are ignored when searching');
 }
 
+// ------------------------------------------------------------------ deleting old records
+{
+  const k = loadBackend();
+  k.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => k.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  const save = (extra) => call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, photos: 'all', ...extra } });
+  save({ retentionDays: 0 });
+  const oldie = call('register', { first: 'Old', last: 'Timer', company: 'N/A', visiting: 'Pat', purpose: 'Audit', agreed: true, photo, quickEntry: true, descriptor });
+  const fresh = call('register', { first: 'New', last: 'Comer', company: 'N/A', visiting: 'Pat', purpose: 'Audit', agreed: true, photo });
+  call('checkIn', { visitorId: oldie.visitor.id });
+  const oldVisit = call('checkIn', { visitorId: oldie.visitor.id }).visitId;
+  call('kioskSignOut', { visitId: oldVisit });
+  call('checkIn', { visitorId: fresh.visitor.id });
+  const dec = call('recordDecline', { first: 'Ivy', last: 'Ancient', photo, reasons: [{ label: 'Illness', answer: 'Yes' }] });
+  call('adminAddExpected', { token: tok, first: 'Long', last: 'Gone', day: '2020-01-01' });
+  eq(call('purgeOld').removed, null, 'nothing is deleted while records are kept forever');
+
+  // Age Old Timer's visits and the decline by a year.
+  const ago = new Date(Date.now() - 400 * 86400000);
+  const set = (tab, match, col, value) => {
+    const sh = k.sheets[tab], head = sh.rows[0];
+    sh.rows.slice(1).forEach((r) => { if (match(Object.fromEntries(head.map((h, i) => [h, r[i]])))) r[head.indexOf(col)] = value; });
+  };
+  set('Visits', (r) => r['First Name'] === 'Old' || r['First Name'] === 'Ivy', 'Signed in', ago);
+  set('Visitors', (r) => r['First Name'] === 'Old', 'Last visit', ago);
+  const folderUrl = k.sheets.Visitors.objects().find((r) => r['First Name'] === 'Old')['Photo folder'];
+  const declinePhoto = k.sheets.Visits.objects().find((r) => r['Visit ID'] === dec.declineId).Photo;
+  ok(k.sheets['Face data'].objects().some((r) => r['Visitor ID'] === oldie.visitor.id), 'face data before');
+
+  save({ retentionDays: 365 });
+  const res = call('purgeOld');
+  ok(res.ok && res.removed, JSON.stringify(res));
+  eq(res.removed, { visits: 3, visitors: 1, expected: 1 }, 'old visits, the visitor and the past expected row');
+  eq(k.sheets.Visitors.objects().map((r) => r['First Name']), ['New']);
+  eq(k.sheets.Visits.objects().map((r) => r['First Name']), ['New'], 'the open visit of a recent visitor stays');
+  ok(!k.sheets['Face data'].objects().some((r) => r['Visitor ID'] === oldie.visitor.id), 'their face data is deleted');
+  ok(k.globals.DriveApp.getFolderById(k.ctx.driveId_(folderUrl)).trashed, 'their photo folder is trashed');
+  ok(k.files[k.ctx.driveId_(declinePhoto)].trashed, 'the declined visitor photo is trashed');
+  eq(call('purgeOld').removed, null, 'once a day');
+}
+
 // ------------------------------------------------------------------ retries
 // A retried write (same request id) replays the first answer instead of writing twice.
 const before = b.sheets.Visitors.rows.length;

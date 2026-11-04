@@ -37,6 +37,9 @@ export function snapshot(video, maxSide = 900, quality = 0.85) {
   return { canvas, dataUrl: canvas.toDataURL('image/jpeg', quality) };
 }
 
+/** True once the face models have loaded (shown in Diagnostics). */
+export let modelsLoaded = false;
+
 export function loadModels() {
   if (!modelsReady) {
     modelsReady = (async () => {
@@ -48,6 +51,7 @@ export function loadModels() {
         api.nets.faceLandmark68Net.loadFromUri(url),
         api.nets.faceRecognitionNet.loadFromUri(url),
       ]);
+      modelsLoaded = true;
     })();
     modelsReady.catch(() => { modelsReady = null; });
   }

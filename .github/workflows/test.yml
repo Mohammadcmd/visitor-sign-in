@@ -1,0 +1,39 @@
+name: Tests
+
+# The backend tests, the kiosk file checks, and the end-to-end test that runs
+# the kiosk in Chromium (both setups, every visitor path, the admin screen).
+# Screenshots from the end-to-end run are attached to each run.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Install Chromium for the end-to-end test
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: End-to-end test
+        run: npm run test:e2e
+        env:
+          SHOTS: e2e-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-screenshots
+          retention-days: 14
+          if-no-files-found: ignore

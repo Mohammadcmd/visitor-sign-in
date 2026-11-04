@@ -116,7 +116,7 @@ function doPost(e) {
 
 // Calls that change the sheet. The kiosk retries these after a network hiccup
 // with the same request id, so the first result is remembered and replayed.
-var WRITE_ACTIONS = ['endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
+var WRITE_ACTIONS = ['purgeOld', 'endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
   'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
   'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow'];
 var REPLAY_TTL = 30 * 60;  // seconds
@@ -157,6 +157,7 @@ function dispatch_(req) {
     case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
     case 'endOfDay': return withLock_(function () { return endOfDay_(a); });
+    case 'purgeOld': return withLock_(function () { return purgeOld_(); });
     case 'findExpected': return withLock_(function () { return findExpected_(a); });
     case 'adminLogin': return adminLogin_(a);
     case 'adminSetPin': return withLock_(function () { return adminSetPin_(a); });
@@ -579,6 +580,70 @@ function dailySummary_(cutoff) {
     console.warn('Summary email not sent: ' + err);
     return false;
   }
+}
+
+// ---------------------------------------------------------------- keeping records only as long as needed
+
+/**
+ * Deletes visits, visitors (with their photo folders and face data) and
+ * expected-visitor rows older than the retention period chosen in setup.
+ * Kiosks call it once a day; the period always comes from the saved
+ * settings, never from the request. Runs at most once a day.
+ */
+function purgeOld_() {
+  var s = readSettings_() || {};
+  var days = Number(s.retentionDays) || 0;
+  if (days < 30) return { ok: true, removed: null };
+  var today = dayKey_(new Date());
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('LAST_PURGE') === today) return { ok: true, removed: null };
+  props.setProperty('LAST_PURGE', today);
+  var cutoff = new Date(new Date().getTime() - days * 86400000);
+  var old = function (v) { var t = new Date(v); return !isNaN(t.getTime()) && t < cutoff; };
+
+  var visits = keepRows_(TABS.visits, function (r) {
+    if (!r['Visit ID'] || !old(r['Signed in']) || !r['Signed out']) return true;
+    trashDrive_(r['Photo']);
+    return false;
+  });
+  var gone = {};
+  var visitors = keepRows_(TABS.visitors, function (r) {
+    var last = r['Last visit'] || r['Registered'];
+    if (!r['Visitor ID'] || !old(last)) return true;
+    gone[r['Visitor ID']] = true;
+    trashDrive_(r['Photo folder']);
+    return false;
+  });
+  keepRows_(TABS.faces, function (r) { return !gone[r['Visitor ID']]; });
+  var expected = book_().getSheetByName(TABS.expected) ? keepRows_(TABS.expected, function (r) {
+    var day = dayKey_(r['Date']);
+    return !day || day >= dayKey_(cutoff);
+  }) : 0;
+  return { ok: true, removed: { visits: visits, visitors: visitors, expected: expected } };
+}
+
+/** Keeps the rows keep(row) says yes to, in order; returns how many were removed. */
+function keepRows_(name, keep) {
+  var sh = book_().getSheetByName(name);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var width = sh.getLastColumn(), count = sh.getLastRow() - 1;
+  var values = sh.getRange(2, 1, count, width).getValues();
+  var rows = readTab_(name);
+  var kept = values.filter(function (v, i) { return keep(rows[i]); });
+  var removed = count - kept.length;
+  if (!removed) return 0;
+  if (kept.length) sh.getRange(2, 1, kept.length, width).setValues(kept);
+  sh.deleteRows(2 + kept.length, removed);
+  return removed;
+}
+
+function trashDrive_(url) {
+  var id = driveId_(url);
+  if (!id) return;
+  try {
+    if (/\/folders\//.test(String(url))) DriveApp.getFolderById(id).setTrashed(true);
+    else DriveApp.getFileById(id).setTrashed(true);
+  } catch (err) { /* already gone */ }
 }
 
 // ---------------------------------------------------------------- expected visitors

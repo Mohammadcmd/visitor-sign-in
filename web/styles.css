@@ -834,3 +834,9 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; p
 .tr-list li[data-state="custom"] { border-left-color: var(--blue); }
 .tr-list .tr-en { display: block; font-size: 15px; color: var(--ink-soft); }
 .tr-list .field { margin-top: 6px; }
+
+/* ---------------------------------------------------------------- diagnostics */
+.diag { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 4px 0 14px; font-size: 16px; }
+.diag dt { color: var(--ink-soft); font-weight: 700; }
+.diag dd { margin: 0; }
+.diag dd.warn { color: #b35d00; font-weight: 700; }

@@ -1,6 +1,6 @@
 // Visitor sign-in kiosk: screen flow and wiring.
-import { CONFIG } from '../config.js';
-import { call, queue, DEMO, MODE, BACKEND_VERSION, dayKey } from './api.js';
+import { CONFIG, APP_VERSION } from '../config.js';
+import { call, queue, DEMO, MODE, BACKEND_VERSION, dayKey, pendingCount } from './api.js';
 import { Keyboard } from './keyboard.js';
 import { listenForTaps } from './nfc.js';
 import * as face from './face.js';
@@ -50,6 +50,8 @@ const state = {
   adminMode: null,        // null | { type: 'add' } | { type: 'link', badge }
   adminBadges: [],
   attention: 0,
+  lastPing: null,         // the backend's last status answer, and when
+  lastTapAt: 0,           // when the badge reader last read a card (Diagnostics)
   // sign-out undo
   undo: null,
 };
@@ -358,6 +360,7 @@ async function refreshAttention() {
   if (!settings().setupComplete) return;
   const res = await api('ping');
   if (!res.ok) return;
+  state.lastPing = { ...res, at: Date.now() };
   state.attention = Number(res.attention) || 0;
   $('[data-attn-dot]').hidden = !state.attention;
   const count = $('[data-attn-count]');
@@ -1068,6 +1071,7 @@ listenForTaps(onTap, (key) => {
 function onTap(tag, typed) {
   kb.untype(typed);
   touch();
+  if (tag) state.lastTapAt = Date.now();
   if (!tag || state.busy) return;
   if (!$('[data-overlay="pin"]').hidden) return;
   if (state.screen === 'setup') { setupTap(tag); return; }
@@ -1727,10 +1731,11 @@ const SETTING_ROWS = [
   ['hosts', 'Hosts', (s) => (s.hosts.length
     ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
     : 'Nobody listed: visitors type any name')],
-  ['touches', 'Photos, reasons, rules, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
+  ['touches', 'Photos, reasons, rules, records, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
 ];
 
 function loadSettingsPane() {
+  renderDiagnostics();
   const s = settings();
   $('[data-settings-rows]').innerHTML = SETTING_ROWS.map(([step, title, sum]) => `
     <div class="set-row"><div><strong>${esc(title)}</strong><span>${esc(sum(s))}</span></div>
@@ -1761,6 +1766,50 @@ function loadSettingsPane() {
     actions.innerHTML = '';
   }
 }
+
+// ------------------------------------------------------------------ diagnostics
+
+function ago(ms) {
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  return `${Math.round(s / 3600)} h ago`;
+}
+const mb = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${(n / 1e6).toFixed(1)} MB`);
+
+/** What a support person would ask first, on one card. */
+async function renderDiagnostics() {
+  const box = $('[data-diagnostics]');
+  const rows = [];
+  const add = (k, v, warn = false) => rows.push(`<dt>${esc(k)}</dt><dd class="${warn ? 'warn' : ''}">${esc(v)}</dd>`);
+  add('App version', `${APP_VERSION}${Kiosk ? ' · Android app' : ' · browser'}`);
+  if (MODE === 'cloud') {
+    await refreshAttention();
+    const p = state.lastPing;
+    add('Records', p?.sheetName ? `Google Sheets: "${p.sheetName}"` : 'Google Sheets');
+    add('Connection', p && Date.now() - p.at < 60000 ? `Connected · checked ${ago(p.at)}` : "Can't reach the Google Sheet right now", !(p && Date.now() - p.at < 60000));
+    const v = p?.version || 1;
+    add('Apps Script version', v < BACKEND_VERSION ? `${v} · update needed (copy the latest code, deploy a new version)` : `${v} · up to date`, v < BACKEND_VERSION);
+    const waiting = pendingCount();
+    add('Waiting to send', waiting ? `${waiting} item${waiting > 1 ? 's' : ''} (sent automatically when the connection is back)` : 'Nothing', waiting > 10);
+  } else {
+    add('Records', DEMO ? 'Demo mode: nothing is kept' : 'On this tablet');
+  }
+  try {
+    const est = await navigator.storage?.estimate?.();
+    const kept = await navigator.storage?.persisted?.();
+    if (est) add('Storage', `${mb(est.usage || 0)} used of ${mb(est.quota || 0)}${MODE === 'cloud' ? '' : kept ? ' · kept permanently' : ' · the browser may clear it if space runs low'}`, MODE !== 'cloud' && !kept && !Kiosk);
+  } catch { /* not available */ }
+  add('Badge reader', !settings().badges ? 'Not used' : state.lastTapAt ? `Last card read ${ago(state.lastTapAt)}` : 'No card read since the kiosk started. Tap one now: it says which badge it is.');
+  let cam = 'Not checked';
+  try { cam = (await navigator.permissions.query({ name: 'camera' })).state; } catch { /* not supported */ }
+  add('Camera', settings().photos === 'off' && !quickEntryOn() ? 'Not used' : { granted: 'Allowed', denied: 'Blocked: allow the camera for this site or app', prompt: 'Will ask the first time a visitor takes a photo' }[cam] || cam, cam === 'denied');
+  add('Quick entry', quickEntryOn() ? (face.modelsLoaded ? 'Face recognition ready' : 'Face recognition loading…') : 'Off');
+  add('Offline start-up', Kiosk ? 'Built into the app' : navigator.serviceWorker?.controller ? 'Ready: the kiosk opens even without Wi-Fi' : 'Not active (needs an HTTPS address)', !Kiosk && !navigator.serviceWorker?.controller);
+  add('Screen', `${innerWidth} × ${innerHeight}${document.documentElement.classList.contains('lite') ? ' · light effects for this tablet' : ''}`);
+  box.innerHTML = rows.join('');
+}
+$('[data-diag-refresh]').addEventListener('click', renderDiagnostics);
 
 $('[data-export-settings]').addEventListener('click', async () => {
   const { exportable } = await import('./settings.js');
@@ -1869,6 +1918,20 @@ async function endOfDayCheck() {
 }
 setInterval(endOfDayCheck, 60 * 1000);
 
+// ------------------------------------------------------------------ deleting old records
+
+const PURGE_KEY = 'kiosk-purge-day';
+async function retentionCheck() {
+  const s = settings();
+  if (!s.setupComplete || !s.retentionDays || DEMO) return;
+  let last = '';
+  try { last = localStorage.getItem(PURGE_KEY) || ''; } catch { /* private mode */ }
+  if (last === dayKey()) return;
+  const res = await api('purgeOld');
+  if (res.ok) { try { localStorage.setItem(PURGE_KEY, dayKey()); } catch { /* runs again later */ } }
+}
+setInterval(() => { if (state.screen === 'welcome') retentionCheck(); }, 10 * 60 * 1000);
+
 // Keep the screen awake where the browser allows it.
 let wakeLock = null;
 async function keepAwake() {
@@ -1930,6 +1993,7 @@ function startKiosk() {
   refreshFaceIndex();
   refreshAttention();
   endOfDayCheck();
+  retentionCheck();
 }
 
 initSetup({
@@ -1961,4 +2025,10 @@ initSetup({
     startKiosk();
   }
   window.addEventListener('load', () => { if (quickEntryOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
+  // Offline start-up for browser kiosks (the Android app has its files built in).
+  if (!Kiosk && 'serviceWorker' in navigator && window.isSecureContext && !new URLSearchParams(location.search).has('nosw')) {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline start-up not available:', err));
+  }
+  // Records kept on the tablet: ask the browser never to clear them to save space.
+  if (MODE !== 'cloud' && !DEMO) navigator.storage?.persist?.().catch(() => {});
 })();

@@ -31,8 +31,9 @@ function serve() {
   });
 }
 
-async function open(browser, url, backend) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera', 'clipboard-read', 'clipboard-write'] });
+async function open(browser, url, backend, { offline = false } = {}) {
+  // The offline cache stays out of the way except in the test made for it.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
   const page = await ctx.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -235,6 +236,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
 
     await page.click('[data-photos-choice] [data-value="all"]');
     await page.click('[data-eod-choice] [data-value="23:59"]');
+    await page.click('[data-retention-choice] [data-value="90"]');
     await page.click('[data-lang-toggle="es"]');
     ok(/still shown in English/.test(await text(page, '[data-translations-title]')), 'the tagline needs a translation');
     ok(await page.$eval('[data-tr-list] li[data-state="built"] input', (e) => e.value.length > 0), 'built-in translations filled in');
@@ -246,7 +248,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
     await snap(page, 'setup-ready');
     const summary = await text(page, '[data-summary]');
-    ok(/2 people/.test(summary) && /11:59/.test(summary) && /English, Español/.test(summary), 'summary lists hosts, the end-of-day time and languages');
+    ok(/2 people/.test(summary) && /11:59/.test(summary) && /English, Español/.test(summary) && /90 days, then deleted/.test(summary), 'summary lists hosts, end of day, retention and languages');
     await next(page);
     await waitView(page, 'welcome');
     ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics', 'welcome shows the company');
@@ -393,6 +395,11 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await page.$$eval('[data-badge-list] .admin-row', (l) => l.length) === 2, 'badges from setup listed');
     await page.click('[data-admin-tab="settings"]');
     await page.waitForSelector('[data-settings-rows] .set-row');
+    await page.waitForFunction(() => /App version/.test(document.querySelector('[data-diagnostics]').textContent));
+    const diag = await text(page, '[data-diagnostics]');
+    ok(/1\.0\.0/.test(diag) && /On this tablet/.test(diag) && /Last card read/.test(diag), `diagnostics: ${diag.slice(0, 120)}`);
+    const purge = await page.evaluate(async () => (await import('./js/api.js')).call('purgeOld'));
+    ok(purge.ok && purge.removed && purge.removed.visits === 0, 'nothing recent is deleted');
     await snap(page, 'admin-settings');
     // Edit the company name from settings.
     await page.click('[data-edit="company"]');
@@ -540,6 +547,19 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     const sent = backend.mail.find((m) => /^Visitor summary/.test(m.subject));
     ok(daily.summary === true && sent && sent.to === 'security@initech.example' && /Milton Waddams/.test(sent.body), `daily summary: ${JSON.stringify(daily)}`);
     ok(!cloud.errors.length && !second.errors.length && !third.errors.length, `no page errors: ${[...cloud.errors, ...second.errors, ...third.errors].join(' | ')}`);
+
+    // ================================================================ offline start-up
+    const off = await open(browser, `${base}?demo`, null, { offline: true });
+    await waitView(off, 'welcome');
+    await off.evaluate(() => navigator.serviceWorker.ready);
+    await off.reload();
+    await waitView(off, 'welcome');
+    ok(await off.evaluate(() => !!navigator.serviceWorker.controller), 'offline cache in control');
+    await off.context().setOffline(true);
+    await off.reload();
+    await waitView(off, 'welcome');
+    ok(await off.$eval('[data-org-name]', (e) => e.textContent) === 'Northwind Labs', 'the kiosk opens with no network');
+    await off.context().close();
 
     // ================================================================ 3. the Shock Tech preset
     const preset = await open(browser, base);

@@ -41,8 +41,7 @@ jobs:
           java-version: 21
           cache: gradle
       - run: npm ci
-      - run: node tests/apps-script.test.js
-      - run: node scripts/sync-backend.mjs --check
+      - run: npm test
       - name: Build APK
         run: node scripts/build-android.mjs
         env:

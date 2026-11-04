@@ -44,6 +44,9 @@ async function send(url, key, action, args, rid) {
   }
 }
 
+/** How many writes are waiting to be sent to the Google Sheet (shown in Diagnostics). */
+export const pendingCount = () => (ON_TABLET ? 0 : readOutbox().length);
+
 /**
  * Calls the backend, retrying a couple of times on a network hiccup. Every
  * attempt carries the same request id, so the backend answers a repeat with
@@ -162,6 +165,7 @@ export const photos = (() => {
     put: (k, v) => run('readwrite', (st) => st.put(v, k)).catch(() => {}),
     get: (k) => run('readonly', (st) => st.get(k)).then((v) => v || '').catch(() => ''),
     clear: () => run('readwrite', (st) => st.clear()).catch(() => {}),
+    del: (k) => run('readwrite', (st) => st.delete(k)).catch(() => {}),
   };
 })();
 
@@ -308,6 +312,7 @@ function startVisit(s, v, a, badgeNo, replacedBy) {
   s.visits.push(visit);
   v.visits = (v.visits || 0) + 1;
   v.lastVisit = new Date().toLocaleDateString();
+  v.lastVisitAt = now();
   return visit;
 }
 
@@ -394,6 +399,9 @@ async function localAction(s, action, a) {
       if (!v) return { ok: false, error: 'not_found' };
       if (!v.quickEntry) return { ok: true, saved: false };
       s.faces.push({ visitorId: v.id, descriptor: a.descriptor });
+      // The newest dozen are plenty for recognition, and keep storage small.
+      const mine = s.faces.filter((f) => f.visitorId === v.id);
+      if (mine.length > 12) { const drop = new Set(mine.slice(0, mine.length - 12)); s.faces = s.faces.filter((f) => !drop.has(f)); }
       return { ok: true, saved: true };
     }
     case 'setQuickEntry': {
@@ -421,6 +429,22 @@ async function localAction(s, action, a) {
       if (!v) return { ok: false, error: 'not_found' };
       const visit = startVisit(s, v, a, '', 'Signed in again');
       return { ok: true, visitId: visit.id, expected: visit.expected };
+    }
+    case 'purgeOld': {
+      const days = Number(st.retentionDays) || 0;
+      if (days < 30) return { ok: true, removed: null };
+      const cutoff = Date.now() - days * 86400000;
+      const old = (iso) => { const t = new Date(iso).getTime(); return !Number.isNaN(t) && t < cutoff; };
+      const before = { visits: s.visits.length, visitors: s.visitors.length, expected: s.expected.length };
+      for (const v of s.visits) if (v.signedOut && old(v.signedIn) && v.photo) await photos.del(v.photo);
+      s.visits = s.visits.filter((v) => !(v.signedOut && old(v.signedIn)));
+      const gone = new Set(s.visitors.filter((v) => old(v.lastVisitAt || v.registered)).map((v) => v.id));
+      for (const id of gone) await photos.del(`visitor:${id}`);
+      s.visitors = s.visitors.filter((v) => !gone.has(v.id));
+      s.faces = s.faces.filter((f) => !gone.has(f.visitorId));
+      const day = dayKey(cutoff);
+      s.expected = s.expected.filter((e) => e.day >= day);
+      return { ok: true, removed: { visits: before.visits - s.visits.length, visitors: before.visitors - s.visitors.length, expected: before.expected - s.expected.length } };
     }
     case 'endOfDay': {
       let cutoff = new Date(a.before);

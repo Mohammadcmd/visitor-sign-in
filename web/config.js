@@ -61,6 +61,9 @@ export function forgetConnection() {
 
 const saved = connection();
 
+/** The kiosk's version. Keep it in step with package.json and sw.js (the tests check). */
+export const APP_VERSION = '1.0.0';
+
 export const CONFIG = {
   // Apps Script web app URL ending in /exec, and the key this kiosk connected with
   API_URL: saved.api || '',

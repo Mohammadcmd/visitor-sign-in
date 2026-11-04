@@ -675,6 +675,11 @@ function renderTouches() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
+  $$('[data-retention-choice] button').forEach((b) => {
+    const on = Number(b.dataset.value) === (draft.retentionDays || 0);
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
   $('[data-summary-box]').hidden = !(draft.storage === 'cloud' && draft.endOfDay);
   $('[data-summary-toggle]').setAttribute('aria-checked', String(!!draft.dailySummary));
   $('[data-summary-to]').hidden = !draft.dailySummary;
@@ -749,6 +754,7 @@ function renderReady() {
     ['Hosts', s.hosts.length ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}` : 'None listed',
       s.hosts.length ? (s.storage === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
     ['Photos', { all: 'Every new visitor', declined: 'Declined visitors only', off: 'No photos' }[s.photos], s.quickEntry && s.photos === 'all' ? 'Quick entry is on for returning visitors who opt in.' : ''],
+    ['Records kept', s.retentionDays ? `${{ 30: '30 days', 90: '90 days', 180: '6 months', 365: '1 year', 730: '2 years' }[s.retentionDays]}, then deleted` : 'Until you delete them', ''],
     ['Languages', s.languages.map((c) => LANGS[c]).join(', '), s.languages.length > 1 ? 'Visitors choose on the welcome screen.' : ''],
     ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out',
       s.endOfDay && s.storage === 'cloud' && s.dailySummary ? `A daily summary is emailed to ${s.screening.alertEmails}.` : ''],
@@ -1015,6 +1021,12 @@ function wire() {
     renderHosts();
   });
   $('[data-notify-toggle]').addEventListener('click', () => { draft.notifyHosts = !draft.notifyHosts; renderHosts(); });
+  $('[data-retention-choice]').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    draft.retentionDays = Number(b.dataset.value);
+    renderTouches();
+  });
   $('[data-lang-toggle="es"]').addEventListener('click', () => {
     draft.languages = draft.languages.includes('es') ? ['en'] : ['en', 'es'];
     renderLanguages();
