@@ -270,6 +270,17 @@
               <input readonly inputmode="none" name="s-summary-to" data-kb="email" maxlength="300" autocomplete="off" placeholder="office@example.com">
               <small>The same addresses as the screening alerts. Separate addresses with commas.</small></label>
           </div>
+          <h3 class="sub">Languages</h3>
+          <p class="hint small">Visitors can switch the visitor screens to another language on the welcome screen. Setup and the admin screen stay in English, and answers are always saved in English.</p>
+          <button type="button" class="agree toggle" data-lang-toggle="es" role="switch" aria-checked="false">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Offer Español (Spanish)</strong><br><span class="small">The kiosk's own screens, and the built-in questions, rules and visit reasons, are already translated.</span></span>
+          </button>
+          <div class="translations" data-translations hidden>
+            <p class="builder-label" data-translations-title></p>
+            <p class="hint small">Your own text, in Spanish. Anything left blank is shown in English. Long texts are easier to type on a computer: export the settings, edit the file, and import it.</p>
+            <ol class="tr-list" data-tr-list></ol>
+          </div>
         </div>
 
         <div class="step" data-sstep="ready">
@@ -298,15 +309,16 @@
     <div class="aurora" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="rings" aria-hidden="true"><span></span><span></span><span></span></div>
     <header class="welcome-top">
-      <div class="clock"><span class="attn-dot" data-attn-dot hidden></span><span data-clock></span></div>
+      <div class="clock" data-no-i18n><span class="attn-dot" data-attn-dot hidden></span><span data-clock></span></div>
     </header>
     <div class="welcome-center">
       <div class="logo-card" data-admin-hold>
         <img data-org-logo alt="">
       </div>
-      <h1 class="welcome-title">Welcome to <span data-org-name></span></h1>
-      <p class="welcome-sub" data-org-tagline></p>
+      <h1 class="welcome-title">Welcome to <span data-org-name data-no-i18n></span></h1>
+      <p class="welcome-sub" data-org-tagline data-no-i18n></p>
       <div class="tap-cta"><span class="tap-dot" aria-hidden="true"></span>Tap anywhere to get started</div>
+      <div class="lang-pick" data-lang-pick hidden></div>
     </div>
     <footer class="welcome-foot">
       <div class="foot-badge" data-foot-badge>
@@ -322,7 +334,7 @@
     <header class="bar">
       <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
       <img class="bar-logo" data-org-logo alt="">
-      <span class="bar-spacer"></span>
+      <span class="bar-spacer bar-end"><button type="button" class="btn-ghost lang-switch" data-lang-switch data-no-i18n hidden></button></span>
     </header>
     <div class="choice-wrap">
       <h2>Have you visited <span data-org-name></span> before?</h2>

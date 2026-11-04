@@ -29,7 +29,7 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 | **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
 | **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
 | **8. Hosts** | Optional. The people visitors come to see, with their email addresses. Their names come up as visitors type. With Google Sheets, each host gets an email the moment their visitor signs in ("Your visitor has arrived"), and the visitor is told "We've let Pat know you're here." |
-| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons, visitor rules, and an optional time each day when everyone still signed in is signed out ("End of day"). With Google Sheets, a daily summary email can go out at that time. |
+| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons, visitor rules, and an optional time each day when everyone still signed in is signed out ("End of day"). With Google Sheets, a daily summary email can go out at that time. Languages: offer Spanish to visitors, and translate your own questions and rules. |
 
 The last screen sums everything up and lists what to do next. Everything can be changed later: **press and hold the logo on the welcome screen for 2.5 seconds**, enter the PIN, then **Settings**.
 
@@ -37,7 +37,7 @@ Setting up another tablet: export the settings from Admin → Settings and impor
 
 ## What visitors see
 
-1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start.
+1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start, or tap **Español** to do everything that follows in Spanish.
 2. **New visitor** or **Returning visitor**.
 3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why (if staff are expecting them, they're greeted and these are filled in); your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
 4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again.
@@ -53,6 +53,15 @@ When an answer is set to decline (for example "Not a U.S. citizen or permanent r
 - **Overriding:** a staff member can tap **Staff override** on the decline screen, enter the PIN and a reason, and the visitor finishes signing in. Or, in **Needs attention**, **Let in** lets that visitor sign in normally at the kiosk for the next two hours. Either way the admin's name and reason are saved with the visit, which shows as "Visitor (override)".
 
 Answers set to **let in and alert** sign the visitor in, mark the visit (for example "Needs induction"), and alert staff the same way.
+
+### Languages
+
+Turn on **Offer Español** in setup (Finishing touches) and visitors can choose Spanish on the welcome screen, or switch on the next screen. Each visitor starts again in English.
+
+- Every visitor screen, message and the on-screen keyboard are translated. The keyboard's **àé** key types accented letters, which also helps with names like José Muñoz (searching ignores accents).
+- The built-in questions, rules, visit reasons and decline messages come translated. Your own text is listed in setup with a box for its Spanish; anything left blank is shown in English. Translations travel with the exported settings file, which is easier for long texts.
+- Answers are always recorded in English, so screening rules, alerts and reports work the same in either language. The rules agreement records the language it was agreed in.
+- Setup and the admin screen stay in English. More languages can be added in `web/js/i18n.js`.
 
 ## Admin screen
 
@@ -104,7 +113,7 @@ The kiosk must be served over **HTTPS** for the camera (any static host: GitHub 
 
 - **Demo:** serve `web/` (`npm start`, then open `http://localhost:8080/?demo`). Sample company and data, a panel that simulates badge taps, admin PIN `123456`, nothing saved.
 - `npm test` runs the backend against an in-memory Google Sheet and Drive, and checks the wizard's copy of the backend is current.
-- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and host emails, expected visitors, a decline, a staff override, the admin screen (history, CSV exports, roll call), end of day with badges not returned and the daily summary, and other tablets joining.
+- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and host emails, expected visitors, a visitor signing in in Spanish, a decline, a staff override, the admin screen (history, CSV exports, roll call), end of day with badges not returned and the daily summary, and other tablets joining.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech

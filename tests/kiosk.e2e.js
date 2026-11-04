@@ -92,14 +92,31 @@ async function holdLogo(page) {
 }
 
 
-async function signInNewVisitor(page, { first, last, citizen, country, sick = 'No', expected = false }) {
-  await page.click('[data-screen="welcome"]');
+async function signInNewVisitor(page, { first, last, citizen, country, sick = 'No', expected = false, lang = '' }) {
+  if (lang) await page.click(`[data-lang-pick] [data-lang="${lang}"]`);
+  else await page.click('[data-screen="welcome"]');
   await waitView(page, 'choice');
+  if (lang === 'es') {
+    ok(/¿Ha visitado Acme Robotics antes\?/.test(await text(page, '[data-screen="choice"] h2')), 'choice screen in Spanish');
+    ok(await text(page, '[data-lang-switch]') === 'English', 'a switch back to English');
+    await snap(page, 'es-choice');
+  }
   await page.click('[data-action="new"]');
   await waitView(page, 'form');
   ok(await step(page) === 'intro', 'form starts with the intro');
+  if (lang === 'es') {
+    ok(/Regístrese antes de su visita/.test(await text(page, '[data-intro]')) && /Algunos de los productos/.test(await text(page, '[data-intro]')), 'intro in Spanish, with the question\'s note');
+    ok(await text(page, '[data-form-next]') === 'Empecemos', 'buttons in Spanish');
+  }
   await formNext(page);
   await type(page, 'input[name="first"]', first);
+  if (lang === 'es') {
+    ok(await page.$eval('[data-step="name"] h2', (e) => e.textContent) === '¿Cómo se llama?', 'name step in Spanish');
+    await page.dispatchEvent('[data-key="accents"]', 'pointerdown');
+    ok(await page.$('[data-keyboard] [data-key="ñ"]') !== null, 'accents on the keyboard');
+    await page.dispatchEvent('[data-key="abc"]', 'pointerdown');
+    ok(await text(page, '[data-keyboard] .kb-space') === 'espacio', 'keyboard labels in Spanish');
+  }
   await set(page, 'input[name="last"]', last);
   await formNext(page);
   if (expected) {
@@ -118,6 +135,10 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
   if (!expected) await page.click('[data-chips="purpose"] .chip >> nth=0');
   await formNext(page);
   ok((await step(page)).startsWith('q:'), 'screening question follows the visit details');
+  if (lang === 'es') {
+    ok(/Ciudadano\/a de EE\. UU\./.test(await text(page, '[data-screen="form"] .step.active .options')), 'answers shown in Spanish');
+    await snap(page, 'es-question');
+  }
   await page.click(`[data-screen="form"] .step.active .option[data-value="${citizen}"]`);
   if (country) await set(page, '[data-screen="form"] .step.active [data-followup] input', country);
   await formNext(page);
@@ -214,15 +235,22 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
 
     await page.click('[data-photos-choice] [data-value="all"]');
     await page.click('[data-eod-choice] [data-value="23:59"]');
+    await page.click('[data-lang-toggle="es"]');
+    ok(/still shown in English/.test(await text(page, '[data-translations-title]')), 'the tagline needs a translation');
+    ok(await page.$eval('[data-tr-list] li[data-state="built"] input', (e) => e.value.length > 0), 'built-in translations filled in');
+    await set(page, '[data-tr-list] li[data-state="missing"] input', 'Automatización desde 1999');
+    ok(/^All \d+ translated$/.test(await text(page, '[data-translations-title]')), 'everything translated');
+    await snap(page, 'setup-languages');
     await snap(page, 'setup-touches');
     await next(page);
     await page.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
     await snap(page, 'setup-ready');
     const summary = await text(page, '[data-summary]');
-    ok(/2 people/.test(summary) && /11:59/.test(summary), 'summary lists hosts and the end-of-day time');
+    ok(/2 people/.test(summary) && /11:59/.test(summary) && /English, Español/.test(summary), 'summary lists hosts, the end-of-day time and languages');
     await next(page);
     await waitView(page, 'welcome');
     ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics', 'welcome shows the company');
+    ok(await page.$$eval('[data-lang-pick] button', (l) => l.map((b) => b.textContent).join('|')) === 'English|Español', 'language buttons on the welcome screen');
     await snap(page, 'welcome');
 
     // The front desk adds an expected visitor.
@@ -296,11 +324,14 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await waitView(page, 'welcome');
 
     // A second declined visitor stays declined.
-    await signInNewVisitor(page, { first: 'Cara', last: 'Smith', citizen: 'U.S. citizen', sick: 'Yes' });
+    await signInNewVisitor(page, { first: 'Cara', last: 'Smith', citizen: 'U.S. citizen', sick: 'Yes', lang: 'es' });
     await formNext(page);
     await waitView(page, 'declined');
+    ok(/Lamentablemente, hoy no podemos registrar su entrada/.test(await text(page, '[data-declined-text]')) && await text(page, '[data-declined-title]') === 'Gracias, Cara', 'decline message in Spanish');
+    await snap(page, 'es-declined');
     await page.click('[data-screen="declined"] [data-go="welcome"]');
     await waitView(page, 'welcome');
+    ok(/Tap anywhere to get started/.test(await text(page, '.tap-cta')) && await page.$eval('html', (e) => e.lang) === 'en', 'back to English for the next visitor');
     await page.waitForFunction(() => !document.querySelector('[data-attn-dot]').hidden, null, { timeout: 8000 });
     ok(true, 'attention dot on the welcome screen');
 
@@ -332,6 +363,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visits]')]);
     const csvText = fs.readFileSync(await csv.path(), 'utf8');
     ok(/^\ufeffSigned in,Signed out,First name/.test(csvText) && /Cara,Smith/.test(csvText) && csvText.trim().split('\r\n').length === 5, 'visits CSV');
+    ok(/Cara,Smith,Globex,Pat Kim,Meeting,/.test(csvText), 'a reason picked in Spanish is recorded in English');
     const [people] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visitors]')]);
     const peopleText = fs.readFileSync(await people.path(), 'utf8');
     ok(/Citizenship status/.test(peopleText.split('\r\n')[0]) && /Ana,Lopez/.test(peopleText), 'visitors CSV with the screening answers');

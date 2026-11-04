@@ -11,6 +11,7 @@ import {
 } from './settings.js';
 import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
+import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -94,16 +95,16 @@ function touch() { state.lastTouch = Date.now(); }
 
 let toastTimer;
 function toast(msg, ms = 4000) {
-  const t = $('[data-toast]');
-  t.textContent = msg;
-  t.hidden = false;
+  const el = $('[data-toast]');
+  el.textContent = msg;
+  el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 function busy(on, text = 'One moment…') {
   state.busy = on;
-  $('[data-busy-text]').textContent = text;
+  $('[data-busy-text]').textContent = t(text);
   $('[data-overlay="busy"]').hidden = !on;
 }
 
@@ -118,15 +119,15 @@ async function api(action, args) {
 
 function errorText(res) {
   switch (res.error) {
-    case 'network': return "We couldn't reach the server. Please try again, or see the front desk.";
-    case 'busy': return 'The system is busy. Please try again.';
-    case 'badge_unknown': return "This badge isn't set up yet. Please use a different badge, or see the front desk.";
-    case 'badge_in_use': return `Badge ${res.badge} is already checked out to someone. Please use a different badge.`;
-    case 'badge_retired': return `Badge ${res.badge} is out of service. Please use a different badge.`;
-    case 'missing': return 'Some answers are missing. Please go back and check.';
-    case 'kiosk_key': case 'not_connected': return 'This kiosk is not connected correctly. Please see the front desk.';
+    case 'network': return t("We couldn't reach the server. Please try again, or see the front desk.");
+    case 'busy': return t('The system is busy. Please try again.');
+    case 'badge_unknown': return t("This badge isn't set up yet. Please use a different badge, or see the front desk.");
+    case 'badge_in_use': return t('Badge {badge} is already checked out to someone. Please use a different badge.', { badge: res.badge });
+    case 'badge_retired': return t('Badge {badge} is out of service. Please use a different badge.', { badge: res.badge });
+    case 'missing': return t('Some answers are missing. Please go back and check.');
+    case 'kiosk_key': case 'not_connected': return t('This kiosk is not connected correctly. Please see the front desk.');
     case 'unknown_action': return 'This needs the latest Apps Script code. Admin → Settings → Copy the latest Apps Script code, then deploy a new version.';
-    default: return 'Something went wrong. Please see the front desk.';
+    default: return t('Something went wrong. Please see the front desk.');
   }
 }
 
@@ -162,41 +163,85 @@ function applySettings() {
   $$('[data-org-logo]').forEach((img) => { img.src = logo; img.alt = s.org.name; });
   $$('[data-org-name]').forEach((el) => { el.textContent = s.org.name || 'us'; });
   const tagline = $('[data-org-tagline]');
-  tagline.textContent = s.org.tagline;
+  tagline.textContent = tc(s.org.tagline, s);
   tagline.hidden = !s.org.tagline;
   document.title = s.org.name ? `${s.org.name} Visitor Sign-In` : 'Visitor Sign-In';
 
   // Intro: a fixed opening, any notes the screening questions need, and the company's own text.
-  const intro = ['Please sign in before your visit. It takes about two minutes.'];
-  activeQuestions(s).forEach((q) => { if (q.intro && !q.every) intro.push(q.intro); });
-  if (s.form.intro) intro.push(...s.form.intro.split(/\n{2,}/));
-  intro.push('We use this information only to manage your visit. Please don\'t enter ID numbers or other sensitive details.', 'Need help? Ask at the front desk.');
+  const intro = [t('Please sign in before your visit. It takes about two minutes.')];
+  activeQuestions(s).forEach((q) => { if (q.intro && !q.every) intro.push(tc(q.intro, s)); });
+  if (s.form.intro) intro.push(...s.form.intro.split(/\n{2,}/).map((p) => tc(p, s)));
+  intro.push(t('We use this information only to manage your visit. Please don\'t enter ID numbers or other sensitive details.'), t('Need help? Ask at the front desk.'));
   $('[data-intro]').innerHTML = intro.map((p) => `<p>${esc(fill(p, s))}</p>`).join('');
 
   $('[data-host-field]').hidden = !s.form.askHost;
-  $('[data-host-label]').textContent = fill(s.form.hostLabel, s);
-  $('[data-host-hint]').textContent = fill(s.form.hostHint, s);
+  $('[data-host-label]').textContent = fill(tc(s.form.hostLabel, s), s);
+  $('[data-host-hint]').textContent = fill(tc(s.form.hostHint, s), s);
   $('[data-purpose-field]').hidden = !s.form.askPurpose;
   const chips = $('[data-chips="purpose"]');
   chips.hidden = !s.form.askPurpose || !s.form.purposes.length;
-  chips.innerHTML = s.form.purposes.map((p) => `<button type="button" class="chip">${esc(p)}</button>`).join('');
-  $('[data-rules]').innerHTML = s.form.rules.map((r) => `<li>${esc(fill(r, s))}</li>`).join('');
+  chips.innerHTML = s.form.purposes.map((p) => `<button type="button" class="chip">${esc(tc(p, s))}</button>`).join('');
+  $('[data-rules]').innerHTML = s.form.rules.map((r) => `<li>${esc(fill(tc(r, s), s))}</li>`).join('');
 
   // With badges, visitors sign out by tapping them; without, there's a button.
   $('[data-foot-badge]').hidden = !s.badges;
   $$('[data-leave-open]').forEach((b) => { b.hidden = s.badges; });
   $('[data-admin-tab="badges"]').hidden = !s.badges;
   $('[data-done-text]').textContent = s.badges
-    ? 'Please wear your badge where it can be seen. Your host will meet you at the front desk.'
-    : 'Please take a seat. Your host will meet you at the front desk.';
+    ? t('Please wear your badge where it can be seen. Your host will meet you at the front desk.')
+    : t('Please take a seat. Your host will meet you at the front desk.');
   $('[data-done-leave]').textContent = s.badges
-    ? 'When you leave, tap your badge on the reader to sign out.'
-    : 'When you leave, tap "Leaving?" on the welcome screen to sign out.';
+    ? t('When you leave, tap your badge on the reader to sign out.')
+    : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
   $('[data-find-hint]').textContent = quickEntryOn(s)
-    ? 'Start typing your name. If you turned on quick entry, the camera may recognize you first.'
-    : 'Start typing your name.';
+    ? t('Start typing your name. If you turned on quick entry, the camera may recognize you first.')
+    : t('Start typing your name.');
   $('[data-cam-bubble]').hidden = !quickEntryOn(s);
   buildScreeningSteps();
+  translateDom(visitorRoots());
+  renderLangPick();
+}
+
+// ------------------------------------------------------------------ visitor languages
+
+/** The screens and overlays visitors see (setup and admin stay in English). */
+const visitorRoots = () => $$('.screen').filter((el) => !['setup', 'admin'].includes(el.dataset.screen))
+  .concat([$('[data-overlay="idle"]'), $('[data-overlay="signout"]')]);
+
+/** Switches the visitor screens to another language. */
+function useLang(code) {
+  if (code === lang()) return;
+  setLang(code);
+  applySettings();
+  kb.render();
+  tickClock();
+}
+
+/** Language buttons on the welcome screen, and a switch on the next screen. */
+function renderLangPick() {
+  const langs = settings().languages.filter((c) => LANGS[c]);
+  const pick = $('[data-lang-pick]');
+  pick.hidden = langs.length < 2;
+  pick.innerHTML = langs.map((c) => `<button type="button" lang="${c}" data-lang="${c}" class="${c === lang() ? 'on' : ''}">${esc(LANGS[c])}</button>`).join('');
+  const other = langs.find((c) => c !== lang());
+  const sw = $('[data-lang-switch]');
+  sw.hidden = langs.length < 2;
+  if (other) { sw.textContent = LANGS[other]; sw.dataset.lang = other; sw.setAttribute('lang', other); }
+}
+$('[data-lang-pick]').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lang]');
+  if (!b) return;
+  e.stopPropagation();
+  useLang(b.dataset.lang);
+  show('choice');
+});
+$('[data-lang-switch]').addEventListener('click', (e) => { e.stopPropagation(); useLang(e.currentTarget.dataset.lang); });
+
+/** A visit reason picked from the chips is recorded in English, whatever language was on screen. */
+function canonicalPurpose(value) {
+  const v = String(value || '').trim();
+  if (lang() === 'en') return v;
+  return settings().form.purposes.find((p) => tc(p) === v) || v;
 }
 
 /** One step per screening question, placed before the photo step. */
@@ -208,13 +253,13 @@ function buildScreeningSteps() {
     el.className = 'step';
     el.dataset.step = `q:${q.id}`;
     const answer = q.type === 'text'
-      ? `<label class="field"><span>Your answer</span><input readonly inputmode="none" name="qa-${esc(q.id)}" data-cap="sentence" maxlength="120" autocomplete="off"></label>`
+      ? `<label class="field"><span>${esc(t('Your answer'))}</span><input readonly inputmode="none" name="qa-${esc(q.id)}" data-cap="sentence" maxlength="120" autocomplete="off"></label>`
       : `<div class="options" role="radiogroup">${q.options.map((o) => {
-        const { main, note } = splitOption(o);
+        const { main, note } = splitOption(tc(o));
         return `<button type="button" class="option" role="radio" aria-checked="false" data-q="${esc(q.id)}" data-value="${esc(o)}">${esc(main)}${note ? ` <small>${esc(note)}</small>` : ''}</button>`;
       }).join('')}</div>`;
-    el.innerHTML = `<p class="eyebrow" data-step-count></p><h2>${esc(fill(q.text))}</h2>${q.hint ? `<p class="hint">${esc(fill(q.hint))}</p>` : ''}${answer}`
-      + (q.followUp ? `<label class="field" data-followup="${esc(q.id)}" hidden><span>${esc(q.followUp.label)}</span><input readonly inputmode="none" name="qf-${esc(q.id)}" data-cap="words" maxlength="60" autocomplete="off"></label>` : '');
+    el.innerHTML = `<p class="eyebrow" data-step-count></p><h2>${esc(fill(tc(q.text)))}</h2>${q.hint ? `<p class="hint">${esc(fill(tc(q.hint)))}</p>` : ''}${answer}`
+      + (q.followUp ? `<label class="field" data-followup="${esc(q.id)}" hidden><span>${esc(tc(q.followUp.label))}</span><input readonly inputmode="none" name="qf-${esc(q.id)}" data-cap="words" maxlength="60" autocomplete="off"></label>` : '');
     photoStep.before(el);
   }
 }
@@ -224,6 +269,8 @@ function buildScreeningSteps() {
 const ENTER = {
   welcome() {
     suppressClick = false;
+    // Each visitor starts in the kiosk's own language.
+    if (lang() !== 'en') useLang('en');
     face.stopCamera();
     Object.assign(state, {
       visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null, hostNotified: '', expected: null,
@@ -245,10 +292,10 @@ const ENTER = {
   badge() {
     const v = state.visitor;
     const returning = state.method !== 'new visitor';
-    $('[data-badge-eyebrow]').textContent = returning ? `Welcome back, ${v.first}` : `Thanks, ${v.first}!`;
+    $('[data-badge-eyebrow]').textContent = returning ? t('Welcome back, {name}', { name: v.first }) : t('Thanks, {name}!', { name: v.first });
     $('[data-badge-title]').textContent = returning
-      ? 'Tap any visitor badge on the reader to finish'
-      : 'Last step: tap any visitor badge on the reader';
+      ? t('Tap any visitor badge on the reader to finish')
+      : t('Last step: tap any visitor badge on the reader');
     $('[data-badge-status]').textContent = '';
     $('[data-tap-scene]').classList.remove('locked', 'reading', 'success', 'error');
     $('[data-badge-no]').textContent = '';
@@ -263,8 +310,8 @@ const ENTER = {
   declined() {
     face.stopCamera();
     const first = state.answers.first || state.visitor?.first || '';
-    $('[data-declined-title]').textContent = first ? `Thank you, ${first}` : 'Thank you';
-    $('[data-declined-text]').textContent = fill(settings().screening.declineMessage);
+    $('[data-declined-title]').textContent = first ? t('Thank you, {name}', { name: first }) : t('Thank you');
+    $('[data-declined-text]').textContent = fill(tc(settings().screening.declineMessage));
   },
   admin() { adminTab('inside'); },
 };
@@ -286,7 +333,7 @@ $('[data-action="returning"]').addEventListener('click', (e) => show('find', { r
 $$('[data-leave-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); show('leave'); }));
 
 function tickClock() {
-  $('[data-clock]').textContent = new Date().toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  $('[data-clock]').textContent = new Date().toLocaleString(locale(), { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 // Press and hold the logo for 2.5 s to open the admin PIN pad.
@@ -383,7 +430,7 @@ function renderStep({ instant = false, back = false } = {}) {
   else if (from !== to) fx.step(from, to, back);
   const total = state.steps.filter((s) => s !== 'intro').length;
   const at = state.steps.slice(0, state.step + 1).filter((s) => s !== 'intro').length;
-  const label = state.flow === 'returning' ? `Quick question ${at} of ${total}` : `Step ${at} of ${total}`;
+  const label = state.flow === 'returning' ? t('Quick question {at} of {total}', { at, total }) : t('Step {at} of {total}', { at, total });
   if (to) $$('[data-step-count]', to).forEach((e) => { e.textContent = label; });
   $('[data-progress]').style.width = `${(state.step / Math.max(1, state.steps.length - 1)) * 100}%`;
   $('[data-form-error]').textContent = '';
@@ -391,7 +438,7 @@ function renderStep({ instant = false, back = false } = {}) {
   $('[data-screen="form"] .form-foot').hidden = name === 'quick';
   next.hidden = name === 'quick';
   const last = state.step === state.steps.length - 1;
-  next.textContent = name === 'intro' ? "Let's begin" : last && !state.result?.declined ? (state.flow === 'returning' ? 'Continue' : 'Sign in') : 'Continue';
+  next.textContent = t(name === 'intro' ? "Let's begin" : last && !state.result?.declined ? (state.flow === 'returning' ? 'Continue' : 'Sign in') : 'Continue');
   $('[data-form-back]').style.visibility = state.step === 0 || state.override ? 'hidden' : '';
   $('[data-screen="form"] .form-body').scrollTop = 0;
   kb.close();
@@ -401,7 +448,7 @@ function renderStep({ instant = false, back = false } = {}) {
 
 function formError(msg, inputs = []) {
   $('[data-screen="form"] .form-foot').hidden = false;
-  $('[data-form-error]').textContent = msg;
+  $('[data-form-error]').textContent = t(msg);
   inputs.forEach((i) => i.classList.add('invalid'));
 }
 
@@ -417,7 +464,7 @@ function validateStep() {
     const q = questionById(name.slice(2));
     if (!q) return true;
     if (!answerOf(q)) { formError(q.type === 'text' ? 'Please answer the question.' : 'Please choose an answer.', q.type === 'text' ? [field(`qa-${q.id}`)] : []); return false; }
-    if (needsFollowUp(q) && !(a[`qf-${q.id}`] || '').trim()) { formError(`Please enter your ${q.followUp.label.toLowerCase()}.`, [field(`qf-${q.id}`)]); return false; }
+    if (needsFollowUp(q) && !(a[`qf-${q.id}`] || '').trim()) { formError(t('Please enter your {what}.', { what: tc(q.followUp.label).toLowerCase() }), [field(`qf-${q.id}`)]); return false; }
     return true;
   }
   switch (name) {
@@ -501,7 +548,7 @@ async function lookUpExpected() {
   const note = $('[data-expected-note]');
   note.hidden = !e;
   if (!e) return;
-  note.textContent = `Welcome, ${first}! We're expecting you${e.host ? `. ${e.host} will be told you're here` : ''}.`;
+  note.textContent = e.host ? t("Welcome, {name}! We're expecting you. {host} will be told you're here.", { name: first, host: e.host }) : t("Welcome, {name}! We're expecting you.", { name: first });
   for (const [name, value] of [['company', e.company], ['visiting', e.host], ['purpose', e.purpose]]) {
     const input = $(`[data-screen="form"] input[name="${name}"]`);
     if (!value || !input || input.value.trim()) continue;
@@ -654,7 +701,8 @@ async function submitNewVisitor(quickEntry, origin) {
   }
   const a = state.answers;
   const res = await api('register', {
-    first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: a.purpose,
+    first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: canonicalPurpose(a.purpose),
+    language: lang() === 'en' ? undefined : LANGS[lang()],
     agreed: !!a.agreed, quickEntry, photo: state.photo?.dataUrl || '', descriptor: quickEntry ? descriptor : null,
     answers: answersForRecord(), flags: state.result?.flags || [], override: state.override || undefined,
   });
@@ -674,7 +722,7 @@ async function afterIdentified(origin) {
   busy(true, 'Signing you in…');
   const res = await api('checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
-    visiting: state.answers.visiting, purpose: state.answers.purpose, expectedId: state.expected?.id,
+    visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
   });
   busy(false);
   if (!res.ok) { toast(errorText(res)); return; }
@@ -684,13 +732,13 @@ async function afterIdentified(origin) {
 
 function showDone(badge) {
   $('[data-done-title]').textContent = state.method === 'new visitor'
-    ? `You're all set, ${state.visitor.first}!`
-    : `Welcome back, ${state.visitor.first}!`;
+    ? t("You're all set, {name}!", { name: state.visitor.first })
+    : t('Welcome back, {name}!', { name: state.visitor.first });
   const b = $('[data-done-badge]');
-  b.textContent = badge ? `Badge ${badge}` : '';
+  b.textContent = badge ? t('Badge {badge}', { badge }) : '';
   b.hidden = !badge;
   const host = $('[data-done-host]');
-  host.textContent = state.hostNotified ? `We've let ${state.hostNotified} know you're here.` : '';
+  host.textContent = state.hostNotified ? t("We've let {host} know you're here.", { host: state.hostNotified }) : '';
   host.hidden = !state.hostNotified;
   show('done');
   if (state.result?.flags?.length || state.override) setTimeout(refreshAttention, 1500);
@@ -704,7 +752,7 @@ async function submitDecline() {
   const a = state.answers, v = state.visitor;
   const res = await api('recordDecline', {
     first: a.first || v?.first, last: a.last || v?.last, company: a.company || v?.company,
-    visiting: a.visiting, purpose: a.purpose, visitorId: v?.id || '', method: state.flow === 'returning' ? state.method : 'new visitor',
+    visiting: a.visiting, purpose: canonicalPurpose(a.purpose), visitorId: v?.id || '', method: state.flow === 'returning' ? state.method : 'new visitor',
     photo: state.photo?.dataUrl || '', reasons: state.result.reasons, expectedId: state.expected?.id,
   });
   busy(false);
@@ -712,7 +760,7 @@ async function submitDecline() {
   if (res.passed) {
     // An admin already let this person in: carry on as normal.
     continueAfterOverride({ by: res.by, reason: res.reason });
-    toast('Welcome! A member of staff has already approved your visit.');
+    toast(t('Welcome! A member of staff has already approved your visit.'));
     return;
   }
   state.declineId = res.declineId;
@@ -805,7 +853,7 @@ function camStatus(cls, text) {
   const bubble = $('[data-cam-bubble]');
   bubble.classList.remove('found', 'idle');
   if (cls) bubble.classList.add(cls);
-  $('[data-cam-label]').textContent = text;
+  $('[data-cam-label]').textContent = t(text);
 }
 
 async function recognizeInBackground() {
@@ -858,7 +906,7 @@ function keepSample(video, descriptors) {
 function showFaceMatch(person) {
   state.faceHit = person;
   camStatus('found', 'Found you!');
-  $('[data-face-title]').textContent = `Welcome back, ${person.first}!`;
+  $('[data-face-title]').textContent = t('Welcome back, {name}!', { name: person.first });
   $('[data-face-name]').textContent = `${person.first} ${person.last}`;
   $('[data-face-company]').textContent = person.company || '';
   $('[data-face-match]').hidden = false;
@@ -896,7 +944,7 @@ async function findMe({ live = false } = {}) {
   if (live && (v('ffirst').length < 2 || v('flast').length < 2)) return;
   if (!live) {
     kb.close();
-    if (!v('ffirst') || !v('flast')) { $('[data-find-error]').textContent = 'Please enter your first and last name.'; return; }
+    if (!v('ffirst') || !v('flast')) { $('[data-find-error]').textContent = t('Please enter your first and last name.'); return; }
     busy(true, 'Looking you up…');
   }
   $('[data-find-error]').textContent = '';
@@ -909,26 +957,26 @@ async function findMe({ live = false } = {}) {
   if (!res.matches.length) {
     box.dataset.ids = '';
     $('[data-suggest]').innerHTML = '';
-    box.innerHTML = live ? '' : `<div class="no-match"><strong>We couldn't find you.</strong> Check the spelling, or sign in as a new visitor. It only takes two minutes.
-      <div class="quick-actions"><button type="button" class="btn-primary" data-new-instead>Sign in as a new visitor</button></div></div>`;
+    box.innerHTML = live ? '' : `<div class="no-match"><strong>${esc(t("We couldn't find you."))}</strong> ${esc(t('Check the spelling, or sign in as a new visitor. It only takes two minutes.'))}
+      <div class="quick-actions"><button type="button" class="btn-primary" data-new-instead>${esc(t('Sign in as a new visitor'))}</button></div></div>`;
     $('[data-new-instead]', box)?.addEventListener('click', () => { state.flow = 'new'; show('form'); });
     return;
   }
   const shown = box.dataset.ids;
   const ids = res.matches.map((m) => m.id).join(',');
   box.dataset.ids = ids;
-  box.innerHTML = `<p class="hint">${res.matches.length > 1 ? 'Which one is you?' : 'Is this you?'}</p>` + res.matches.map((m, i) => `
+  box.innerHTML = `<p class="hint">${esc(t(res.matches.length > 1 ? 'Which one is you?' : 'Is this you?'))}</p>` + res.matches.map((m, i) => `
     <button type="button" class="match" data-match="${i}">
       <span class="avatar">${esc(initials(m))}</span>
-      <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)}${m.lastVisit ? ` · last visit ${esc(m.lastVisit)}` : ''}</span></span>
-      <span class="go">That's me ›</span>
+      <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)}${m.lastVisit ? ` · ${esc(t('last visit {date}', { date: m.lastVisit }))}` : ''}</span></span>
+      <span class="go">${esc(t("That's me ›"))}</span>
     </button>`).join('');
   const suggest = $('[data-suggest]');
   suggest.innerHTML = res.matches.map((m, i) => `
     <button type="button" class="suggest-chip" data-match="${i}">
       <span class="avatar">${esc(initials(m))}</span>
       <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)}</span></span>
-      <em>That's me ›</em>
+      <em>${esc(t("That's me ›"))}</em>
     </button>`).join('');
   $$('[data-match]', box).concat($$('[data-match]', suggest)).forEach((b) => b.addEventListener('click', () => chooseMatch(res.matches[Number(b.dataset.match)], centerOf(b))));
   if (shown !== ids) fx.cascade(box, { step: 70 });
@@ -943,7 +991,7 @@ function chooseMatch(m, origin) {
   state.method = 'returning (name)';
   if (m.quickEntry) { saveSample('return-name'); continueReturning(origin); return; }
   if (!state.sample || !quickEntryOn()) { continueReturning(origin); return; }
-  $('[data-optin-title]').textContent = `Hi, ${m.first}!`;
+  $('[data-optin-title]').textContent = t('Hi, {name}!', { name: m.first });
   show('optin');
 }
 
@@ -979,7 +1027,7 @@ async function findOpen({ live = false } = {}) {
   if (live && (v('lfirst').length < 2 || v('llast').length < 2)) return;
   if (!live) {
     kb.close();
-    if (!v('lfirst') || !v('llast')) { $('[data-leave-error]').textContent = 'Please enter your first and last name.'; return; }
+    if (!v('lfirst') || !v('llast')) { $('[data-leave-error]').textContent = t('Please enter your first and last name.'); return; }
   }
   const seq = ++leaveSeq;
   const res = await api('findOpenVisits', { first: v('lfirst'), last: v('llast') });
@@ -987,14 +1035,14 @@ async function findOpen({ live = false } = {}) {
   const box = $('[data-leave-matches]');
   if (!res.ok) { if (!live) $('[data-leave-error]').textContent = errorText(res); return; }
   if (!res.matches.length) {
-    box.innerHTML = live ? '' : '<div class="no-match"><strong>We couldn\'t find you signed in.</strong> Check the spelling, or see the front desk.</div>';
+    box.innerHTML = live ? '' : `<div class="no-match"><strong>${esc(t("We couldn't find you signed in."))}</strong> ${esc(t('Check the spelling, or see the front desk.'))}</div>`;
     return;
   }
-  box.innerHTML = `<p class="hint">${res.matches.length > 1 ? 'Which one is you?' : 'Is this you?'}</p>` + res.matches.map((m, i) => `
+  box.innerHTML = `<p class="hint">${esc(t(res.matches.length > 1 ? 'Which one is you?' : 'Is this you?'))}</p>` + res.matches.map((m, i) => `
     <button type="button" class="match" data-leave-match="${i}">
       <span class="avatar">${esc(initials(m))}</span>
-      <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)} · signed in ${esc(timeOf(m.since))}</span></span>
-      <span class="go">Sign me out ›</span>
+      <span><strong>${esc(m.first)} ${esc(m.last)}</strong><span>${esc(m.company)} · ${esc(t('signed in {time}', { time: timeOf(m.since) }))}</span></span>
+      <span class="go">${esc(t('Sign me out ›'))}</span>
     </button>`).join('');
   $$('[data-leave-match]', box).forEach((b) => b.addEventListener('click', async () => {
     const m = res.matches[Number(b.dataset.leaveMatch)];
@@ -1002,8 +1050,9 @@ async function findOpen({ live = false } = {}) {
     const out = await api('kioskSignOut', { visitId: m.visitId });
     busy(false);
     if (!out.ok) { $('[data-leave-error]').textContent = errorText(out); return; }
-    show('welcome');
+    // The goodbye is shown in the visitor's language, before the kiosk switches back.
     showSignedOut(out);
+    show('welcome');
   }));
 }
 
@@ -1022,11 +1071,11 @@ function onTap(tag, typed) {
   if (!tag || state.busy) return;
   if (!$('[data-overlay="pin"]').hidden) return;
   if (state.screen === 'setup') { setupTap(tag); return; }
-  if (!settings().badges) { toast("This kiosk doesn't use badges. Sign in and out on the screen."); return; }
+  if (!settings().badges) { toast(t("This kiosk doesn't use badges. Sign in and out on the screen.")); return; }
   if (state.screen === 'admin') { adminTap(tag); return; }
   if (state.screen === 'welcome') { welcomeTap(tag); return; }
   if (state.screen === 'badge') { badgeTap(tag); return; }
-  if (state.screen !== 'done') toast('Finish signing in first. You will tap your badge at the end.');
+  if (state.screen !== 'done') toast(t('Finish signing in first. You will tap your badge at the end.'));
 }
 
 /**
@@ -1051,12 +1100,12 @@ async function badgeTap(tag) {
   scene.classList.remove('error');
   lockBadge(scene);
   scene.classList.add('reading');
-  status.textContent = 'Reading your badge…';
+  status.textContent = t('Reading your badge…');
   const [res] = await Promise.all([
     api('assignBadge', {
       visitorId: state.visitor.id, tag, method: state.method,
       flags: state.result?.flags || [], override: state.override || undefined,
-      visiting: state.answers.visiting, purpose: state.answers.purpose, expectedId: state.expected?.id,
+      visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
     }),
     sleep(700), // long enough to see the reader at work
   ]);
@@ -1076,7 +1125,7 @@ async function badgeTap(tag) {
   state.hostNotified = res.hostNotified || '';
   $('[data-badge-no]').textContent = res.badge;
   scene.classList.add('success');
-  status.textContent = `Badge ${res.badge} is yours!`;
+  status.textContent = t('Badge {badge} is yours!', { badge: res.badge });
   await sleep(1500);
   showDone(res.badge);
 }
@@ -1095,13 +1144,11 @@ async function welcomeTap(tag) {
 function showSignedOut(res) {
   const ov = $('[data-overlay="signout"]');
   const org = settings().org.name;
-  $('[data-signout-title]').textContent = `Goodbye, ${res.first}!`;
-  $('[data-signout-text]').textContent = res.badge
-    ? `You're signed out. Please leave badge ${res.badge} at the front desk. Thanks for visiting${org ? ` ${org}` : ''}.`
-    : `You're signed out. Thanks for visiting${org ? ` ${org}` : ''}.`;
+  $('[data-signout-title]').textContent = t('Goodbye, {name}!', { name: res.first });
+  $('[data-signout-text]').textContent = `${res.badge ? t("You're signed out. Please leave badge {badge} at the front desk.", { badge: res.badge }) : t("You're signed out.")} ${org ? t('Thanks for visiting {org}.', { org }) : t('Thanks for visiting.')}`;
   const undo = $('[data-undo]');
   undo.hidden = false;
-  undo.textContent = 'Not you? Undo';
+  undo.textContent = t('Not you? Undo');
   ov.hidden = false;
   clearTimeout(state.undo?.timer);
   state.undo = { visitId: res.visitId, timer: setTimeout(() => { ov.hidden = true; state.undo = null; }, 7000) };
@@ -1115,7 +1162,7 @@ $('[data-undo]').addEventListener('click', async (e) => {
   state.undo = null;
   const res = await api('undoSignOut', { visitId });
   $('[data-overlay="signout"]').hidden = true;
-  toast(res.ok ? 'Undone. You are still signed in.' : 'Too late to undo. Please see the front desk.');
+  toast(t(res.ok ? 'Undone. You are still signed in.' : 'Too late to undo. Please see the front desk.'));
 });
 $('[data-overlay="signout"]').addEventListener('click', (e) => {
   if (e.target.closest('[data-undo]')) return;
@@ -1680,7 +1727,7 @@ const SETTING_ROWS = [
   ['hosts', 'Hosts', (s) => (s.hosts.length
     ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
     : 'Nobody listed: visitors type any name')],
-  ['touches', 'Photos, reasons, rules and end of day', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'}`],
+  ['touches', 'Photos, reasons, rules, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
 ];
 
 function loadSettingsPane() {

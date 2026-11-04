@@ -2,6 +2,8 @@
 // NFC reader is connected, so the kiosk brings its own. Fields are readonly
 // <input>s; this writes their value and fires an 'input' event.
 // A field's data-kb picks the layout: text (default), email, url or digits.
+// The àé key on the text layout shows accented letters for one keystroke.
+import { t } from './i18n.js';
 
 const LETTERS = [
   ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
@@ -12,7 +14,14 @@ const ROWS = {
     ...LETTERS,
     ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', "'"],
     ['shift', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '-', 'back'],
-    [',', '.', 'space', '&', 'done'],
+    ['accents', ',', '.', 'space', '&', 'done'],
+  ],
+  accents: [
+    ['á', 'é', 'í', 'ó', 'ú', 'ñ', 'ü', 'ç', 'à', 'è'],
+    ['â', 'ê', 'î', 'ô', 'û', 'ã', 'õ', 'ë', 'ï', 'ö'],
+    ['ä', 'å', 'ø', 'æ', 'ß', 'œ', 'ł', 'š', 'ž', 'č'],
+    ['shift', 'ì', 'ò', 'ù', 'ý', 'ÿ', '¿', '¡', "'", 'back'],
+    ['abc', ',', '.', 'space', 'done'],
   ],
   email: [
     ...LETTERS,
@@ -58,8 +67,10 @@ export class Keyboard {
     this.root.innerHTML = ROWS[this.layout].map((row) => `<div class="kb-row">${row.map((k) => {
       if (k === 'shift') return `<button type="button" class="kb-key kb-wide ${upper ? 'on' : ''}" data-key="shift" aria-label="Shift">⇧</button>`;
       if (k === 'back') return '<button type="button" class="kb-key kb-wide" data-key="back" aria-label="Delete">⌫</button>';
-      if (k === 'space') return '<button type="button" class="kb-key kb-space" data-key=" ">space</button>';
-      if (k === 'done') return '<button type="button" class="kb-key kb-done" data-key="done">Done</button>';
+      if (k === 'space') return `<button type="button" class="kb-key kb-space" data-key=" ">${t('space')}</button>`;
+      if (k === 'done') return `<button type="button" class="kb-key kb-done" data-key="done">${t('Done')}</button>`;
+      if (k === 'accents') return '<button type="button" class="kb-key kb-wide" data-key="accents" aria-label="Accents">àé</button>';
+      if (k === 'abc') return '<button type="button" class="kb-key kb-wide" data-key="abc" aria-label="Letters">abc</button>';
       const shown = upper && k.length === 1 ? k.toUpperCase() : k;
       return `<button type="button" class="kb-key${k.length > 1 ? ' kb-chunk' : ''}" data-key="${shown}">${shown}</button>`;
     }).join('')}</div>`).join('');
@@ -106,8 +117,11 @@ export class Keyboard {
   press(k) {
     if (!this.input) return;
     if (k === 'shift') { this.shift = !this.shift; this.manualShift = this.shift; this.render(); return; }
+    if (k === 'accents' || k === 'abc') { this.layout = k === 'accents' ? 'accents' : 'text'; this.render(); return; }
     if (k === 'done') { const el = this.input; this.close(); el.dispatchEvent(new Event('change', { bubbles: true })); return; }
     this.type(k === 'back' ? 'Backspace' : k);
+    // One accented letter, then back to the letters.
+    if (this.layout === 'accents' && k !== 'back') { this.layout = 'text'; this.render(); }
     if (this.manualShift) { this.manualShift = false; this.shift = false; this.render(); }
     this.autoShift();
   }

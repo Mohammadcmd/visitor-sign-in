@@ -382,6 +382,18 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   ok(old.handle({ key: KEY, action: 'adminAddExpected', args: { token: otok, first: 'Ann', last: 'Lee', day: today } }).ok, 'tab created on demand');
 }
 
+// ------------------------------------------------------------------ visitors signing in another language
+{
+  const l = loadBackend();
+  l.handle({ action: 'claim', key: KEY });
+  const reg = l.handle({ key: KEY, action: 'register', args: { first: 'José', last: 'Muñoz', company: 'N/A', visiting: 'Pat', purpose: 'Reunión', agreed: true, photo, language: 'Español' } });
+  ok(reg.ok, JSON.stringify(reg));
+  ok(/^Agreed to the visitor rules on the kiosk, in Español \(/.test(l.sheets.Visitors.objects()[0]['Visitor acknowledgment']), 'the language the rules were agreed in is kept');
+  l.handle({ key: KEY, action: 'register', args: { first: 'Ann', last: 'Lee', company: 'N/A', visiting: 'Pat', purpose: 'Meeting', agreed: true, photo, language: '=HYPERLINK("x")' } });
+  ok(/^Agreed to the visitor rules on the kiosk \(/.test(l.sheets.Visitors.objects()[1]['Visitor acknowledgment']), 'odd language values are ignored');
+  eq(l.handle({ key: KEY, action: 'findVisitor', args: { first: 'jose', last: 'munoz' } }).matches.length, 1, 'accents are ignored when searching');
+}
+
 // ------------------------------------------------------------------ retries
 // A retried write (same request id) replays the first answer instead of writing twice.
 const before = b.sheets.Visitors.rows.length;

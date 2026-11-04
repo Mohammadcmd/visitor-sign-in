@@ -10,6 +10,7 @@ import {
 import { normalizeTag } from './match.js';
 import * as fx from './transitions.js';
 import { saveFile } from './files.js';
+import { builtIn, LANGS } from './i18n.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -677,8 +678,57 @@ function renderTouches() {
   $('[data-summary-box]').hidden = !(draft.storage === 'cloud' && draft.endOfDay);
   $('[data-summary-toggle]').setAttribute('aria-checked', String(!!draft.dailySummary));
   $('[data-summary-to]').hidden = !draft.dailySummary;
+  renderLanguages();
   $('[data-rules-edit]').innerHTML = draft.form.rules.map((r, i) => `<li>${esc(fill(r, draft))}<button type="button" data-unrule="${i}" aria-label="Remove">×</button></li>`).join('')
     || '<li class="hint small">No rules: the rules step is skipped.</li>';
+}
+
+// ------------------------------------------------------------------ languages
+
+/** The business's own text that visitors see, for the translation list. */
+function translatableTexts() {
+  const out = [];
+  const add = (x) => { const v = String(x || '').trim(); if (v && !out.includes(v)) out.push(v); };
+  add(draft.org.tagline);
+  if (draft.form.askHost) { add(draft.form.hostLabel); add(draft.form.hostHint); }
+  String(draft.form.intro || '').split(/\n{2,}/).forEach(add);
+  if (extra.screeningOn) {
+    draft.screening.questions.forEach((q) => {
+      add(q.text); add(q.hint); q.options.forEach(add);
+      if (q.followUp) add(q.followUp.label);
+      add(q.intro);
+    });
+    add(draft.screening.declineMessage);
+  }
+  if (draft.form.askPurpose) draft.form.purposes.forEach(add);
+  draft.form.rules.forEach(add);
+  return out;
+}
+
+function renderLanguages() {
+  const on = draft.languages.includes('es');
+  const toggle = $('[data-lang-toggle="es"]');
+  toggle.setAttribute('aria-checked', String(on));
+  $('[data-translations]').hidden = !on;
+  if (!on) return;
+  const keys = translatableTexts();
+  extra.trKeys = keys;
+  const map = draft.translations.es || {};
+  $('[data-tr-list]').innerHTML = keys.map((k, i) => {
+    const value = map[k] || builtIn('es', k);
+    const st = map[k] ? 'custom' : value ? 'built' : 'missing';
+    return `<li data-state="${st}"><span class="tr-en">${esc(k)}</span>
+      <label class="field"><input readonly inputmode="none" name="tr" data-tr="${i}" data-cap="sentence" maxlength="600" autocomplete="off" lang="es" value="${esc(value)}" placeholder="${esc('Shown in English')}"></label></li>`;
+  }).join('');
+  renderTrTitle();
+}
+
+function renderTrTitle() {
+  const keys = extra.trKeys || [];
+  const map = draft.translations.es || {};
+  const missing = keys.filter((k) => !map[k] && !builtIn('es', k)).length;
+  $('[data-translations-title]').textContent = !keys.length ? 'Nothing of your own to translate.'
+    : missing ? `${keys.length - missing} of ${keys.length} translated · ${missing} still shown in English` : `All ${keys.length} translated`;
 }
 
 // ------------------------------------------------------------------ ready
@@ -699,6 +749,7 @@ function renderReady() {
     ['Hosts', s.hosts.length ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}` : 'None listed',
       s.hosts.length ? (s.storage === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
     ['Photos', { all: 'Every new visitor', declined: 'Declined visitors only', off: 'No photos' }[s.photos], s.quickEntry && s.photos === 'all' ? 'Quick entry is on for returning visitors who opt in.' : ''],
+    ['Languages', s.languages.map((c) => LANGS[c]).join(', '), s.languages.length > 1 ? 'Visitors choose on the welcome screen.' : ''],
     ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out',
       s.endOfDay && s.storage === 'cloud' && s.dailySummary ? `A daily summary is emailed to ${s.screening.alertEmails}.` : ''],
   ];
@@ -741,6 +792,16 @@ function wire() {
       case 's-pin': case 's-pin2': renderPinChecks(); break;
       case 's-alerts': case 's-summary-to': draft.screening.alertEmails = v; break;
       case 's-key': break;
+      case 'tr': {
+        const key = extra.trKeys?.[Number(t.dataset.tr)];
+        if (!key) break;
+        const map = (draft.translations.es ||= {});
+        if (!v || v === builtIn('es', key)) delete map[key]; else map[key] = v;
+        const row = t.closest('li');
+        if (row) row.dataset.state = v ? (map[key] ? 'custom' : 'built') : 'missing';
+        renderTrTitle();
+        break;
+      }
       case 'q-text': {
         const q = draft.screening.questions.find((x) => x.id === extra.editing);
         if (q) { q.text = v; if (!q.template || !q.label) q.label = v.slice(0, 60); }
@@ -954,6 +1015,10 @@ function wire() {
     renderHosts();
   });
   $('[data-notify-toggle]').addEventListener('click', () => { draft.notifyHosts = !draft.notifyHosts; renderHosts(); });
+  $('[data-lang-toggle="es"]').addEventListener('click', () => {
+    draft.languages = draft.languages.includes('es') ? ['en'] : ['en', 'es'];
+    renderLanguages();
+  });
   $('[data-summary-toggle]').addEventListener('click', () => {
     draft.dailySummary = !draft.dailySummary;
     renderTouches();

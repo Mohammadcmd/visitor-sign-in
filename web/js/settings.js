@@ -97,7 +97,30 @@ export const DEFAULTS = Object.freeze({
   notifyHosts: true,
   endOfDay: '',                // 'HH:MM': sign everyone still inside out at this time each day; '' = never
   dailySummary: false,         // Google Sheets: email the alert addresses a summary at the end-of-day time
+  languages: ['en'],           // languages visitors can choose; English is always first
+  translations: {},            // { es: { "English text": "texto" } } for the business's own text
 });
+
+const VISITOR_LANGS = ['en', 'es'];
+
+function translationMap(v) {
+  const out = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const code of VISITOR_LANGS.slice(1)) {
+    const src = v[code];
+    if (!src || typeof src !== 'object') continue;
+    const m = {};
+    let n = 0;
+    for (const [k, val] of Object.entries(src)) {
+      if (n >= 400) break;
+      const key = typeof k === 'string' ? k.trim().slice(0, 600) : '';
+      const text = typeof val === 'string' ? val.trim().slice(0, 600) : '';
+      if (key && text) { m[key] = text; n++; }
+    }
+    if (n) out[code] = m;
+  }
+  return out;
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -186,6 +209,8 @@ export function normalize(input) {
     notifyHosts: s.notifyHosts !== false,
     endOfDay: /^([01]\d|2[0-3]):[0-5]\d$/.test(s.endOfDay || '') ? s.endOfDay : '',
     dailySummary: s.dailySummary === true,
+    languages: ['en', ...(Array.isArray(s.languages) ? VISITOR_LANGS.slice(1).filter((c) => s.languages.includes(c)) : [])],
+    translations: translationMap(s.translations),
   };
   // Quick entry recognizes faces, so it needs a photo of every new visitor.
   if (out.photos !== 'all') out.quickEntry = false;
@@ -266,6 +291,7 @@ export function demoSettings() {
     badges: true,
     screening: { questions: [us, fromTemplate(QUESTION_TEMPLATES[1])] },
     hosts: [{ name: 'Lisa Chen' }, { name: 'Pat Kim' }, { name: 'Tom Alvarez' }],
+    languages: ['en', 'es'],
   });
 }
 

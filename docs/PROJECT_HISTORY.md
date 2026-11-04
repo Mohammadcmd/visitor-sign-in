@@ -116,6 +116,13 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 - **Daily summary** (Google Sheets): at the end-of-day time, one email per day to the alert addresses with sign-ins, declines, flags, who was signed out automatically, badges not returned and expected visitors who didn't arrive. A kiosk's very first end-of-day run skips it, so turning the feature on doesn't send a summary for a day before setup.
 - Two fixes found by the new tests: the first tap on the welcome screen after leaving the admin screen was swallowed, and the on-screen keyboard covered forms in the admin screen.
 
+## Spanish for visitors
+
+- Visitor screens switch languages per visitor (welcome screen buttons, a switch on the next screen); the kiosk returns to English for the next person. Staff screens stay in English.
+- `web/js/i18n.js` holds the kiosk's own text in Spanish plus translations of every built-in question, rule, reason and decline message. The static page text is translated in place, so `index.html` keeps reading as plain English.
+- The business's own text is translated in setup, one box per item, falling back to the built-in translation and then English. Options keep their English value underneath, so recorded answers, decline rules and alerts never depend on the language. A reason picked from the Spanish chips is saved in English; the rules agreement notes the language.
+- The on-screen keyboard gained one-shot accented letters.
+
 ## Where things are
 
 | Thing | Location |
@@ -133,6 +140,6 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 
 Not built yet, in rough order of value:
 
-1. Spanish and other languages, including translations for the business's own questions and rules.
+1. More languages (French, Portuguese, Chinese…): a dictionary each in `web/js/i18n.js`.
 2. Text-message host notifications, and notifying hosts in on-tablet mode.
 3. Calendar integration for expected visitors (Google Calendar invites with visitors).

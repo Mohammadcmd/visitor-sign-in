@@ -293,6 +293,8 @@ function register_(a) {
 
   var answers = cleanAnswers_(a.answers);
   var flags = cleanFlags_(a.flags);
+  // The language the visitor read the questions and rules in, when it wasn't English.
+  var language = /^[A-Za-zÀ-ÿ ]{2,20}$/.test(String(a.language || '')) && a.language !== 'English' ? a.language : '';
   var pass = takePass_(v.first, v.last);
   var screening = screeningText_(flags, a.override || pass);
 
@@ -307,7 +309,7 @@ function register_(a) {
   var row = {
     'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
     'Who are you visiting?': v.visiting, 'Purpose of your visit': v.purpose,
-    'Visitor acknowledgment': v.agreed ? 'Agreed to the visitor rules on the kiosk (' + stamp_(now) + ')' : '',
+    'Visitor acknowledgment': v.agreed ? 'Agreed to the visitor rules on the kiosk' + (language ? ', in ' + language : '') + ' (' + stamp_(now) + ')' : '',
     'Quick entry': v.quickEntry ? 'Yes' : 'No', 'Screening': screening,
     'Registered': now, 'Last visit': now, 'Visit count': 0,
     'Visitor ID': id, 'Photo folder': folderUrl
