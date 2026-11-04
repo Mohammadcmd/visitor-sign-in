@@ -1,0 +1,15 @@
+{
+  "name": "visitor-sign-in",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A configurable visitor sign-in kiosk with screening questions, NFC/RFID cards, visitor photos and Google Sheets cloud sync. No build step: the app is plain HTML, CSS and JavaScript.",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "npm run test:connector && npm run test:e2e",
+    "test:connector": "node tests/connector.test.js",
+    "test:e2e": "node tests/e2e.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

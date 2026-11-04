@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="color-scheme" content="light dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Sign In">
+  <meta name="description" content="A professional visitor sign-in kiosk with screening questions, NFC/RFID cards, visitor photos and optional Google Sheets cloud sync.">
+  <title>Visitor Sign In</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Icon sprite -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-mark" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M16 9h2a2 2 0 0 1 2 2v10"/><path d="M9 7h2M9 11h2M9 15h2"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="6" width="15" height="12" rx="2"/><path d="M19.5 9a4.5 4.5 0 0 1 0 6"/><path d="M22 7a8 8 0 0 1 0 10"/><path d="M5 14h4"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M20 12c0 1.7-3.6 3-8 3s-8-1.3-8-3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H7a5 5 0 1 1 1-9.9A6 6 0 0 1 19.4 11 4 4 0 0 1 17.5 19z"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></symbol>
+    <symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15v2M12 10v7M17 6v11"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M2 2l20 20"/><path d="M8.5 16.4a5 5 0 0 1 6.9-.2"/><path d="M5 12.9a10 10 0 0 1 4.2-2.4M19 12.9a10 10 0 0 0-2.6-1.8"/><path d="M1.4 9a15 15 0 0 1 4.3-2.6M22.6 9A15 15 0 0 0 11 5.1"/><path d="M12 20h.01"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M18 13l-6 6-6-6"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4"/><path d="M4 4h12l-2 4 2 4H4"/></symbol>
+    <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  </svg>
+
+  <noscript><p class="noscript">This kiosk needs JavaScript. Please turn it on in your browser settings.</p></noscript>
+
+  <!-- =====================================================================
+       SETUP WIZARD (first run) and SETTINGS (from the admin panel)
+       ===================================================================== -->
+  <section id="view-setup" class="view view-setup" hidden>
+    <div class="setup-shell">
+      <aside class="setup-aside" aria-label="Setup progress">
+        <div class="aside-brand">
+          <span class="app-mark"><svg class="i"><use href="#i-mark"/></svg></span>
+          <div><strong>Visitor Sign In</strong><small id="aside-mode">Setup</small></div>
+        </div>
+        <ol class="vsteps" id="setup-steps"></ol>
+        <div class="tip-card" id="tip-aside"></div>
+        <p class="aside-foot"><svg class="i"><use href="#i-lock"/></svg><span>Your data stays on this device or in your own Google account. Nothing is sent to us.</span></p>
+      </aside>
+
+      <main class="setup-main">
+        <div class="mobile-progress" aria-hidden="true">
+          <div class="mp-row"><span id="mp-label"></span><span id="mp-name"></span></div>
+          <div class="mp-bar"><span id="mp-fill"></span></div>
+        </div>
+
+        <form id="setup-form" novalidate>
+          <p class="step-count" id="step-count"></p>
+
+          <!-- 1. Company -->
+          <fieldset class="setup-step" data-step="company">
+            <header class="step-head">
+              <h1>What's your company called?</h1>
+              <p class="lead">Your company name appears on the welcome screen, on visitor badges and in your reports.</p>
+            </header>
+            <label class="field">
+              <span class="label">Company name <b class="req" aria-hidden="true">*</b></span>
+              <input name="orgName" type="text" required maxlength="80" placeholder="e.g. Acme Corporation" autocomplete="organization">
+            </label>
+            <div class="field">
+              <span class="label">Brand color</span>
+              <span class="hint">Used for buttons, highlights and badges. Button text automatically switches to black or white to stay readable.</span>
+              <div class="color-row">
+                <div class="swatches" id="swatches"></div>
+                <label class="color-custom" title="Pick any color">
+                  <input name="accent" type="color" value="#2563eb" aria-label="Custom brand color">
+                  <span>Custom</span>
+                </label>
+              </div>
+            </div>
+            <div class="preview-card" aria-hidden="true">
+              <span class="preview-label">Live preview</span>
+              <div class="pv-screen">
+                <img class="pv-logo" id="pv-logo" alt="" hidden>
+                <strong class="pv-name" id="pv-name">Your company</strong>
+                <span class="pv-welcome">Welcome! Please sign in.</span>
+                <div class="pv-btns"><span class="pv-btn pv-in">Sign in</span><span class="pv-btn pv-out">Sign out</span></div>
+              </div>
+            </div>
+            <p class="import-line">
+              <svg class="i"><use href="#i-upload"/></svg>
+              Setting up another kiosk?
+              <label class="link-btn">Import settings from your first kiosk<input type="file" id="setup-import" accept=".json,application/json" hidden></label>
+            </p>
+          </fieldset>
+
+          <!-- 2. Admin login -->
+          <fieldset class="setup-step" data-step="admin" hidden>
+            <header class="step-head">
+              <h1>Create your admin login</h1>
+              <p class="lead">Only admins can see the visitor log, review declined visitors, manage cards and change settings. Visitors and staff never need this code.</p>
+            </header>
+            <label class="field">
+              <span class="label">Admin name <b class="req" aria-hidden="true">*</b></span>
+              <span class="hint">Shown in the admin panel and recorded when you override a decision.</span>
+              <input name="adminName" type="text" required maxlength="60" placeholder="e.g. Jordan Lee, Office Manager" autocomplete="name">
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="label">Admin code <b class="req" data-pin-req aria-hidden="true">*</b></span>
+                <span class="pw-wrap">
+                  <input name="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 to 8 digits">
+                  <button type="button" class="pw-toggle" id="pin-show" aria-label="Show code" aria-pressed="false"><svg class="i"><use href="#i-eye"/></svg></button>
+                </span>
+              </label>
+              <label class="field">
+                <span class="label">Confirm admin code <b class="req" data-pin-req aria-hidden="true">*</b></span>
+                <input name="pin2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="Type it again">
+              </label>
+            </div>
+            <ul class="checks" id="pin-checks">
+              <li data-check="len">4 to 8 digits</li>
+              <li data-check="easy">Not an easy pattern like 1234 or 1111</li>
+              <li data-check="match">Both codes match</li>
+            </ul>
+            <p class="hint" id="pin-keep-note" hidden>Leave both code fields blank to keep your current admin code.</p>
+          </fieldset>
+
+          <!-- 3. Logo -->
+          <fieldset class="setup-step" data-step="logo" hidden>
+            <header class="step-head">
+              <h1>Upload your logo</h1>
+              <p class="lead">Use a <strong>PNG with a transparent background</strong>, with no white box behind the logo, so it looks clean on any screen and badge. This step is optional.</p>
+            </header>
+            <div class="dropzone" id="logo-drop" tabindex="0" role="button" aria-label="Choose a PNG logo file">
+              <span class="dz-icon"><svg class="i"><use href="#i-upload"/></svg></span>
+              <strong>Drop your PNG here, or <u>browse</u></strong>
+              <small>PNG only · transparent background · at least 400 px wide works best</small>
+              <input id="logo-input" type="file" accept="image/png" hidden>
+            </div>
+            <div class="logo-result" id="logo-result" hidden>
+              <div class="logo-previews">
+                <figure><div class="lp checker" id="lp-a"></div><figcaption>Transparency</figcaption></figure>
+                <figure><div class="lp lp-light" id="lp-b"></div><figcaption>Light screen</figcaption></figure>
+                <figure><div class="lp lp-dark" id="lp-c"></div><figcaption>Dark screen</figcaption></figure>
+              </div>
+              <div class="logo-meta">
+                <span id="logo-dims" class="hint"></span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-secondary btn-sm" id="logo-replace">Replace</button>
+                <button type="button" class="btn btn-ghost btn-sm text-danger" id="logo-clear">Remove</button>
+              </div>
+            </div>
+            <div class="callout" id="logo-note" hidden></div>
+          </fieldset>
+
+          <!-- 4. NFC / RFID cards -->
+          <fieldset class="setup-step" data-step="cards" hidden>
+            <header class="step-head">
+              <h1>NFC / RFID card sign-in</h1>
+              <p class="lead">Staff, contractors and regular visitors can tap a card to sign in, then tap again to sign out. Visitors without a card still use the on-screen form.</p>
+            </header>
+            <div class="choice-grid three" role="radiogroup" aria-label="Card reader">
+              <label class="choice">
+                <input type="radio" name="cardMode" value="off">
+                <span class="choice-body">
+                  <span class="choice-icon"><svg class="i"><use href="#i-monitor"/></svg></span>
+                  <strong>No cards</strong>
+                  <small>Everyone signs in on the screen.</small>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="radio" name="cardMode" value="usb">
+                <span class="choice-body">
+                  <span class="choice-icon"><svg class="i"><use href="#i-card"/></svg></span>
+                  <strong>USB or Bluetooth reader</strong>
+                  <small>Works with most readers on iPad, Windows, Mac, Android and Chromebook.</small>
+                </span>
+              </label>
+              <label class="choice" id="nfc-choice">
+                <input type="radio" name="cardMode" value="nfc">
+                <span class="choice-body">
+                  <span class="choice-icon"><svg class="i"><use href="#i-device"/></svg></span>
+                  <strong>Built-in NFC</strong>
+                  <small id="nfc-support">Uses the device's own NFC chip. Needs Chrome on Android.</small>
+                </span>
+              </label>
+            </div>
+            <div class="test-panel" id="card-test" hidden>
+              <div class="tap-target" id="tap-target" aria-live="polite">
+                <span class="tap-icon"><svg class="i"><use href="#i-card"/></svg></span>
+                <span><strong>Test your reader</strong><small>Tap a card on the reader now.</small></span>
+              </div>
+              <div class="row-btns left">
+                <button type="button" class="btn btn-secondary" id="nfc-start" hidden>Start NFC scan</button>
+                <button type="button" class="btn btn-secondary" id="make-admin-card" hidden><svg class="i"><use href="#i-shield"/></svg>Use this card as an admin card</button>
+              </div>
+              <p class="hint" id="admin-cards-note"></p>
+            </div>
+          </fieldset>
+
+          <!-- 5. Storage -->
+          <fieldset class="setup-step" data-step="storage" hidden>
+            <header class="step-head">
+              <h1>Where should visitor records be saved?</h1>
+              <p class="lead">Choose what suits your business. You can switch later in Settings, and your existing records come with you.</p>
+            </header>
+            <div class="choice-grid two" role="radiogroup" aria-label="Storage">
+              <label class="choice choice-lg">
+                <input type="radio" name="storage" value="local">
+                <span class="choice-body">
+                  <span class="choice-top"><span class="choice-icon"><svg class="i"><use href="#i-device"/></svg></span><span class="tag">Simplest</span></span>
+                  <strong>On this device</strong>
+                  <small>Records are saved privately in this browser. There's nothing else to set up.</small>
+                  <ul class="pros">
+                    <li class="pro">Ready in seconds, no accounts</li>
+                    <li class="pro">Works completely offline</li>
+                    <li class="con">Records stay on this one device</li>
+                    <li class="con">Staff alerts appear in the admin panel only</li>
+                  </ul>
+                  <span class="best">Best for a single front desk</span>
+                </span>
+              </label>
+              <label class="choice choice-lg">
+                <input type="radio" name="storage" value="cloud">
+                <span class="choice-body">
+                  <span class="choice-top"><span class="choice-icon"><svg class="i"><use href="#i-cloud"/></svg></span><span class="tag tag-accent">Teams &amp; multiple entrances</span></span>
+                  <strong>Cloud: Google Sheets</strong>
+                  <small>Every sign-in is saved to a Google Sheet that you own.</small>
+                  <ul class="pros">
+                    <li class="pro">See who's on site from any phone or computer</li>
+                    <li class="pro">Several kiosks share one visitor log</li>
+                    <li class="pro">Email alerts to staff and hosts</li>
+                    <li class="pro">Keeps working offline, then catches up</li>
+                    <li class="con">Needs a free Google account, about 5 minutes</li>
+                  </ul>
+                  <span class="best">Best for teams</span>
+                </span>
+              </label>
+            </div>
+            <div class="callout info">
+              <svg class="i"><use href="#i-lock"/></svg>
+              <div><strong>Your data stays yours.</strong> Records are kept on this device or in your own Google account. This app has no servers of its own, so nothing is ever sent to us.</div>
+            </div>
+          </fieldset>
+
+          <!-- 6. Spreadsheet (local: people list, cloud: connector) -->
+          <fieldset class="setup-step" data-step="sheet" hidden>
+            <div data-storage="local">
+              <header class="step-head">
+                <h1>Link your people spreadsheet</h1>
+                <p class="lead">Keep your staff and card holders in a Google Sheet. The kiosk reads it, so you can add or remove people from anywhere. This step is optional.</p>
+              </header>
+              <ol class="guide">
+                <li>
+                  <span class="gnum">1</span>
+                  <div>
+                    <strong>Create a Google Sheet</strong> with these headings in row 1:
+                    <div class="template">
+                      <code>Name</code><code>Card ID</code><code>Company</code><code>Role</code><code>Admin</code>
+                      <button type="button" class="btn btn-ghost btn-sm" id="copy-headers"><svg class="i"><use href="#i-copy"/></svg>Copy</button>
+                    </div>
+                    <a class="btn btn-secondary btn-sm" href="https://sheets.new" target="_blank" rel="noopener"><svg class="i"><use href="#i-external"/></svg>Open a new Google Sheet</a>
+                    <p class="hint">Only <em>Name</em> is required. Add a <em>Card ID</em> for anyone with an NFC/RFID card, and put "Yes" in the <em>Admin</em> column for admin cards. Everyone listed also appears in the "Who are you visiting?" list.</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="gnum">2</span>
+                  <div><strong>Share it so that anyone with the link can view it.</strong> Click <kbd>Share</kbd>, then under <em>General access</em> choose <kbd>Anyone with the link</kbd> and set the role to <kbd>Viewer</kbd>.</div>
+                </li>
+                <li>
+                  <span class="gnum">3</span>
+                  <div><strong>Copy and paste the link.</strong> Click <kbd>Copy link</kbd>, paste it below, then click <em>Test link</em>.</div>
+                </li>
+              </ol>
+              <label class="field">
+                <span class="label">Spreadsheet link</span>
+                <span class="input-row">
+                  <input name="sheetUrl" type="url" inputmode="url" placeholder="https://docs.google.com/spreadsheets/d/…" autocomplete="off">
+                  <button type="button" class="btn btn-secondary" id="sheet-test">Test link</button>
+                </span>
+              </label>
+              <div class="status-box" id="sheet-status" hidden></div>
+              <div class="callout warn small">
+                <svg class="i"><use href="#i-alert"/></svg>
+                <div>Anyone with the link can open this sheet, so only include names, card IDs and companies. Don't add personal phone numbers, emails or home addresses.</div>
+              </div>
+            </div>
+
+            <div data-storage="cloud">
+              <header class="step-head">
+                <h1>Connect your Google Sheet</h1>
+                <p class="lead">Add a small connector script to a Google Sheet that you own. It takes about 5 minutes and you only do it once. Your sheet stays private.</p>
+              </header>
+              <ol class="guide">
+                <li>
+                  <span class="gnum">1</span>
+                  <div>
+                    <strong>Create a Google Sheet</strong> to hold your visitor log, and give it a name such as "Visitor log".
+                    <div class="btn-line"><a class="btn btn-secondary btn-sm" href="https://sheets.new" target="_blank" rel="noopener"><svg class="i"><use href="#i-external"/></svg>Open a new Google Sheet</a></div>
+                    <p class="hint">The connector adds a <em>People</em> tab (staff and card holders) and a <em>Visits</em> tab (every sign-in) automatically.</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="gnum">2</span>
+                  <div>
+                    <strong>Add the connector script.</strong> In the sheet, open <kbd>Extensions</kbd> → <kbd>Apps Script</kbd>. Delete any code in the editor, paste the script, then click <kbd>Save</kbd>.
+                    <div class="btn-line">
+                      <button type="button" class="btn btn-primary btn-sm" id="copy-script"><svg class="i"><use href="#i-copy"/></svg>Copy script</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="download-script"><svg class="i"><use href="#i-download"/></svg>Download Code.gs</button>
+                    </div>
+                    <p class="hint">The script contains this kiosk's private key: <code id="key-display"></code></p>
+                  </div>
+                </li>
+                <li>
+                  <span class="gnum">3</span>
+                  <div><strong>Deploy it as a web app.</strong> Click <kbd>Deploy</kbd> → <kbd>New deployment</kbd>, click the gear next to <em>Select type</em> and choose <kbd>Web app</kbd>. Set <em>Execute as</em> to <kbd>Me</kbd> and <em>Who has access</em> to <kbd>Anyone</kbd>, then click <kbd>Deploy</kbd>.</div>
+                </li>
+                <li>
+                  <span class="gnum">4</span>
+                  <div>
+                    <strong>Allow access.</strong> When Google asks, choose your account, click <kbd>Advanced</kbd> → <kbd>Go to … (unsafe)</kbd> → <kbd>Allow</kbd>.
+                    <p class="hint">Google shows this warning for any script you add yourself. The script can only open this one spreadsheet and send the alert emails you set up.</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="gnum">5</span>
+                  <div><strong>Paste the Web app URL</strong> (it ends in <code>/exec</code>) below and test the connection.</div>
+                </li>
+              </ol>
+              <label class="field">
+                <span class="label">Web app URL <b class="req" aria-hidden="true">*</b></span>
+                <span class="input-row">
+                  <input name="cloudUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+                  <button type="button" class="btn btn-primary" id="cloud-test">Test connection</button>
+                </span>
+              </label>
+              <div class="status-box" id="cloud-status" hidden></div>
+              <div class="field-row">
+                <label class="field">
+                  <span class="label">Kiosk name</span>
+                  <span class="hint">Recorded with each visit, so you can tell entrances apart.</span>
+                  <input name="kioskName" type="text" maxlength="60" placeholder="e.g. Front entrance" autocomplete="off">
+                </label>
+                <label class="field">
+                  <span class="label">Kiosk key</span>
+                  <span class="hint">Setting up a second kiosk? Use the same key as the first one.</span>
+                  <input name="cloudKey" type="text" maxlength="64" autocomplete="off" spellcheck="false">
+                </label>
+              </div>
+              <label class="toggle">
+                <input name="notifyHosts" type="checkbox">
+                <span><strong>Email hosts when their visitor arrives</strong><small>Add an <em>Email</em> column to the People tab for anyone who should be notified.</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- 7. Screening questions -->
+          <fieldset class="setup-step" data-step="questions" hidden>
+            <header class="step-head">
+              <h1>Do you want to ask visitors extra questions?</h1>
+              <p class="lead">Screening questions appear after the sign-in form. Depending on the answers, the kiosk can politely decline a visitor or alert your staff. Card holders skip these questions.</p>
+            </header>
+            <div class="choice-grid two" role="radiogroup" aria-label="Screening questions">
+              <label class="choice">
+                <input type="radio" name="screeningEnabled" value="no">
+                <span class="choice-body">
+                  <span class="choice-icon"><svg class="i"><use href="#i-check-circle"/></svg></span>
+                  <strong>No extra questions</strong>
+                  <small>Visitors fill in the form and sign in.</small>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="radio" name="screeningEnabled" value="yes">
+                <span class="choice-body">
+                  <span class="choice-icon"><svg class="i"><use href="#i-question"/></svg></span>
+                  <strong>Yes, add screening questions</strong>
+                  <small>Decline or flag visitors based on their answers.</small>
+                </span>
+              </label>
+            </div>
+
+            <div id="screening-builder" hidden>
+              <div class="qtemplates">
+                <span class="label">Quick add</span>
+                <div class="chip-row" id="q-templates"></div>
+              </div>
+              <ol class="qlist" id="q-list"></ol>
+              <button type="button" class="btn btn-secondary" id="q-add"><svg class="i"><use href="#i-plus"/></svg>Add your own question</button>
+
+              <div class="subsection">
+                <h2 class="sub-title">When a visitor is declined</h2>
+                <label class="field">
+                  <span class="label">Message shown to the visitor</span>
+                  <span class="hint">Keep it polite and general. Visitors aren't told which answer led to the decision.</span>
+                  <textarea name="declineMessage" rows="4"></textarea>
+                </label>
+                <label class="field" id="alert-emails-field">
+                  <span class="label">Email alerts to</span>
+                  <span class="hint">Staff to email, with the visitor's photo, when someone is declined or flagged. Separate addresses with commas.</span>
+                  <input name="alertEmails" type="text" inputmode="email" placeholder="security@example.com, reception@example.com" autocomplete="off">
+                </label>
+                <div class="callout info small" id="alert-local-note" hidden>
+                  <svg class="i"><use href="#i-bell"/></svg>
+                  <div>With on-device storage, staff alerts appear in the admin panel, and the gear icon shows a dot until someone reviews them. Choose <strong>Cloud: Google Sheets</strong> storage to also send email alerts.</div>
+                </div>
+              </div>
+
+              <div class="callout warn">
+                <svg class="i"><use href="#i-alert"/></svg>
+                <div><strong>Make sure your questions follow local law.</strong> Some questions, such as citizenship or health status, are only appropriate where your business is required to ask them, for example under ITAR/EAR export-control rules. Answers and photos are stored with each visit record.</div>
+              </div>
+            </div>
+
+            <div class="subsection">
+              <h2 class="sub-title">Visitor photos</h2>
+              <div class="seg seg-lg" role="radiogroup" aria-label="Visitor photos">
+                <label><input type="radio" name="photoMode" value="off"><span>No photos</span></label>
+                <label><input type="radio" name="photoMode" value="declined"><span>Declined visitors</span></label>
+                <label><input type="radio" name="photoMode" value="all"><span>Every visitor</span></label>
+              </div>
+              <p class="hint" id="photo-hint"></p>
+            </div>
+          </fieldset>
+
+          <!-- Settings only: visitor form -->
+          <fieldset class="setup-step" data-step="form" hidden>
+            <header class="step-head">
+              <h1>Visitor form</h1>
+              <p class="lead">Full name is always required. Choose what else visitors are asked on the first screen.</p>
+            </header>
+            <div class="field-matrix" id="field-matrix"></div>
+            <label class="field">
+              <span class="label">Extra people visitors can ask for</span>
+              <span class="hint">One per line. These are added to anyone listed in your spreadsheet.</span>
+              <textarea name="hosts" rows="3" placeholder="Front Desk&#10;Maintenance"></textarea>
+            </label>
+            <label class="field">
+              <span class="label">Reasons for visit</span>
+              <span class="hint">One per line. Shown as buttons that visitors tap.</span>
+              <textarea name="purposes" rows="4"></textarea>
+            </label>
+          </fieldset>
+
+          <!-- Settings only: agreement -->
+          <fieldset class="setup-step" data-step="agreement" hidden>
+            <header class="step-head">
+              <h1>Visitor agreement</h1>
+              <p class="lead">Ask visitors to accept your safety rules, an NDA or a privacy notice before they sign in.</p>
+            </header>
+            <label class="toggle">
+              <input name="agreementEnabled" type="checkbox">
+              <span><strong>Ask visitors to accept an agreement</strong><small>Shown as the last step of sign-in.</small></span>
+            </label>
+            <div id="agreement-options">
+              <label class="field">
+                <span class="label">Agreement text</span>
+                <textarea name="agreementText" rows="8"></textarea>
+              </label>
+              <label class="toggle">
+                <input name="signatureRequired" type="checkbox">
+                <span><strong>Require a signature</strong><small>Visitors sign with a finger or stylus.</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Settings only: kiosk behaviour -->
+          <fieldset class="setup-step" data-step="kiosk" hidden>
+            <header class="step-head">
+              <h1>Kiosk behavior</h1>
+              <p class="lead">Fine-tune the welcome screen, badges and how long records are kept.</p>
+            </header>
+            <label class="field">
+              <span class="label">Welcome message</span>
+              <input name="welcome" type="text" maxlength="120">
+            </label>
+            <label class="field">
+              <span class="label">Message after sign-in</span>
+              <input name="thanks" type="text" maxlength="160">
+            </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="label">Return to the welcome screen after</span>
+                <span class="input-suffix"><input name="resetSeconds" type="number" min="3" max="120" step="1"><span>seconds</span></span>
+              </label>
+              <label class="field">
+                <span class="label">Keep visit records on this device for</span>
+                <select name="retentionDays">
+                  <option value="0">Forever</option>
+                  <option value="365">1 year</option>
+                  <option value="180">6 months</option>
+                  <option value="90">90 days</option>
+                  <option value="30">30 days</option>
+                </select>
+              </label>
+            </div>
+            <div class="toggle-group">
+              <label class="toggle">
+                <input name="autoSignOutOn" type="checkbox">
+                <span><strong>Sign everyone out automatically</strong><small>For visitors who forget to sign out. Their record shows "Auto signed out".</small></span>
+              </label>
+              <label class="field inline-field" id="auto-out-time">
+                <span class="label">Every day at</span>
+                <input name="autoSignOutAt" type="time" value="18:00">
+              </label>
+              <label class="toggle">
+                <input name="printBadges" type="checkbox">
+                <span><strong>Offer badge printing</strong><small>Shows a "Print badge" button after sign-in.</small></span>
+              </label>
+              <label class="toggle">
+                <input name="keepAwake" type="checkbox">
+                <span><strong>Keep the screen on</strong><small>Stops the device going to sleep while the kiosk is open, where supported.</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Final: ready -->
+          <fieldset class="setup-step" data-step="finish" hidden>
+            <div class="ready-hero">
+              <span class="ready-check"><svg class="i"><use href="#i-check"/></svg></span>
+              <h1>You're all set!</h1>
+              <p class="lead">Here's a summary of your setup and everything you need to get started.</p>
+            </div>
+            <h2 class="sub-title">Your setup</h2>
+            <ul class="summary" id="ready-summary"></ul>
+            <h2 class="sub-title">Next steps</h2>
+            <ol class="next-steps" id="ready-next"></ol>
+          </fieldset>
+
+          <details class="tip-inline" id="tip-inline-wrap">
+            <summary><svg class="i"><use href="#i-info"/></svg>Good to know</summary>
+            <div id="tip-inline"></div>
+          </details>
+
+          <p class="form-error" id="setup-error" role="alert"></p>
+
+          <footer class="setup-foot">
+            <button type="button" class="btn btn-ghost" id="setup-cancel" hidden>Cancel</button>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn-secondary" id="setup-back"><svg class="i"><use href="#i-arrow-left"/></svg>Back</button>
+            <button type="button" class="btn btn-ghost" id="setup-skip" hidden>Skip for now</button>
+            <button type="button" class="btn btn-primary" id="setup-next">Continue<svg class="i"><use href="#i-arrow-right"/></svg></button>
+            <button type="submit" class="btn btn-primary" id="setup-save" hidden>Finish setup</button>
+            <button type="button" class="btn btn-primary btn-lg" id="setup-open" hidden>Open the kiosk<svg class="i"><use href="#i-arrow-right"/></svg></button>
+          </footer>
+        </form>
+      </main>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       WELCOME
+       ===================================================================== -->
+  <section id="view-home" class="view kiosk home" hidden>
+    <button class="icon-btn admin-btn" id="open-admin" aria-label="Admin">
+      <svg class="i"><use href="#i-gear"/></svg>
+      <span class="attn-dot" id="admin-dot" hidden></span>
+    </button>
+    <div class="home-inner">
+      <div class="brand">
+        <img id="home-logo" alt="" hidden>
+        <h1 id="home-org"></h1>
+      </div>
+      <p class="welcome" id="home-welcome"></p>
+      <div class="home-actions">
+        <button class="action-card action-in" id="go-signin">
+          <span class="ac-icon"><svg class="i"><use href="#i-login"/></svg></span>
+          <span class="ac-text"><strong>Sign in</strong><small>I'm arriving</small></span>
+        </button>
+        <button class="action-card action-out" id="go-signout">
+          <span class="ac-icon"><svg class="i"><use href="#i-logout"/></svg></span>
+          <span class="ac-text"><strong>Sign out</strong><small>I'm leaving</small></span>
+        </button>
+      </div>
+      <p class="card-hint" id="card-hint" hidden><svg class="i"><use href="#i-card"/></svg><span>Have a card? Just tap it to sign in or out.</span></p>
+      <button class="btn btn-secondary" id="nfc-activate" hidden><svg class="i"><use href="#i-card"/></svg>Tap here to turn on the card reader</button>
+    </div>
+    <footer class="home-foot">
+      <span id="home-clock"></span>
+      <span class="sync-chip" id="home-sync" hidden></span>
+    </footer>
+  </section>
+
+  <!-- =====================================================================
+       SIGN IN (details, then questions, then agreement)
+       ===================================================================== -->
+  <section id="view-signin" class="view kiosk" hidden>
+    <div class="panel panel-flow">
+      <header class="panel-head">
+        <button type="button" class="btn btn-ghost" id="flow-back"><svg class="i"><use href="#i-arrow-left"/></svg><span>Back</span></button>
+        <ol class="flow-steps" id="flow-steps" aria-label="Sign-in progress"></ol>
+        <span class="panel-spacer"></span>
+      </header>
+      <form id="signin-form" novalidate autocomplete="off">
+        <div class="flow-step" data-flow="details">
+          <h2 class="flow-title">Welcome! Tell us about yourself</h2>
+          <div class="form-grid" id="signin-fields"></div>
+        </div>
+        <div class="flow-step" data-flow="questions" hidden>
+          <h2 class="flow-title">A few quick questions</h2>
+          <p class="flow-lead">Please answer every question.</p>
+          <div class="sq-list" id="screening-fields"></div>
+        </div>
+        <div class="flow-step" data-flow="agreement" hidden>
+          <h2 class="flow-title">Visitor agreement</h2>
+          <div class="agreement-text" id="agreement-text"></div>
+          <label class="toggle big-toggle">
+            <input type="checkbox" name="agree">
+            <span><strong>I have read and agree to the above</strong></span>
+          </label>
+          <div id="signature-wrap" hidden>
+            <div class="sig-head">
+              <span class="label">Signature <b class="req" aria-hidden="true">*</b></span>
+              <button type="button" class="btn btn-ghost btn-sm" id="sig-clear">Clear</button>
+            </div>
+            <canvas id="sig-pad" class="sig-pad" aria-label="Signature pad: sign with your finger"></canvas>
+          </div>
+        </div>
+        <p class="form-error" id="signin-error" role="alert"></p>
+        <button type="submit" class="btn btn-primary btn-xl btn-block" id="flow-next">Continue</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       PHOTO
+       ===================================================================== -->
+  <section id="view-photo" class="view kiosk" hidden>
+    <div class="panel photo-panel">
+      <h2 class="flow-title" id="photo-title">Time for a quick photo</h2>
+      <p class="flow-lead" id="photo-lead"></p>
+      <div class="camera">
+        <video id="camera-video" playsinline muted autoplay></video>
+        <img id="camera-still" alt="Your photo" hidden>
+        <div class="camera-frame" aria-hidden="true"></div>
+        <div class="camera-count" id="camera-count" hidden></div>
+        <div class="camera-msg" id="camera-msg" hidden></div>
+      </div>
+      <div class="row-btns">
+        <button class="btn btn-primary btn-xl" id="photo-take"><svg class="i"><use href="#i-camera"/></svg>Take photo</button>
+        <button class="btn btn-secondary btn-xl" id="photo-retake" hidden>Retake</button>
+        <button class="btn btn-primary btn-xl" id="photo-use" hidden>Use this photo</button>
+        <button class="btn btn-secondary btn-xl" id="photo-skip" hidden>Continue without a photo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       SIGNED IN
+       ===================================================================== -->
+  <section id="view-done" class="view kiosk" hidden>
+    <div class="panel result">
+      <span class="state-icon state-success"><svg class="i"><use href="#i-check"/></svg></span>
+      <h2 id="done-title"></h2>
+      <p id="done-msg" class="flow-lead"></p>
+      <div class="badge" id="done-badge">
+        <div class="badge-slot" aria-hidden="true"></div>
+        <div class="badge-top"><img class="badge-logo" id="badge-logo" alt="" hidden><span id="badge-org"></span></div>
+        <div class="badge-body">
+          <img class="badge-photo" id="badge-photo" alt="" hidden>
+          <div class="badge-label" id="badge-label">VISITOR</div>
+          <div class="badge-name" id="badge-name"></div>
+          <div class="badge-meta" id="badge-meta"></div>
+        </div>
+      </div>
+      <div class="row-btns">
+        <button class="btn btn-secondary btn-lg" id="print-badge"><svg class="i"><use href="#i-printer"/></svg>Print badge</button>
+        <button class="btn btn-primary btn-lg" data-go="home">Done</button>
+      </div>
+      <p class="countdown" id="done-countdown"></p>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       DECLINED
+       ===================================================================== -->
+  <section id="view-declined" class="view kiosk" hidden>
+    <div class="panel result declined">
+      <span class="state-icon state-neutral"><svg class="i"><use href="#i-info"/></svg></span>
+      <h2 id="declined-title"></h2>
+      <p class="declined-msg" id="declined-msg"></p>
+      <p class="flow-lead">A member of our team has been notified and will be with you shortly.</p>
+      <div class="row-btns">
+        <button class="btn btn-primary btn-lg" id="declined-done">Done</button>
+      </div>
+      <button class="link-btn subtle" id="declined-override"><svg class="i"><use href="#i-unlock"/></svg>Staff override</button>
+      <p class="countdown" id="declined-countdown"></p>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       SIGN OUT
+       ===================================================================== -->
+  <section id="view-signout" class="view kiosk" hidden>
+    <div class="panel">
+      <header class="panel-head">
+        <button class="btn btn-ghost" data-go="home"><svg class="i"><use href="#i-arrow-left"/></svg><span>Back</span></button>
+        <h2>Sign out</h2>
+        <span class="panel-spacer"></span>
+      </header>
+      <label class="field search-field">
+        <span class="label">Find your name</span>
+        <span class="input-icon"><svg class="i"><use href="#i-search"/></svg><input type="search" id="signout-search" placeholder="Start typing your name…" autocomplete="off" data-card-capture></span>
+      </label>
+      <ul class="visitor-list" id="signout-list"></ul>
+      <p class="empty" id="signout-empty" hidden></p>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       SIGNED OUT / NOTICE
+       ===================================================================== -->
+  <section id="view-bye" class="view kiosk" hidden>
+    <div class="panel result">
+      <span class="state-icon state-success" id="bye-icon"><svg class="i"><use href="#i-check"/></svg></span>
+      <h2 id="bye-title"></h2>
+      <p class="flow-lead" id="bye-msg"></p>
+      <div class="row-btns"><button class="btn btn-primary btn-lg" data-go="home">Done</button></div>
+      <p class="countdown" id="bye-countdown"></p>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       ADMIN
+       ===================================================================== -->
+  <section id="view-admin" class="view admin-view" hidden>
+    <header class="admin-bar">
+      <div class="admin-brand">
+        <img id="admin-logo" alt="" hidden>
+        <div><strong id="admin-org"></strong><small id="admin-hello"></small></div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Admin sections">
+        <button role="tab" class="tab" aria-selected="true" data-tab="dash"><svg class="i"><use href="#i-dashboard"/></svg>Dashboard<span class="tab-badge" id="attn-badge" hidden></span></button>
+        <button role="tab" class="tab" aria-selected="false" data-tab="log"><svg class="i"><use href="#i-list"/></svg>Visitor log</button>
+        <button role="tab" class="tab" aria-selected="false" data-tab="people"><svg class="i"><use href="#i-users"/></svg>People &amp; cards</button>
+        <button role="tab" class="tab" aria-selected="false" data-tab="data"><svg class="i"><use href="#i-database"/></svg>Data</button>
+      </nav>
+      <div class="admin-actions">
+        <button class="btn btn-secondary" id="admin-settings"><svg class="i"><use href="#i-gear"/></svg><span>Settings</span></button>
+        <button class="btn btn-primary" id="admin-close"><svg class="i"><use href="#i-lock"/></svg><span>Lock</span></button>
+      </div>
+    </header>
+
+    <main class="admin-main">
+      <!-- Dashboard -->
+      <div class="tab-panel" data-panel="dash">
+        <section class="card attention" id="attn-card" hidden>
+          <header class="card-head">
+            <h3><svg class="i"><use href="#i-bell"/></svg>Needs attention <span class="count-pill" id="attn-count"></span></h3>
+            <button class="btn btn-ghost btn-sm" id="attn-clear">Mark all as reviewed</button>
+          </header>
+          <ul class="attn-list" id="attn-list"></ul>
+        </section>
+
+        <div class="stats">
+          <div class="stat"><span class="stat-icon"><svg class="i"><use href="#i-users"/></svg></span><span class="stat-num" id="stat-onsite">0</span><span class="stat-label">On site now</span></div>
+          <div class="stat"><span class="stat-icon"><svg class="i"><use href="#i-login"/></svg></span><span class="stat-num" id="stat-today">0</span><span class="stat-label">Visits today</span></div>
+          <div class="stat"><span class="stat-icon"><svg class="i"><use href="#i-calendar"/></svg></span><span class="stat-num" id="stat-week">0</span><span class="stat-label">Last 7 days</span></div>
+          <div class="stat"><span class="stat-icon"><svg class="i"><use href="#i-clock"/></svg></span><span class="stat-num" id="stat-avg">–</span><span class="stat-label">Average visit</span></div>
+        </div>
+
+        <div class="grid-2">
+          <section class="card">
+            <header class="card-head"><h3><svg class="i"><use href="#i-chart"/></svg>Visits in the last 7 days</h3><span class="hint" id="chart-note"></span></header>
+            <div class="chart" id="chart" role="img"></div>
+          </section>
+          <section class="card">
+            <header class="card-head"><h3 id="storage-title"><svg class="i"><use href="#i-database"/></svg>Storage</h3></header>
+            <div id="storage-info"></div>
+          </section>
+        </div>
+
+        <section class="card">
+          <header class="card-head">
+            <h3><svg class="i"><use href="#i-users"/></svg>On site now <span class="count-pill" id="onsite-count"></span></h3>
+            <button class="btn btn-secondary btn-sm" id="print-rollcall"><svg class="i"><use href="#i-printer"/></svg>Print roll call</button>
+          </header>
+          <ul class="onsite-list" id="onsite-list"></ul>
+          <p class="empty" id="onsite-empty">Nobody is signed in right now.</p>
+        </section>
+      </div>
+
+      <!-- Visitor log -->
+      <div class="tab-panel" data-panel="log" hidden>
+        <div class="toolbar">
+          <span class="input-icon grow"><svg class="i"><use href="#i-search"/></svg><input type="search" id="log-search" placeholder="Search name, company, host, card…"></span>
+          <select id="log-filter" aria-label="Filter visits">
+            <option value="all">All visits</option>
+            <option value="onsite">On site now</option>
+            <option value="today">Today</option>
+            <option value="week">Last 7 days</option>
+            <option value="declined">Declined</option>
+            <option value="flagged">Flagged</option>
+          </select>
+          <button class="btn btn-secondary" id="export-csv"><svg class="i"><use href="#i-download"/></svg>Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table class="log">
+            <thead id="log-head"></thead>
+            <tbody id="log-body"></tbody>
+          </table>
+          <p class="empty" id="log-empty" hidden>No visits to show.</p>
+        </div>
+        <p class="hint table-note" id="log-note"></p>
+      </div>
+
+      <!-- People & cards -->
+      <div class="tab-panel" data-panel="people" hidden>
+        <div class="toolbar">
+          <div class="sheet-line" id="sheet-line"></div>
+          <span class="spacer"></span>
+          <button class="btn btn-secondary" id="people-sync"><svg class="i"><use href="#i-refresh"/></svg>Sync</button>
+          <button class="btn btn-primary" id="enroll-card"><svg class="i"><use href="#i-plus"/></svg>Add a card</button>
+        </div>
+        <div class="table-wrap">
+          <table class="log">
+            <thead><tr><th>Name</th><th>Card ID</th><th>Company</th><th>Role</th><th>Source</th><th></th></tr></thead>
+            <tbody id="people-body"></tbody>
+          </table>
+          <p class="empty" id="people-empty" hidden>No people yet. Link a spreadsheet in Settings, or add a card here.</p>
+        </div>
+      </div>
+
+      <!-- Data -->
+      <div class="tab-panel" data-panel="data" hidden>
+        <div class="grid-2">
+          <section class="card">
+            <h3><svg class="i"><use href="#i-download"/></svg>Export the visitor log</h3>
+            <p class="muted">Download every visit as a CSV file that opens in Excel, Numbers or Google Sheets.</p>
+            <button class="btn btn-secondary" id="export-all"><svg class="i"><use href="#i-download"/></svg>Download CSV</button>
+          </section>
+          <section class="card">
+            <h3><svg class="i"><use href="#i-copy"/></svg>Copy settings to another kiosk</h3>
+            <p class="muted">Export this kiosk's settings and import them on another device. The admin code and admin cards aren't included. If you use cloud storage, the file contains your connection key, so keep it private.</p>
+            <div class="row-btns left">
+              <button class="btn btn-secondary" id="export-config"><svg class="i"><use href="#i-download"/></svg>Export settings</button>
+              <label class="btn btn-secondary"><svg class="i"><use href="#i-upload"/></svg>Import settings<input type="file" id="import-config" accept="application/json,.json" hidden></label>
+            </div>
+          </section>
+          <section class="card">
+            <h3><svg class="i"><use href="#i-monitor"/></svg>Kiosk tools</h3>
+            <p class="muted">Full-screen mode hides the browser bars. For a kiosk that visitors can't leave, also turn on Guided Access (iPad) or screen pinning (Android).</p>
+            <div class="row-btns left">
+              <button class="btn btn-secondary" id="fullscreen-btn"><svg class="i"><use href="#i-maximize"/></svg><span>Enter full screen</span></button>
+            </div>
+            <p class="hint" id="device-info"></p>
+          </section>
+          <section class="card danger-zone">
+            <h3><svg class="i"><use href="#i-alert"/></svg>Danger zone</h3>
+            <p class="muted" id="clear-note">Permanently delete records from this device. Export a CSV first if you need a copy.</p>
+            <div class="row-btns left">
+              <button class="btn btn-danger" id="clear-log"><svg class="i"><use href="#i-trash"/></svg>Clear visitor log</button>
+              <button class="btn btn-danger" id="factory-reset"><svg class="i"><use href="#i-trash"/></svg>Erase everything</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- =====================================================================
+       DIALOGS
+       ===================================================================== -->
+  <dialog id="pin-dialog" class="dialog">
+    <form method="dialog" id="pin-form">
+      <span class="dlg-icon"><svg class="i"><use href="#i-lock"/></svg></span>
+      <h3 id="pin-title">Admin login</h3>
+      <p class="muted small" id="pin-hint">Enter your admin code.</p>
+      <input type="password" id="pin-input" class="pin-input" inputmode="numeric" maxlength="8" autocomplete="off" aria-label="Admin code" data-card-capture>
+      <p class="form-error" id="pin-error" role="alert"></p>
+      <div class="row-btns">
+        <button type="button" class="btn btn-ghost" id="pin-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Unlock</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog">
+    <form method="dialog" id="confirm-form">
+      <h3 id="confirm-title"></h3>
+      <p class="muted" id="confirm-msg"></p>
+      <label class="field" id="confirm-field" hidden>
+        <span class="label" id="confirm-label"></span>
+        <input type="text" id="confirm-input" autocomplete="off">
+      </label>
+      <div class="row-btns">
+        <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="confirm-ok">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="enroll-dialog" class="dialog dialog-wide">
+    <form id="enroll-form" novalidate>
+      <h3>Add a card</h3>
+      <div class="tap-target small-tap" id="enroll-tap" aria-live="polite">
+        <span class="tap-icon"><svg class="i"><use href="#i-card"/></svg></span>
+        <span><strong>Tap the card now</strong><small>Or type the card ID below.</small></span>
+      </div>
+      <label class="field"><span class="label">Card ID <b class="req" aria-hidden="true">*</b></span><input name="cardId" type="text" autocomplete="off" spellcheck="false" data-card-capture></label>
+      <div class="field-row">
+        <label class="field"><span class="label">Name <b class="req" aria-hidden="true">*</b></span><input name="name" type="text" maxlength="120" autocomplete="off"></label>
+        <label class="field"><span class="label">Company</span><input name="company" type="text" maxlength="120" autocomplete="off"></label>
+      </div>
+      <label class="field"><span class="label">Role</span><input name="role" type="text" maxlength="60" placeholder="e.g. Staff, Contractor, Cleaner" autocomplete="off"></label>
+      <label class="toggle"><input name="isAdmin" type="checkbox"><span><strong>Admin card</strong><small>Opens the admin panel instead of signing in.</small></span></label>
+      <p class="hint" id="enroll-dest"></p>
+      <p class="form-error" id="enroll-error" role="alert"></p>
+      <div class="row-btns">
+        <button type="button" class="btn btn-ghost" id="enroll-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="enroll-save">Save card</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="visit-dialog" class="dialog dialog-wide">
+    <header class="dlg-head">
+      <h3 id="vd-title"></h3>
+      <button type="button" class="icon-btn" id="vd-close" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    </header>
+    <div class="vd-top">
+      <div class="vd-photo" id="vd-photo"></div>
+      <dl class="vd-list" id="vd-list"></dl>
+    </div>
+    <div id="vd-extra"></div>
+    <div class="row-btns right" id="vd-actions"></div>
+  </dialog>
+
+  <div id="print-area" aria-hidden="true"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="apps-script.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
