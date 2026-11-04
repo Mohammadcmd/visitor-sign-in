@@ -11,7 +11,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Set by scripts/build-android.mjs from package.json's version (1.2.3 → 10203),
         // so every release installs as an update.
-        versionCode (System.getenv("KIOSK_VERSION_CODE") ?: "1").toInteger()
+        versionCode Integer.parseInt(System.getenv("KIOSK_VERSION_CODE") ?: "1")
         versionName System.getenv("KIOSK_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
