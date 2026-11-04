@@ -78,10 +78,10 @@ export class Keyboard {
     document.documentElement.style.setProperty('--kb-h', `${this.root.offsetHeight}px`);
     // Keep the field visible in the space left above the keyboard and the action bar.
     requestAnimationFrame(() => {
-      const box = input.closest('.form-body');
+      const box = input.closest('.form-body, .admin-body');
       if (!box) return;
       const top = box.getBoundingClientRect().top;
-      const bottom = window.innerHeight - this.root.offsetHeight - 90;
+      const bottom = window.innerHeight - this.root.offsetHeight - (box.classList.contains('admin-body') ? 20 : 90);
       const r = input.getBoundingClientRect();
       box.scrollTop += r.top + r.height / 2 - (top + (bottom - top) * 0.5);
     });

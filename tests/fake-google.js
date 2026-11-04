@@ -122,7 +122,7 @@ function fakeGoogle(initialProps = {}) {
       sleep() {},
       computeDigest: (_, s) => [...crypto.createHash('sha256').update(s).digest()].map((b) => (b > 127 ? b - 256 : b)),
       DigestAlgorithm: { SHA_256: 'sha256' },
-      formatDate: (d) => new Date(d).toISOString(),
+      formatDate: (d, tz, fmt) => formatDate(new Date(d), tz, fmt),
       base64Decode: (s) => Buffer.from(s, 'base64'),
       base64Encode: (b) => Buffer.from(b).toString('base64'),
       newBlob: (bytes, type, name) => ({ bytes, type, name }),
@@ -135,6 +135,22 @@ function fakeGoogle(initialProps = {}) {
 }
 
 /** Loads apps-script/Code.gs into a fresh fake Google. */
+/** Utilities.formatDate for the patterns the backend uses (yyyy MM M MMM dd d EEE HH h mm ss a). */
+function formatDate(d, tz, fmt) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short',
+    hour: 'numeric', hourCycle: 'h23', minute: '2-digit', second: '2-digit',
+  }).formatToParts(d).map((p) => [p.type, p.value]));
+  const month = Number(parts.month), hour = Number(parts.hour) % 24;
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = (n) => String(n).padStart(2, '0');
+  const tokens = {
+    yyyy: parts.year, MMM: names[month - 1], MM: pad(month), M: String(month), dd: pad(parts.day), d: String(Number(parts.day)),
+    EEE: parts.weekday, HH: pad(hour), h: String(hour % 12 || 12), mm: parts.minute, ss: parts.second, a: hour < 12 ? 'AM' : 'PM',
+  };
+  return String(fmt || "yyyy-MM-dd'T'HH:mm:ss").replace(/'([^']*)'|yyyy|MMM|MM|M|dd|d|EEE|HH|h|mm|ss|a/g, (m, lit) => (lit !== undefined ? lit : tokens[m]));
+}
+
 function loadBackend(initialProps) {
   const g = fakeGoogle(initialProps);
   const ctx = vm.createContext(g.globals);

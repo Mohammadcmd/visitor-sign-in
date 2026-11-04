@@ -8,7 +8,7 @@ import { settings, saveLocal, hashPin, useSettings } from './settings.js';
 export const MODE = CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
 export const DEMO = MODE === 'demo';
 export const ON_TABLET = MODE !== 'cloud';
-export const BACKEND_VERSION = 3;
+export const BACKEND_VERSION = 4;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];
@@ -178,10 +178,10 @@ const PASS_MS = 2 * 60 * 60 * 1000;
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
-    if (s && s.badges) return { passes: [], ...s };
+    if (s && s.badges) return { passes: [], expected: [], ...s };
   } catch { /* fall through to a fresh store */ }
   return {
-    visitors: [], visits: [], faces: [], passes: [],
+    visitors: [], visits: [], faces: [], passes: [], expected: [],
     badges: DEMO ? [1, 2, 3, 4, 5].map((n) => ({ badge: `V${n}`, tag: `DEMO000${n}`, status: 'available' })) : [],
   };
 }
@@ -268,6 +268,21 @@ function attention(s) {
   return s.visits.filter((v) => !v.reviewed && /^(declined|flagged)/i.test(v.screening || '') && new Date(v.signedIn).getTime() >= since);
 }
 
+/** "2026-11-04" on this tablet's calendar. */
+export function dayKey(d = new Date()) {
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return '';
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+/** Today's expected visitor with this name (or id) who hasn't arrived yet. */
+function matchExpected(s, first, last, id) {
+  const today = dayKey();
+  const list = s.expected.filter((e) => e.day === today && !e.arrived);
+  return (id && list.find((e) => e.id === id))
+    || list.find((e) => near(nameKey(e.first), nameKey(first)) && near(nameKey(e.last), nameKey(last))) || null;
+}
+
 function signOut(s, visit, by) {
   visit.signedOut = now();
   visit.signedOutBy = by;
@@ -278,15 +293,18 @@ function signOut(s, visit, by) {
 function startVisit(s, v, a, badgeNo, replacedBy) {
   const open = s.visits.find((x) => x.visitorId === v.id && !x.signedOut);
   if (open) signOut(s, open, replacedBy);
+  const expected = matchExpected(s, v.first, v.last, a.expectedId);
+  if (expected) expected.arrived = `Signed in ${new Date().toLocaleString()}`;
   const flags = cleanFlags(a.flags);
   const screening = flags.length || a.override ? screeningText(flags, a.override) : (v.screening || 'Clear');
   const visit = {
     id: randomId('S'), visitorId: v.id, first: v.first, last: v.last, company: v.company,
-    visiting: clean(a.visiting) || v.visiting, purpose: clean(a.purpose) || v.purpose,
+    visiting: clean(a.visiting) || expected?.host || v.visiting, purpose: clean(a.purpose) || expected?.purpose || v.purpose,
     kind: kindOf(screening), badge: badgeNo,
     method: (clean(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
     signedIn: now(), screening,
   };
+  visit.expected = !!expected;
   s.visits.push(visit);
   v.visits = (v.visits || 0) + 1;
   v.lastVisit = new Date().toLocaleDateString();
@@ -336,6 +354,8 @@ async function localAction(s, action, a) {
       const pass = takePass(s, first, last);
       if (pass) return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
       const id = randomId('D');
+      const exp = matchExpected(s, first, last, a.expectedId);
+      if (exp) exp.arrived = `Declined at the kiosk ${new Date().toLocaleString()}`;
       if (a.photo) await photos.put(`decline:${id}`, a.photo);
       s.visits.push({
         id, visitorId: clean(a.visitorId), first, last, company: clean(a.company) || 'N/A',
@@ -354,6 +374,11 @@ async function localAction(s, action, a) {
           && (!c.length || sameCompany(companyWords(v.company), c))).slice(0, 5)
           .map((v) => ({ id: v.id, first: v.first, last: v.last, company: v.company, quickEntry: !!v.quickEntry, lastVisit: v.lastVisit || '' })),
       };
+    }
+    case 'findExpected': {
+      if (!nameKey(a.first) || !nameKey(a.last)) return { ok: false, error: 'fullname' };
+      const e = matchExpected(s, a.first, a.last, '');
+      return { ok: true, expected: e ? { id: e.id, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose } : null };
     }
     case 'findOpenVisits': {
       const f = nameKey(a.first), l = nameKey(a.last);
@@ -388,13 +413,14 @@ async function localAction(s, action, a) {
         return b.visitorId === v.id ? { ok: true, badge: b.badge, already: true } : { ok: false, error: 'badge_in_use', badge: b.badge };
       }
       const visit = startVisit(s, v, a, b.badge, `Switched to badge ${b.badge}`);
-      Object.assign(b, { status: 'in use', holder: `${v.first} ${v.last}`, visitorId: v.id, visitId: visit.id, since: visit.signedIn });
-      return { ok: true, badge: b.badge, visitId: visit.id };
+      Object.assign(b, { status: 'in use', holder: `${v.first} ${v.last}`, visitorId: v.id, visitId: visit.id, since: visit.signedIn, note: '' });
+      return { ok: true, badge: b.badge, visitId: visit.id, expected: visit.expected };
     }
     case 'checkIn': {
       const v = s.visitors.find((x) => x.id === a.visitorId);
       if (!v) return { ok: false, error: 'not_found' };
-      return { ok: true, visitId: startVisit(s, v, a, '', 'Signed in again').id };
+      const visit = startVisit(s, v, a, '', 'Signed in again');
+      return { ok: true, visitId: visit.id, expected: visit.expected };
     }
     case 'endOfDay': {
       let cutoff = new Date(a.before);
@@ -403,13 +429,16 @@ async function localAction(s, action, a) {
       for (const v of s.visits) {
         if (v.signedOut || new Date(v.signedIn) >= cutoff) continue;
         signOut(s, v, 'End of day');
+        const b = v.badge && s.badges.find((x) => x.badge === v.badge);
+        if (b && b.status === 'available') Object.assign(b, { status: 'not returned', note: `Not returned by ${v.first} ${v.last} (${new Date(v.signedIn).toLocaleDateString()})` });
         done++;
       }
-      return { ok: true, signedOut: done };
+      return { ok: true, signedOut: done, summary: false };
     }
     case 'tapAtWelcome': {
       const b = byTag(a.tag);
       if (!b) return { ok: true, result: 'unknown' };
+      if (b.status === 'not returned') { Object.assign(b, { status: 'available', note: '' }); return { ok: true, result: 'returned', badge: b.badge }; }
       if (b.status !== 'in use') return { ok: true, result: 'not_out', badge: b.badge };
       const visit = s.visits.find((x) => x.id === b.visitId);
       const name = b.holder, visitId = b.visitId, badge = b.badge;
@@ -493,6 +522,32 @@ async function localAction(s, action, a) {
       }
       return { ok: true, visits: out };
     }
+    case 'adminExpected': {
+      const days = Math.max(1, Math.min(90, Number(a.days) || 14));
+      const from = dayKey(Date.now() - 86400000), to = dayKey(Date.now() + days * 86400000);
+      const list = s.expected.filter((e) => e.day >= from && e.day <= to).sort((x, y) => (x.day < y.day ? -1 : x.day > y.day ? 1 : 0));
+      return { ok: true, today: dayKey(), expected: list.map((e) => ({ ...e })) };
+    }
+    case 'adminAddExpected': {
+      const e = {
+        id: randomId('E'), day: /^\d{4}-\d{2}-\d{2}$/.test(a.day || '') ? a.day : '',
+        first: clean(a.first), last: clean(a.last), company: clean(a.company), host: clean(a.host),
+        purpose: clean(a.purpose), note: clean(a.note), arrived: '', addedBy: `${st.admin.name || 'Admin'} (${new Date().toLocaleString()})`,
+      };
+      if (!e.first || !e.last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
+      if (!e.day) return { ok: false, error: 'missing', fields: ['day'] };
+      s.expected.push(e);
+      // Keep a year of history at most.
+      const oldest = dayKey(Date.now() - 365 * 86400000);
+      s.expected = s.expected.filter((x) => x.day >= oldest);
+      return { ok: true, id: e.id };
+    }
+    case 'adminRemoveExpected': {
+      const i = s.expected.findIndex((e) => e.id === a.id);
+      if (i < 0) return { ok: false, error: 'not_found' };
+      s.expected.splice(i, 1);
+      return { ok: true };
+    }
     case 'adminVisitors': return {
       ok: true,
       visitors: s.visitors.map((v) => ({
@@ -531,7 +586,7 @@ async function localAction(s, action, a) {
       if (DEMO) useSettings(next); else saveLocal(next);
       return { ok: true };
     }
-    case 'adminBadges': return { ok: true, badges: s.badges.map((b) => ({ badge: b.badge, tag: b.tag || '', status: b.status, holder: b.holder || '', since: b.since || '' })) };
+    case 'adminBadges': return { ok: true, badges: s.badges.map((b) => ({ badge: b.badge, tag: b.tag || '', status: b.status, holder: b.holder || '', since: b.since || '', note: b.note || '' })) };
     case 'adminSignOut': {
       const v = s.visits.find((x) => x.id === a.visitId);
       if (!v) return { ok: false, error: 'not_found' };
@@ -563,6 +618,7 @@ async function localAction(s, action, a) {
       if (!b) return { ok: false, error: 'not_found' };
       if (action === 'adminRetireBadge' && b.status === 'in use') return { ok: false, error: 'badge_in_use' };
       b.status = action === 'adminRetireBadge' ? 'retired' : 'available';
+      if (action === 'adminRestoreBadge') b.note = '';
       return { ok: true };
     }
   }

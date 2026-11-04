@@ -1,6 +1,6 @@
 // Visitor sign-in kiosk: screen flow and wiring.
 import { CONFIG } from '../config.js';
-import { call, queue, DEMO, MODE, BACKEND_VERSION } from './api.js';
+import { call, queue, DEMO, MODE, BACKEND_VERSION, dayKey } from './api.js';
 import { Keyboard } from './keyboard.js';
 import { listenForTaps } from './nfc.js';
 import * as face from './face.js';
@@ -33,6 +33,7 @@ const state = {
   qf: {},                 // follow-up answers by question id
   result: null,           // { declined, reasons, flags } once the questions are answered
   hostNotified: '',       // the host's name when the backend emailed them
+  expected: null,         // { id, company, host, purpose } when staff are expecting this visitor
   declineId: '',
   override: null,         // { by, reason } after a staff member let a declined visitor in
   resume: false,
@@ -222,9 +223,10 @@ function buildScreeningSteps() {
 
 const ENTER = {
   welcome() {
+    suppressClick = false;
     face.stopCamera();
     Object.assign(state, {
-      visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null, hostNotified: '',
+      visitor: null, method: '', answers: {}, qa: {}, qf: {}, result: null, declineId: '', override: null, hostNotified: '', expected: null,
       resume: false, photo: null, photoDescriptor: null, sample: null, flow: 'new',
     });
     stopIdle();
@@ -294,7 +296,12 @@ let suppressClick = false;
   let timer;
   const cancel = () => clearTimeout(timer);
   logo.addEventListener('pointerdown', () => {
-    timer = setTimeout(() => { suppressClick = true; openPin(); }, 2500);
+    timer = setTimeout(() => {
+      // Swallow the click that ends this press, but not a later tap (the PIN pad may take that click).
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 800);
+      openPin();
+    }, 2500);
   });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => logo.addEventListener(ev, cancel));
 })();
@@ -357,6 +364,8 @@ function resetForm() {
   $$('[data-chips="purpose"] .chip').forEach((c) => c.classList.remove('on'));
   $$('[data-followup]').forEach((f) => { f.hidden = true; });
   renderHostSuggest('');
+  state.expected = null;
+  $('[data-expected-note]').hidden = true;
   $('[data-agree]').setAttribute('aria-checked', 'false');
   clearPhoto();
   renderStep({ instant: true });
@@ -472,12 +481,35 @@ $('[data-form-next]').addEventListener('click', () => {
     if (state.result.declined && state.step === state.steps.length - 1) { submitDecline(); return; }
   }
   if (state.result?.declined && name === 'photo') { submitDecline(); return; }
+  if (name === 'name') lookUpExpected();
   if (state.step < state.steps.length - 1) { state.step++; renderStep(); return; }
   finishQuestions(false, centerOf($('[data-form-next]')));
 });
 $('[data-form-back]').addEventListener('click', () => {
   if (state.step > 0) { state.step--; renderStep({ back: true }); }
 });
+
+/** Staff expecting this visitor: greet them and fill in what staff already told us. */
+let expectedSeq = 0;
+async function lookUpExpected() {
+  const first = (state.answers.first || '').trim(), last = (state.answers.last || '').trim();
+  const seq = ++expectedSeq;
+  const res = await api('findExpected', { first, last });
+  if (seq !== expectedSeq || state.screen !== 'form') return;
+  const e = res.ok ? res.expected : null;
+  state.expected = e;
+  const note = $('[data-expected-note]');
+  note.hidden = !e;
+  if (!e) return;
+  note.textContent = `Welcome, ${first}! We're expecting you${e.host ? `. ${e.host} will be told you're here` : ''}.`;
+  for (const [name, value] of [['company', e.company], ['visiting', e.host], ['purpose', e.purpose]]) {
+    const input = $(`[data-screen="form"] input[name="${name}"]`);
+    if (!value || !input || input.value.trim()) continue;
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  renderHostSuggest('');
+}
 
 /** Every field on every screen opens the on-screen keyboard. */
 document.addEventListener('click', (e) => {
@@ -642,7 +674,7 @@ async function afterIdentified(origin) {
   busy(true, 'Signing you in…');
   const res = await api('checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
-    visiting: state.answers.visiting, purpose: state.answers.purpose,
+    visiting: state.answers.visiting, purpose: state.answers.purpose, expectedId: state.expected?.id,
   });
   busy(false);
   if (!res.ok) { toast(errorText(res)); return; }
@@ -673,7 +705,7 @@ async function submitDecline() {
   const res = await api('recordDecline', {
     first: a.first || v?.first, last: a.last || v?.last, company: a.company || v?.company,
     visiting: a.visiting, purpose: a.purpose, visitorId: v?.id || '', method: state.flow === 'returning' ? state.method : 'new visitor',
-    photo: state.photo?.dataUrl || '', reasons: state.result.reasons,
+    photo: state.photo?.dataUrl || '', reasons: state.result.reasons, expectedId: state.expected?.id,
   });
   busy(false);
   if (!res.ok) { formError(errorText(res)); return; }
@@ -1024,7 +1056,7 @@ async function badgeTap(tag) {
     api('assignBadge', {
       visitorId: state.visitor.id, tag, method: state.method,
       flags: state.result?.flags || [], override: state.override || undefined,
-      visiting: state.answers.visiting, purpose: state.answers.purpose,
+      visiting: state.answers.visiting, purpose: state.answers.purpose, expectedId: state.expected?.id,
     }),
     sleep(700), // long enough to see the reader at work
   ]);
@@ -1055,6 +1087,7 @@ async function welcomeTap(tag) {
   busy(false);
   if (!res.ok) { toast(errorText(res)); return; }
   if (res.result === 'unknown') { toast("This badge isn't set up yet. Please see the front desk."); return; }
+  if (res.result === 'returned') { toast(`Thanks for bringing back badge ${res.badge}. Please leave it at the front desk.`, 6000); return; }
   if (res.result === 'not_out') { toast(`Badge ${res.badge} isn't checked out. To sign in, tap the screen.`); return; }
   showSignedOut(res);
 }
@@ -1172,6 +1205,7 @@ function exitAdmin() {
   state.adminToken = null;
   state.adminMode = null;
   $('[data-overlay="rollcall"]').hidden = true;
+  $('[data-expected-form]').hidden = true;
   show('welcome');
 }
 $('[data-admin-exit]').addEventListener('click', exitAdmin);
@@ -1189,6 +1223,7 @@ function adminTab(name) {
   if (name === 'inside') loadInside();
   else if (name === 'attention') loadAttention();
   else if (name === 'history') loadHistory();
+  else if (name === 'expected') loadExpected();
   else if (name === 'badges') loadBadges();
   else loadSettingsPane();
 }
@@ -1197,6 +1232,7 @@ async function loadInside() {
   const list = $('[data-inside-list]');
   list.innerHTML = '<div class="empty">Loading…</div>';
   refreshAttention();
+  adminApi('adminExpected', { days: 1 }).then((r) => { if (r.ok) updateExpectedCount(r); });
   const res = await adminApi('adminInside');
   if (!res.ok) { list.innerHTML = `<div class="empty">${esc(errorText(res))}</div>`; return; }
   $('[data-inside-count]').textContent = res.inside.length;
@@ -1268,6 +1304,119 @@ async function loadAttention() {
     loadAttention();
   }));
 }
+
+// ------------------------------------------------------------------ expected visitors
+
+const expected = { day: '', list: [] };
+
+function dayChoices() {
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(Date.now() + i * 86400000);
+    out.push([dayKey(d), i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })]);
+  }
+  return out;
+}
+function dayLabel(key, today) {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const long = date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  if (key === today) return `Today · ${long}`;
+  if (key === dayKey(Date.now() + 86400000)) return `Tomorrow · ${long}`;
+  if (key < today) return `Yesterday · ${long}`;
+  return long;
+}
+
+async function loadExpected() {
+  const list = $('[data-expected-list]');
+  $('[data-expected-hint]').textContent = MODE === 'cloud'
+    ? 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them. Staff can also type rows straight into the Expected tab of your Google Sheet: a date, a first and last name, and anything else.'
+    : 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them.';
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  const res = await adminApi('adminExpected', { days: 14 });
+  if (!res.ok) { list.innerHTML = `<div class="empty">${esc(errorText(res))}</div>`; return; }
+  expected.list = res.expected;
+  updateExpectedCount(res);
+  if (!res.expected.length) { list.innerHTML = '<div class="empty">Nobody expected yet. Tap “Add a visitor” to let the front desk know who\'s coming.</div>'; return; }
+  let html = '', lastDay = '';
+  res.expected.forEach((e, i) => {
+    if (e.day !== lastDay) { html += `<p class="exp-day">${esc(dayLabel(e.day, res.today))}</p>`; lastDay = e.day; }
+    const declined = /^declined/i.test(e.arrived);
+    const status = e.arrived ? (declined ? ['declined', 'Declined'] : ['arrived', e.arrived.replace(/^Signed in /, 'Arrived ')]) : e.day < res.today ? ['retired', 'Didn\'t arrive'] : ['expected', 'Expected'];
+    html += `<div class="admin-row exp-row">
+      <span class="badge-no">${esc(initials(e))}</span>
+      <div class="who"><strong>${esc(e.first)} ${esc(e.last)}</strong>
+        <span class="meta">${[e.company, e.host && `visiting ${e.host}`, e.purpose].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</span>
+        ${e.note ? `<span class="note-line">${esc(e.note)}</span>` : ''}</div>
+      <span class="pill ${status[0]}">${esc(status[1])}</span>
+      <div class="actions">${e.arrived ? '' : `<button type="button" data-unexpect="${i}">Remove</button>`}</div>
+    </div>`;
+  });
+  list.innerHTML = html;
+  fx.cascade(list, { step: 30 });
+  $$('[data-unexpect]', list).forEach((b) => b.addEventListener('click', () => confirmTap(b, 'Tap again to remove', async () => {
+    const r = await adminApi('adminRemoveExpected', { id: expected.list[Number(b.dataset.unexpect)].id });
+    if (!r.ok) toast(errorText(r));
+    loadExpected();
+  })));
+}
+
+function updateExpectedCount(res) {
+  const n = res.expected.filter((e) => e.day === res.today && !e.arrived).length;
+  const c = $('[data-expected-count]');
+  c.textContent = n;
+  c.hidden = !n;
+}
+
+function renderExpectedForm() {
+  $('[data-expected-day]').innerHTML = dayChoices().map(([key, label]) => `<button type="button" role="radio" data-value="${key}" class="${key === expected.day ? 'on' : ''}" aria-checked="${key === expected.day}">${esc(label)}</button>`).join('');
+  const typed = $('input[name="e-host"]').value;
+  const hits = typed ? hostMatches(typed) : settings().hosts.slice(0, 8);
+  $('[data-expected-hosts]').innerHTML = hits.map((h) => `<button type="button" class="chip" data-host="${esc(h.name)}">${esc(h.name)}</button>`).join('');
+}
+
+$('[data-expected-new]').addEventListener('click', () => {
+  const form = $('[data-expected-form]');
+  form.hidden = false;
+  $$('input', form).forEach((i) => { i.value = ''; i.classList.remove('invalid'); });
+  $('[data-expected-error]').textContent = '';
+  expected.day = dayKey();
+  renderExpectedForm();
+  kb.open($('input[name="e-first"]'));
+});
+$('[data-expected-cancel]').addEventListener('click', () => { kb.close(); $('[data-expected-form]').hidden = true; });
+$('[data-expected-day]').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  expected.day = b.dataset.value;
+  renderExpectedForm();
+});
+$('input[name="e-host"]').addEventListener('input', renderExpectedForm);
+$('[data-expected-form]').addEventListener('input', () => { $('[data-expected-error]').textContent = ''; });
+$('[data-expected-hosts]').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-host]');
+  if (!b) return;
+  $('input[name="e-host"]').value = b.dataset.host;
+  renderExpectedForm();
+  kb.open($('input[name="e-purpose"]'));
+});
+$('[data-expected-save]').addEventListener('click', async () => {
+  const v = (n) => $(`input[name="e-${n}"]`).value.trim();
+  const missing = ['first', 'last'].filter((n) => !v(n));
+  if (missing.length) {
+    $('[data-expected-error]').textContent = 'Enter the visitor\'s first and last name.';
+    missing.forEach((n) => $(`input[name="e-${n}"]`).classList.add('invalid'));
+    return;
+  }
+  kb.close();
+  busy(true, 'Saving…');
+  const res = await adminApi('adminAddExpected', { first: v('first'), last: v('last'), company: v('company'), host: v('host'), purpose: v('purpose'), note: v('note'), day: expected.day });
+  busy(false);
+  if (!res.ok) { $('[data-expected-error]').textContent = errorText(res); return; }
+  $('[data-expected-form]').hidden = true;
+  toast(`${v('first')} ${v('last')} added. The front desk will be ready for them.`);
+  loadExpected();
+});
 
 // ------------------------------------------------------------------ admin history and export
 
@@ -1451,13 +1600,14 @@ async function loadBadges() {
     const status = String(b.status || 'available').toLowerCase();
     return `<div class="admin-row">
       <span class="badge-no">${esc(b.badge)}</span>
-      <div class="who"><strong>${status === 'in use' ? esc(b.holder) : status === 'retired' ? 'Out of service' : 'Available'}</strong>
-        <span class="meta">${b.tag ? `NFC tag …${esc(String(b.tag).slice(-6))}` : 'No NFC tag linked'}${status === 'in use' ? ` · since ${esc(timeOf(b.since))}` : ''}</span></div>
+      <div class="who"><strong>${status === 'in use' ? esc(b.holder) : status === 'retired' ? 'Out of service' : status === 'not returned' ? esc(b.note || 'Not returned') : 'Available'}</strong>
+        <span class="meta">${b.tag ? `NFC tag …${esc(String(b.tag).slice(-6))}` : 'No NFC tag linked'}${status === 'in use' ? ` · since ${esc(timeOf(b.since))}` : ''}${status === 'not returned' ? ' · signed out at the end of the day' : ''}</span></div>
       <span class="pill ${status.replace(' ', '-')}">${esc(status)}</span>
       <div class="actions">
         <button type="button" data-link="${esc(b.badge)}">${b.tag ? 'Relink tag' : 'Link tag'}</button>
+        ${status === 'not returned' ? `<button type="button" data-restore="${esc(b.badge)}">Mark returned</button>` : ''}
         ${status === 'retired' ? `<button type="button" data-restore="${esc(b.badge)}">Restore</button>`
-          : status === 'in use' ? '' : `<button type="button" data-retire="${esc(b.badge)}">Retire</button>`}
+          : status === 'in use' ? '' : `<button type="button" data-retire="${esc(b.badge)}">${status === 'not returned' ? 'Lost: retire' : 'Retire'}</button>`}
       </div>
     </div>`;
   }).join('');
@@ -1530,7 +1680,7 @@ const SETTING_ROWS = [
   ['hosts', 'Hosts', (s) => (s.hosts.length
     ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
     : 'Nobody listed: visitors type any name')],
-  ['touches', 'Photos, reasons, rules and end of day', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}` : 'no automatic sign-out'}`],
+  ['touches', 'Photos, reasons, rules and end of day', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'}`],
 ];
 
 function loadSettingsPane() {
@@ -1661,7 +1811,7 @@ async function endOfDayCheck() {
   if (last >= cutoff.getTime()) return;
   eodRunning = true;
   try {
-    const res = await api('endOfDay', { before: cutoff.toISOString() });
+    const res = await api('endOfDay', { before: cutoff.toISOString(), summary: last > 0 });
     if (res.ok) {
       try { localStorage.setItem(EOD_KEY, String(cutoff.getTime())); } catch { /* runs again next time */ }
       if (res.signedOut && state.screen === 'admin') toast(`End of day: ${res.signedOut} visitor${res.signedOut > 1 ? 's' : ''} signed out.`);

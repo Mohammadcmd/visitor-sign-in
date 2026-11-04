@@ -21,14 +21,15 @@
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
 
-var BACKEND_VERSION = 3;
+var BACKEND_VERSION = 4;
 
 var TABS = {
   visitors: 'Visitors',
   visits: 'Visits',
   badges: 'Badges',
   faces: 'Face data',
-  settings: 'Settings'
+  settings: 'Settings',
+  expected: 'Expected'
 };
 
 var HEADERS = {
@@ -44,7 +45,9 @@ var HEADERS = {
   ],
   Badges: ['Badge', 'NFC tag', 'Status', 'Holder', 'Visitor ID', 'Visit ID', 'Since', 'Note'],
   'Face data': ['Visitor ID', 'Descriptor', 'Captured', 'Source', 'Photo file ID'],
-  Settings: ['Setting', 'Value']
+  Settings: ['Setting', 'Value'],
+  // Visitors staff are expecting. Staff can add rows here by hand: a date, a name, and the rest if they like.
+  Expected: ['Date', 'First Name', 'Last Name', 'Company', 'Host', 'Purpose', 'Note', 'Arrived', 'Added by', 'Expected ID']
 };
 
 // Older sheets named this column after the company ("Who are you visiting at …?").
@@ -113,7 +116,7 @@ function doPost(e) {
 
 // Calls that change the sheet. The kiosk retries these after a network hiccup
 // with the same request id, so the first result is remembered and replayed.
-var WRITE_ACTIONS = ['endOfDay', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
+var WRITE_ACTIONS = ['endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
   'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
   'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow'];
 var REPLAY_TTL = 30 * 60;  // seconds
@@ -154,6 +157,7 @@ function dispatch_(req) {
     case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
     case 'endOfDay': return withLock_(function () { return endOfDay_(a); });
+    case 'findExpected': return withLock_(function () { return findExpected_(a); });
     case 'adminLogin': return adminLogin_(a);
     case 'adminSetPin': return withLock_(function () { return adminSetPin_(a); });
   }
@@ -165,6 +169,9 @@ function dispatch_(req) {
     case 'adminBadges': return adminBadges_();
     case 'adminAttention': return adminAttention_();
     case 'adminHistory': return adminHistory_(a);
+    case 'adminExpected': return adminExpected_(a);
+    case 'adminAddExpected': return withLock_(function () { return adminAddExpected_(a); });
+    case 'adminRemoveExpected': return withLock_(function () { return adminRemoveExpected_(a); });
     case 'adminPhoto': return adminPhoto_(a);
     case 'adminSignOut': return withLock_(function () { return adminSignOut_(a); });
     case 'adminAddBadge': return withLock_(function () { return adminAddBadge_(a); });
@@ -331,6 +338,8 @@ function recordDecline_(a) {
   if (!v.first || !v.last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
   var pass = takePass_(v.first, v.last);
   if (pass) return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
+  var expected = matchExpected_(v.first, v.last, a.expectedId);
+  if (expected) setCell_(TABS.expected, expected.row, 'Arrived', 'Declined at the kiosk ' + stamp_(new Date()));
 
   var reasons = cleanFlags_(a.reasons);
   var photoUrl = '';
@@ -440,9 +449,9 @@ function assignBadge_(a) {
   var p = person.values, now = new Date();
   setCells_(TABS.badges, badge.row, {
     'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
-    'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now
+    'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now, 'Note': ''
   });
-  return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified };
+  return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified, expected: started.expected };
 }
 
 /** Signs a visitor in without a badge (kiosks set up without visitor badges). */
@@ -450,7 +459,7 @@ function checkIn_(a) {
   var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
   if (!person) return { ok: false, error: 'not_found' };
   var started = startVisit_(person, a, '', 'Signed in again');
-  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified };
+  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified, expected: started.expected };
 }
 
 /**
@@ -463,14 +472,17 @@ function startVisit_(person, a, badgeNo, replacedBy) {
   var p = person.values, now = new Date(), visitId = 'S' + randomCode_(8);
   var flags = cleanFlags_(a.flags);
   var screening = flags.length || a.override ? screeningText_(flags, a.override) : String(p['Screening'] || 'Clear');
-  var visiting = clean_(a.visiting) || p['Who are you visiting?'];
-  var host = notifyHost_(visiting, { first: p['First Name'], last: p['Last Name'], company: p['Company'], purpose: clean_(a.purpose) || p['Purpose of your visit'] }, badgeNo, now);
+  var expected = matchExpected_(p['First Name'], p['Last Name'], a.expectedId);
+  var visiting = clean_(a.visiting) || (expected && expected.host) || p['Who are you visiting?'];
+  var purpose = clean_(a.purpose) || (expected && expected.purpose) || p['Purpose of your visit'];
+  if (expected) setCell_(TABS.expected, expected.row, 'Arrived', 'Signed in ' + stamp_(now));
+  var host = notifyHost_(visiting, { first: p['First Name'], last: p['Last Name'], company: p['Company'], purpose: purpose }, badgeNo, now);
   if (host) ensureColumn_(TABS.visits, 'Host notified', 'Visitor ID');
   appendRow_(TABS.visits, {
     'Signed in': now, 'First Name': p['First Name'], 'Last Name': p['Last Name'],
     'Company': p['Company'],
-    'Visiting': clean_(a.visiting) || p['Who are you visiting?'],
-    'Purpose': clean_(a.purpose) || p['Purpose of your visit'],
+    'Visiting': visiting,
+    'Purpose': purpose,
     'Kind': kindOf_(screening), 'Badge': badgeNo,
     'How they signed in': (clean_(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
     'Screening': screening,
@@ -481,7 +493,7 @@ function startVisit_(person, a, badgeNo, replacedBy) {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
   });
   if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
-  return { visitId: visitId, hostNotified: host };
+  return { visitId: visitId, hostNotified: host, expected: !!expected };
 }
 
 /**
@@ -499,9 +511,168 @@ function endOfDay_(a) {
     var t = new Date(r['Signed in']);
     if (isNaN(t.getTime()) || t >= cutoff) continue;
     signOutVisit_({ row: i + 2, values: r }, 'End of day');
+    if (r['Badge']) {
+      // The visitor left without tapping out, so the badge probably left with them.
+      var badge = findRow_(TABS.badges, 'Badge', r['Badge']);
+      if (badge && lower_(badge.values['Status']) === 'available') {
+        setCells_(TABS.badges, badge.row, { 'Status': 'not returned', 'Note': 'Not returned by ' + r['First Name'] + ' ' + r['Last Name'] + ' (' + dateOnly_(t) + ')' });
+      }
+    }
     done++;
   }
-  return { ok: true, signedOut: done };
+  // A kiosk's first run after end of day is turned on skips the summary (it would cover a day before setup).
+  var summary = a.summary === false ? false : dailySummary_(cutoff);
+  return { ok: true, signedOut: done, summary: summary };
+}
+
+/**
+ * Emails the alert addresses a summary of the day the cutoff closes, once per
+ * day, when the kiosk settings turn it on.
+ */
+function dailySummary_(cutoff) {
+  var s = readSettings_() || {};
+  if (!s.dailySummary) return false;
+  var to = alertAddresses_(s);
+  if (!to.length) return false;
+  var day = dayKey_(cutoff);
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('LAST_SUMMARY') === day) return false;
+  props.setProperty('LAST_SUMMARY', day);
+
+  var visits = readTab_(TABS.visits).filter(function (r) { return r['Visit ID'] && dayKey_(r['Signed in']) === day; });
+  var declined = visits.filter(function (r) { return /^declined/i.test(String(r['Screening'] || '')); });
+  var signedIn = visits.filter(function (r) { return !/^declined/i.test(String(r['Screening'] || '')); });
+  var flagged = signedIn.filter(function (r) { return /^flagged/i.test(String(r['Screening'] || '')); });
+  var overridden = signedIn.filter(function (r) { return /^overridden/i.test(String(r['Screening'] || '')); });
+  var lateOut = signedIn.filter(function (r) { return r['Signed out by'] === 'End of day'; });
+  var people = {};
+  signedIn.forEach(function (r) { people[r['Visitor ID'] || (r['First Name'] + ' ' + r['Last Name'])] = true; });
+  var notReturned = readTab_(TABS.badges).filter(function (r) { return lower_(r['Status']) === 'not returned'; });
+  var noShows = expectedRows_().filter(function (e) { return e.day === day && !e.arrived; });
+  var name = function (r) { return r['First Name'] + ' ' + r['Last Name'] + (r['Company'] && r['Company'] !== 'N/A' ? ' (' + r['Company'] + ')' : ''); };
+  var org = (s.org && clean_(s.org.name)) || 'The';
+  var dayLabel = Utilities.formatDate(cutoff, tz_(), 'EEE, MMM d');
+
+  var lines = [org + ' visitors on ' + dayLabel + ':', ''];
+  lines.push('  ' + signedIn.length + ' sign-in' + (signedIn.length === 1 ? '' : 's') + ' (' + Object.keys(people).length + ' ' + (Object.keys(people).length === 1 ? 'person' : 'people') + ')');
+  lines.push('  ' + declined.length + ' declined');
+  lines.push('  ' + flagged.length + ' flagged for a look');
+  if (overridden.length) lines.push('  ' + overridden.length + ' let in by staff override');
+  var section = function (title, rows, fmt) {
+    if (!rows.length) return;
+    lines.push('', title);
+    rows.slice(0, 40).forEach(function (r) { lines.push('  - ' + fmt(r)); });
+    if (rows.length > 40) lines.push('  … and ' + (rows.length - 40) + ' more');
+  };
+  section('Declined:', declined, function (r) { return name(r) + ': ' + String(r['Screening']).replace(/^Declined: /, ''); });
+  section('Flagged:', flagged, function (r) { return name(r) + ': ' + String(r['Screening']).replace(/^Flagged: /, ''); });
+  section('Still signed in at the end of the day (signed out automatically):', lateOut, function (r) { return name(r) + (r['Badge'] ? ', badge ' + r['Badge'] : ''); });
+  section('Badges not returned:', notReturned, function (r) { return r['Badge'] + (r['Note'] ? ': ' + String(r['Note']).replace(/^Not returned by /, '') : ''); });
+  section('Expected but didn\'t arrive:', noShows, function (e) { return e.first + ' ' + e.last + (e.host ? ', for ' + e.host : ''); });
+  lines.push('', 'Visitor log: ' + book_().getUrl());
+  try {
+    MailApp.sendEmail({ to: to.join(','), name: org + ' visitor kiosk', subject: 'Visitor summary for ' + dayLabel + ': ' + signedIn.length + ' sign-in' + (signedIn.length === 1 ? '' : 's') + (declined.length ? ', ' + declined.length + ' declined' : ''), body: lines.join('\n') });
+    return true;
+  } catch (err) {
+    console.warn('Summary email not sent: ' + err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------- expected visitors
+
+/** "2026-11-04" in the script's time zone, from a Date or a date typed into the sheet. */
+function dayKey_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return v.trim();
+  var d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz_(), 'yyyy-MM-dd');
+}
+
+function expectedRows_() {
+  var sh = book_().getSheetByName(TABS.expected);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return readTab_(TABS.expected).map(function (r, i) {
+    return {
+      row: i + 2, id: String(r['Expected ID'] || ''), day: dayKey_(r['Date']),
+      first: clean_(r['First Name']), last: clean_(r['Last Name']), company: clean_(r['Company']),
+      host: clean_(r['Host']), purpose: clean_(r['Purpose']), note: clean_(r['Note']),
+      arrived: String(r['Arrived'] || ''), addedBy: String(r['Added by'] || '')
+    };
+  }).filter(function (e) { return e.day && (e.first || e.last); });
+}
+
+/** Today's expected visitor with this name (or this id) who hasn't arrived yet. */
+function matchExpected_(first, last, id) {
+  var today = dayKey_(new Date());
+  var f = nameKey_(first), l = nameKey_(last);
+  var list = expectedRows_().filter(function (e) { return e.day === today && !e.arrived; });
+  if (id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  }
+  for (var j = 0; j < list.length; j++) {
+    if (near_(nameKey_(list[j].first), f) && near_(nameKey_(list[j].last), l)) return list[j];
+  }
+  return null;
+}
+
+/** The kiosk asks after the name step, to greet expected visitors and fill in their visit. */
+function findExpected_(a) {
+  if (!nameKey_(a.first) || !nameKey_(a.last)) return { ok: false, error: 'fullname' };
+  var e = matchExpected_(a.first, a.last, '');
+  if (!e) return { ok: true, expected: null };
+  if (!e.id) {
+    // Added by hand in the sheet: give it an id so the sign-in can find it again.
+    e.id = 'E' + randomCode_(8);
+    setCell_(TABS.expected, e.row, 'Expected ID', e.id);
+  }
+  return { ok: true, expected: { id: e.id, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose } };
+}
+
+function adminExpected_(a) {
+  var days = Math.max(1, Math.min(90, Number(a.days) || 14));
+  var from = dayKey_(new Date(new Date().getTime() - 86400000));
+  var to = dayKey_(new Date(new Date().getTime() + days * 86400000));
+  var list = expectedRows_().filter(function (e) { return e.day >= from && e.day <= to; });
+  list.sort(function (x, y) { return x.day < y.day ? -1 : x.day > y.day ? 1 : x.row - y.row; });
+  return {
+    ok: true, today: dayKey_(new Date()),
+    expected: list.map(function (e) {
+      return { id: e.id || 'row:' + e.row, day: e.day, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose, note: e.note, arrived: e.arrived, addedBy: e.addedBy };
+    })
+  };
+}
+
+function adminAddExpected_(a) {
+  var e = { first: clean_(a.first), last: clean_(a.last), company: clean_(a.company), host: clean_(a.host), purpose: clean_(a.purpose), note: clean_(a.note) };
+  var day = dayKey_(a.day);
+  if (!e.first || !e.last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
+  if (!day) return { ok: false, error: 'missing', fields: ['day'] };
+  ensureTab_(TABS.expected);
+  var id = 'E' + randomCode_(8);
+  appendRow_(TABS.expected, {
+    'Date': day, 'First Name': e.first, 'Last Name': e.last, 'Company': e.company, 'Host': e.host,
+    'Purpose': e.purpose, 'Note': e.note, 'Added by': adminName_() + ' (' + stamp_(new Date()) + ')', 'Expected ID': id
+  });
+  return { ok: true, id: id };
+}
+
+function adminRemoveExpected_(a) {
+  var list = expectedRows_();
+  var m = /^row:(\d+)$/.exec(String(a.id || ''));
+  var hit = list.filter(function (e) { return m ? e.row === Number(m[1]) : e.id === a.id; })[0];
+  if (!hit) return { ok: false, error: 'not_found' };
+  sheet_(TABS.expected).deleteRow(hit.row);
+  return { ok: true };
+}
+
+/** Creates a tab added in a later version, for sheets connected before it existed. */
+function ensureTab_(name) {
+  var ss = book_();
+  if (ss.getSheetByName(name)) return;
+  var sh = ss.insertSheet(name);
+  sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold');
+  sh.setFrozenRows(1);
 }
 
 /** A badge tapped while the welcome screen shows: sign the holder out. */
@@ -509,6 +680,10 @@ function tapAtWelcome_(a) {
   var badge = badgeByTag_(a.tag);
   if (!badge) return { ok: true, result: 'unknown' };
   var b = badge.values;
+  if (lower_(b['Status']) === 'not returned') {
+    setCells_(TABS.badges, badge.row, { 'Status': 'available', 'Note': '' });
+    return { ok: true, result: 'returned', badge: b['Badge'] };
+  }
   if (lower_(b['Status']) !== 'in use') return { ok: true, result: 'not_out', badge: b['Badge'] };
   var visit = findRow_(TABS.visits, 'Visit ID', b['Visit ID']);
   var name = b['Holder'];
@@ -778,7 +953,7 @@ function adminBadges_() {
     badges: readTab_(TABS.badges).filter(function (r) { return r['Badge']; }).map(function (r) {
       return {
         badge: String(r['Badge']), tag: String(r['NFC tag'] || ''), status: r['Status'] || 'available',
-        holder: r['Holder'] || '', since: iso_(r['Since'])
+        holder: r['Holder'] || '', since: iso_(r['Since']), note: String(r['Note'] || '')
       };
     })
   };
@@ -826,7 +1001,7 @@ function adminRetireBadge_(a, retire) {
   var badge = findRow_(TABS.badges, 'Badge', a.badge);
   if (!badge) return { ok: false, error: 'not_found' };
   if (retire && lower_(badge.values['Status']) === 'in use') return { ok: false, error: 'badge_in_use' };
-  setCell_(TABS.badges, badge.row, 'Status', retire ? 'retired' : 'available');
+  setCells_(TABS.badges, badge.row, retire ? { 'Status': 'retired' } : { 'Status': 'available', 'Note': '' });
   return { ok: true };
 }
 
@@ -903,9 +1078,7 @@ function takePass_(first, last) {
 /** Emails the alert addresses from the kiosk settings (with the photo attached). */
 function alert_(kind, v, flags, photo) {
   var s = readSettings_() || {};
-  var to = String((s.screening && s.screening.alertEmails) || '').split(/[\s,;]+/).filter(function (e) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-  }).slice(0, 10);
+  var to = alertAddresses_(s);
   if (!to.length) return false;
   var org = (s.org && clean_(s.org.name)) || 'The';
   var declined = kind === 'declined';
@@ -941,6 +1114,12 @@ function alert_(kind, v, flags, photo) {
     console.warn('Alert email not sent: ' + err);
     return false;
   }
+}
+
+function alertAddresses_(s) {
+  return String((s.screening && s.screening.alertEmails) || '').split(/[\s,;]+/).filter(function (e) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  }).slice(0, 10);
 }
 
 /**

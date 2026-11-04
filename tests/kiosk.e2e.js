@@ -92,7 +92,7 @@ async function holdLogo(page) {
 }
 
 
-async function signInNewVisitor(page, { first, last, citizen, country, sick = 'No' }) {
+async function signInNewVisitor(page, { first, last, citizen, country, sick = 'No', expected = false }) {
   await page.click('[data-screen="welcome"]');
   await waitView(page, 'choice');
   await page.click('[data-action="new"]');
@@ -102,12 +102,20 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
   await type(page, 'input[name="first"]', first);
   await set(page, 'input[name="last"]', last);
   await formNext(page);
+  if (expected) {
+    await page.waitForSelector('[data-expected-note]:not([hidden])');
+    ok(/We're expecting you\. Pat Kim will be told/.test(await text(page, '[data-expected-note]')), 'expected visitor greeted');
+    ok(await page.$eval('input[name="company"]', (e) => e.value) === 'Globex' && await page.$eval('input[name="purpose"]', (e) => e.value) === 'Quarterly review', 'visit details filled in from the expected list');
+    await snap(page, 'expected-greeting');
+  }
   await set(page, 'input[name="company"]', 'Globex');
-  await type(page, 'input[name="visiting"]', 'pa');
-  await page.waitForSelector('[data-host-suggest] .chip');
-  await page.click('[data-host-suggest] .chip:has-text("Pat Kim")');
-  ok(await page.$eval('input[name="visiting"]', (e) => e.value) === 'Pat Kim', 'host picked from the suggestions');
-  await page.click('[data-chips="purpose"] .chip >> nth=0');
+  if (!expected) {
+    await type(page, 'input[name="visiting"]', 'pa');
+    await page.waitForSelector('[data-host-suggest] .chip');
+    await page.click('[data-host-suggest] .chip:has-text("Pat Kim")');
+  }
+  ok(await page.$eval('input[name="visiting"]', (e) => e.value) === 'Pat Kim', expected ? 'host filled in for the expected visitor' : 'host picked from the suggestions');
+  if (!expected) await page.click('[data-chips="purpose"] .chip >> nth=0');
   await formNext(page);
   ok((await step(page)).startsWith('q:'), 'screening question follows the visit details');
   await page.click(`[data-screen="form"] .step.active .option[data-value="${citizen}"]`);
@@ -217,8 +225,33 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics', 'welcome shows the company');
     await snap(page, 'welcome');
 
+    // The front desk adds an expected visitor.
+    await holdLogo(page);
+    await page.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(page, PIN);
+    await waitView(page, 'admin');
+    await page.click('[data-admin-tab="expected"]');
+    await page.waitForSelector('[data-expected-list] .empty');
+    await page.click('[data-expected-new]');
+    await page.click('[data-expected-save]');
+    ok(/first and last name/.test(await text(page, '[data-expected-error]')), 'expected visitor needs a name');
+    await set(page, 'input[name="e-first"]', 'Ana');
+    await set(page, 'input[name="e-last"]', 'Lopez');
+    await set(page, 'input[name="e-company"]', 'Globex');
+    await type(page, 'input[name="e-host"]', 'pa');
+    await page.click('[data-expected-hosts] [data-host="Pat Kim"]');
+    await set(page, 'input[name="e-purpose"]', 'Quarterly review');
+    await set(page, 'input[name="e-note"]', 'Bring the NDA');
+    await snap(page, 'expected-form');
+    await page.click('[data-expected-save]');
+    await page.waitForSelector('[data-expected-list] .exp-row');
+    ok(/Ana Lopez/.test(await text(page, '[data-expected-list]')) && /Expected/.test(await text(page, '[data-expected-list] .pill')), 'expected visitor listed');
+    ok(await text(page, '[data-expected-count]') === '1', 'tab shows one expected today');
+    await page.click('[data-admin-exit]');
+    await waitView(page, 'welcome');
+
     // A normal sign-in with a badge.
-    await signInNewVisitor(page, { first: 'Ana', last: 'Lopez', citizen: 'U.S. citizen' });
+    await signInNewVisitor(page, { first: 'Ana', last: 'Lopez', citizen: 'U.S. citizen', expected: true });
     await formNext(page);
     ok(await step(page) === 'rules', 'rules after the photo');
     await page.click('[data-agree]');
@@ -287,6 +320,10 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(attn.some((r) => /Cara Smith/.test(r) && /Illness/.test(r)), 'declined visitor needs attention');
     ok(await page.$$eval('[data-attn-list] .attn-photo', (l) => l.length) >= 1, 'declined visitor photo shown');
     await snap(page, 'admin-attention');
+    await page.click('[data-admin-tab="expected"]');
+    await page.waitForSelector('[data-expected-list] .pill.arrived');
+    ok(/Arrived/.test(await text(page, '[data-expected-list] .pill')), 'expected visitor marked arrived');
+
     // History and the CSV export.
     await page.click('[data-admin-tab="history"]');
     await page.waitForSelector('[data-history-list] .history-row');
@@ -343,6 +380,13 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     // End of day signs out whoever is left (Boris) and frees his badge.
     const eod = await page.evaluate(async () => (await import('./js/api.js')).call('endOfDay', { before: new Date().toISOString() }));
     ok(eod.ok && eod.signedOut === 1, `end of day: ${JSON.stringify(eod)}`);
+    const v2 = await page.evaluate(async () => (await (await import('./js/api.js')).call('adminLogin', { pin: '482916' })).token)
+      .then((t) => page.evaluate(async (tok) => (await (await import('./js/api.js')).call('adminBadges', { token: tok })).badges.find((b) => b.badge === 'V2'), t));
+    ok(v2.status === 'not returned' && /Boris Ivanov/.test(v2.note), 'badge left with the visitor is marked not returned');
+    await page.waitForTimeout(3200); // the reader ignores the same card again within 3 seconds
+    await tapBadge(page, '04FFEE0011');
+    await page.waitForFunction(() => /Thanks for bringing back badge V2/.test(document.querySelector('[data-toast]').textContent));
+    ok(true, 'returned badge thanked at the welcome screen');
     ok(!page.errors.length, `no page errors: ${page.errors.join(' | ')}`);
     await page.context().close();
 
@@ -384,6 +428,11 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await snap(cloud, 'cloud-hosts');
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-photos-choice] [data-value="off"]');
+    ok(await cloud.$eval('[data-summary-box]', (e) => e.hidden), 'summary option waits for an end-of-day time');
+    await cloud.click('[data-eod-choice] [data-value="23:59"]');
+    await cloud.click('[data-summary-toggle]');
+    ok(await cloud.$eval('input[name="s-summary-to"]', (e) => e.value) === 'security@initech.example', 'summary goes to the alert addresses');
+    await snap(cloud, 'cloud-summary');
     await next(cloud);
     await cloud.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
     ok(backend.props.KIOSK_KEY && backend.props.ADMIN_PIN_HASH, 'sheet claimed and PIN set');
@@ -454,6 +503,10 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await next(third);
     await waitView(third, 'welcome');
     ok(await third.$eval('[data-org-name]', (e) => e.textContent) === 'Initech', 'joined tablet uses the sheet settings');
+    ok(!backend.mail.some((m) => /^Visitor summary/.test(m.subject)), 'no summary for the day before setup');
+    const daily = await third.evaluate(async () => (await import('./js/api.js')).call('endOfDay', { before: new Date().toISOString() }));
+    const sent = backend.mail.find((m) => /^Visitor summary/.test(m.subject));
+    ok(daily.summary === true && sent && sent.to === 'security@initech.example' && /Milton Waddams/.test(sent.body), `daily summary: ${JSON.stringify(daily)}`);
     ok(!cloud.errors.length && !second.errors.length && !third.errors.length, `no page errors: ${[...cloud.errors, ...second.errors, ...third.errors].join(' | ')}`);
 
     // ================================================================ 3. the Shock Tech preset

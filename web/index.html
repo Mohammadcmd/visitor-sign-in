@@ -261,6 +261,15 @@
             <button type="button" role="radio" data-value="20:00">8:00 PM</button>
             <button type="button" role="radio" data-value="23:59">Midnight</button>
           </div>
+          <div data-summary-box hidden>
+            <button type="button" class="agree toggle" data-summary-toggle role="switch" aria-checked="false">
+              <span class="agree-box" aria-hidden="true">✓</span>
+              <span><strong>Email a daily summary at that time</strong><br><span class="small">Sign-ins, declines and flags, who was still inside, badges not returned, and expected visitors who didn't arrive.</span></span>
+            </button>
+            <label class="field" data-summary-to hidden><span>Send the summary to</span>
+              <input readonly inputmode="none" name="s-summary-to" data-kb="email" maxlength="300" autocomplete="off" placeholder="office@example.com">
+              <small>The same addresses as the screening alerts. Separate addresses with commas.</small></label>
+          </div>
         </div>
 
         <div class="step" data-sstep="ready">
@@ -368,6 +377,7 @@
       <div class="step" data-step="visit">
         <p class="eyebrow" data-step-count></p>
         <h2>About your visit</h2>
+        <p class="expected-note" data-expected-note hidden></p>
         <label class="field"><span>Company</span>
           <input readonly inputmode="none" name="company" data-cap="words" maxlength="80" autocomplete="off">
           <small>Write “N/A” if you're visiting on your own.</small></label>
@@ -593,6 +603,7 @@
       <img class="bar-logo" data-org-logo alt="">
       <nav class="tabs" role="tablist">
         <button type="button" class="tab active" data-admin-tab="inside">Inside now</button>
+        <button type="button" class="tab" data-admin-tab="expected">Expected <span class="tab-count soft" data-expected-count hidden></span></button>
         <button type="button" class="tab" data-admin-tab="attention">Needs attention <span class="tab-count" data-attn-count hidden></span></button>
         <button type="button" class="tab" data-admin-tab="history">History</button>
         <button type="button" class="tab" data-admin-tab="badges">Badges</button>
@@ -609,6 +620,30 @@
             <button type="button" class="btn-primary roll-btn" data-rollcall-open>Roll call</button>
           </div></div>
         <div class="admin-list" data-inside-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="expected" hidden>
+        <div class="admin-head"><h2>Expected visitors</h2>
+          <button type="button" class="btn-primary" data-expected-new>+ Add a visitor</button></div>
+        <p class="hint small admin-hint" data-expected-hint></p>
+        <div class="exp-form" data-expected-form hidden>
+          <div class="exp-grid">
+            <label class="field"><span>First name</span><input readonly inputmode="none" name="e-first" data-cap="words" maxlength="60" autocomplete="off"></label>
+            <label class="field"><span>Last name</span><input readonly inputmode="none" name="e-last" data-cap="words" maxlength="60" autocomplete="off"></label>
+            <label class="field"><span>Company <em>(optional)</em></span><input readonly inputmode="none" name="e-company" data-cap="words" maxlength="80" autocomplete="off"></label>
+            <label class="field"><span>Visiting <em>(optional)</em></span><input readonly inputmode="none" name="e-host" data-cap="words" maxlength="80" autocomplete="off"></label>
+            <label class="field"><span>Purpose <em>(optional)</em></span><input readonly inputmode="none" name="e-purpose" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+            <label class="field"><span>Note for the front desk <em>(optional)</em></span><input readonly inputmode="none" name="e-note" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+          </div>
+          <div class="chips" data-expected-hosts></div>
+          <p class="builder-label">Arriving</p>
+          <div class="seg seg-wrap" role="radiogroup" data-expected-day></div>
+          <p class="form-error" data-expected-error role="alert"></p>
+          <div class="row-actions">
+            <button type="button" class="btn-secondary" data-expected-cancel>Cancel</button>
+            <button type="button" class="btn-primary" data-expected-save>Save</button>
+          </div>
+        </div>
+        <div class="admin-list" data-expected-list></div>
       </div>
       <div class="admin-pane" data-admin-pane="attention" hidden>
         <div class="admin-head"><h2>Needs attention</h2>

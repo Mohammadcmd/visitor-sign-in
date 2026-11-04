@@ -19,10 +19,10 @@ const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
   eq(b.handle({ action: 'claim', key: 'short' }).error, 'bad_key');
   const claim = b.handle({ action: 'claim', key: KEY });
   ok(claim.ok && claim.claimed, 'first kiosk claims the sheet');
-  eq(claim.version, 3);
+  eq(claim.version, 4);
   eq(claim.setupComplete, false);
   eq(claim.hasPin, false);
-  eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings']);
+  eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings', 'Expected']);
   ok(b.sheets['Face data'].hidden && b.sheets.Settings.hidden, 'helper tabs are hidden');
   const head = b.sheets.Visitors.rows[0];
   eq([head[0], head[1], head[head.length - 1]], ['First Name', 'Last Name', 'Photo folder']);
@@ -302,6 +302,84 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   ok(visits.objects().some((r) => r['Signed out by'] === 'End of day'));
   eq(call('endOfDay', { before: new Date(Date.now() + 86400000).toISOString() }).signedOut, 1, 'a future cutoff means now');
   eq(call('adminInside', { token: tok }).inside.length, 0);
+}
+
+// ------------------------------------------------------------------ expected visitors, badges not returned, daily summary
+{
+  const x = loadBackend();
+  x.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => x.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: {
+    setupComplete: true, org: { name: 'Initech' }, admin: { name: 'Sam' }, storage: 'cloud', badges: true, photos: 'off',
+    form: { rules: [] }, screening: { alertEmails: 'desk@initech.example' }, dailySummary: true,
+    notifyHosts: true, hosts: [{ name: 'Bill Lumbergh', email: 'bill@initech.example' }],
+  } });
+  const today = x.ctx.dayKey_(new Date());
+  const tomorrow = x.ctx.dayKey_(new Date(Date.now() + 86400000));
+
+  // Staff add expected visitors from the kiosk, or by typing into the Expected tab.
+  eq(call('adminAddExpected', { token: tok, first: 'Ann', day: today }).error, 'missing');
+  ok(call('adminAddExpected', { token: tok, first: 'Michael', last: 'Bolton', company: 'Initech', host: 'Bill Lumbergh', purpose: 'TPS reports', day: today }).ok);
+  call('adminAddExpected', { token: tok, first: 'Tom', last: 'Smykowski', host: 'Bill Lumbergh', day: tomorrow });
+  x.sheets.Expected.appendRow([today, 'Samir', 'Nagheenanajar', 'Initech', 'Bill Lumbergh', 'Interview', '', '', '', '']);
+  const list = call('adminExpected', { token: tok });
+  eq(list.expected.map((e) => e.first), ['Michael', 'Samir', 'Tom'], 'today first, then tomorrow');
+  ok(/^row:\d+$/.test(list.expected[1].id), 'rows typed into the sheet are listed too');
+
+  // The kiosk greets them after the name step (spelling slips allowed).
+  const found = call('findExpected', { first: 'michael', last: 'boltan' }).expected;
+  eq([found.company, found.host, found.purpose], ['Initech', 'Bill Lumbergh', 'TPS reports']);
+  eq(call('findExpected', { first: 'Tom', last: 'Smykowski' }).expected, null, 'not expected until tomorrow');
+  const samir = call('findExpected', { first: 'Samir', last: 'Nagheenanajar' }).expected;
+  ok(/^E[A-Z0-9]{8}$/.test(samir.id) && x.sheets.Expected.objects().find((r) => r['First Name'] === 'Samir')['Expected ID'] === samir.id, 'a typed-in row gets an id');
+
+  // Signing in marks them arrived and fills in the host, who is emailed.
+  const mb = call('register', { first: 'Michael', last: 'Bolton', company: 'Initech', visiting: 'Peter', purpose: 'Lunch' });
+  call('adminAddBadge', { token: tok, tag: '04BB00' });
+  const got = call('assignBadge', { visitorId: mb.visitor.id, tag: '04BB00', expectedId: found.id });
+  ok(got.ok && got.expected && got.hostNotified === 'Bill Lumbergh', JSON.stringify(got));
+  const visit = x.sheets.Visits.objects().at(-1);
+  eq([visit.Visiting, visit.Purpose], ['Bill Lumbergh', 'TPS reports'], 'the visit uses the expected host and purpose');
+  ok(/^Signed in /.test(x.sheets.Expected.objects()[0].Arrived), 'expected visitor marked arrived');
+  eq(call('findExpected', { first: 'Michael', last: 'Bolton' }).expected, null, 'only greeted once');
+  call('recordDecline', { first: 'Samir', last: 'Nagheenanajar', reasons: [{ label: 'Prohibited items', answer: 'Yes' }] });
+  ok(/^Declined at the kiosk/.test(x.sheets.Expected.objects().find((r) => r['First Name'] === 'Samir').Arrived), 'a decline is noted on the expected row');
+
+  // Removing an expected visitor.
+  const tomId = call('adminExpected', { token: tok }).expected.find((e) => e.first === 'Tom').id;
+  ok(call('adminRemoveExpected', { token: tok, id: tomId }).ok);
+  eq(call('adminExpected', { token: tok }).expected.length, 2);
+  eq(call('adminRemoveExpected', { token: tok, id: 'nope' }).error, 'not_found');
+
+  // End of day: Michael never tapped out, so his badge is "not returned", and the summary goes out once.
+  const mails = x.mail.length;
+  const eod = call('endOfDay', { before: new Date(Date.now() + 1000).toISOString() });
+  ok(eod.signedOut === 1 && eod.summary === true, JSON.stringify(eod));
+  const badge = x.sheets.Badges.objects()[0];
+  ok(badge.Status === 'not returned' && /^Not returned by Michael Bolton/.test(badge.Note), 'badge marked not returned');
+  eq(call('adminBadges', { token: tok }).badges[0].status, 'not returned');
+  const summary = x.mail.at(-1);
+  eq(x.mail.length, mails + 1);
+  eq(summary.to, 'desk@initech.example');
+  ok(/^Visitor summary for .+: 1 sign-in, 1 declined$/.test(summary.subject), summary.subject);
+  ok(/Declined:\n  - Samir Nagheenanajar \(N\/A\)|Declined:\n  - Samir Nagheenanajar: /.test(summary.body), summary.body);
+  ok(/Badges not returned:\n  - V1: Michael Bolton/.test(summary.body), 'summary lists badges not returned');
+  ok(/signed out automatically\):\n  - Michael Bolton \(Initech\), badge V1/.test(summary.body), 'summary lists who was signed out');
+  eq(call('endOfDay', { before: new Date().toISOString() }).summary, false, 'one summary a day');
+
+  // The badge comes back: a tap at the welcome screen clears it.
+  eq(call('tapAtWelcome', { tag: '04BB00' }).result, 'returned');
+  eq(x.sheets.Badges.objects()[0].Status, 'available');
+  eq(x.sheets.Badges.objects()[0].Note, '');
+
+  // Sheets connected before the Expected tab existed get it when staff first add someone.
+  const old = loadBackend();
+  old.handle({ action: 'claim', key: KEY });
+  delete old.sheets.Expected;
+  const otok = old.handle({ key: KEY, action: 'adminSetPin', args: { pin: '246810' } }).token;
+  eq(old.handle({ key: KEY, action: 'findExpected', args: { first: 'Ann', last: 'Lee' } }).expected, null, 'no Expected tab: nobody expected');
+  ok(old.handle({ key: KEY, action: 'adminAddExpected', args: { token: otok, first: 'Ann', last: 'Lee', day: today } }).ok, 'tab created on demand');
 }
 
 // ------------------------------------------------------------------ retries

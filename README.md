@@ -29,7 +29,7 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 | **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
 | **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
 | **8. Hosts** | Optional. The people visitors come to see, with their email addresses. Their names come up as visitors type. With Google Sheets, each host gets an email the moment their visitor signs in ("Your visitor has arrived"), and the visitor is told "We've let Pat know you're here." |
-| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons, visitor rules, and an optional time each day when everyone still signed in is signed out ("End of day"). |
+| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons, visitor rules, and an optional time each day when everyone still signed in is signed out ("End of day"). With Google Sheets, a daily summary email can go out at that time. |
 
 The last screen sums everything up and lists what to do next. Everything can be changed later: **press and hold the logo on the welcome screen for 2.5 seconds**, enter the PIN, then **Settings**.
 
@@ -39,10 +39,10 @@ Setting up another tablet: export the settings from Admin → Settings and impor
 
 1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start.
 2. **New visitor** or **Returning visitor**.
-3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why; your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
+3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why (if staff are expecting them, they're greeted and these are filled in); your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
 4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again.
 5. **Finish:** tap any visitor badge on the reader, or (without badges) they're signed in straight away.
-6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds.
+6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds. A badge marked "not returned" (see End of day) is cleared when it's tapped.
 
 ### Declined visitors
 
@@ -60,9 +60,10 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 
 - **Inside now:** everyone signed in, with a Sign out button.
   - **Roll call**, for an evacuation or drill: everyone on site as cards with their photo, company, host and badge. Tap each person as they're accounted for; the ones still missing stay at the top, with a running count.
+- **Expected:** visitors staff are expecting today and in the next two weeks, with company, host, purpose and a note for the front desk. When an expected visitor signs in, they see "Welcome, Ana! We're expecting you", their details are filled in, and the list shows them as arrived (or declined). With Google Sheets, staff can also type rows straight into the sheet's **Expected** tab.
 - **Needs attention:** declined and flagged visitors from the last two weeks, with photos and answers. **Let in** or **Mark reviewed**.
 - **History:** every visit and decline from today, the last 7 or 30 days, or the last year, with search by name, company or host. **Export visits (CSV)**, and on this tablet also **Export visitors (CSV)** with every screening answer. In the Android app, exports go to the tablet's Downloads folder.
-- **Badges:** add badges by tapping them, link or relink tags, retire or restore badges.
+- **Badges:** add badges by tapping them, link or relink tags, retire or restore badges. Badges signed out by End of day are marked **not returned** until they're tapped again or marked returned.
 - **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
 
 ## Where records are kept
@@ -77,6 +78,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 | **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, which host was emailed, time out and by whom (including "End of day"), and review notes. |
 | **Badges** | Badge number, NFC tag, status (available / in use / retired) and holder. |
 | **Face data** *(hidden)* | Face signatures, only for visitors who opted into quick entry. Turning it off deletes their rows. |
+| **Expected** | Visitors staff are expecting: Date, First Name, Last Name, Company, Host, Purpose, Note, then Arrived (filled in by the kiosk), Added by and an id. Type rows in here, or add them from the kiosk. |
 | **Settings** *(hidden)* | The kiosk settings, shared by every tablet on the sheet. The logo is kept in Drive. |
 
 The first kiosk to connect becomes the sheet's owner: its random kiosk key is saved in the script's properties, and requests without it are refused. Other tablets join with the private link from Admin → Settings. The tablet keeps working through Wi-Fi drops: nonessential writes wait in an outbox and go out when it's back.
@@ -102,7 +104,7 @@ The kiosk must be served over **HTTPS** for the camera (any static host: GitHub 
 
 - **Demo:** serve `web/` (`npm start`, then open `http://localhost:8080/?demo`). Sample company and data, a panel that simulates badge taps, admin PIN `123456`, nothing saved.
 - `npm test` runs the backend against an in-memory Google Sheet and Drive, and checks the wizard's copy of the backend is current.
-- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and host emails, a decline, a staff override, the admin screen (history, CSV exports, roll call), end of day, and other tablets joining.
+- `npm run test:e2e` runs the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and host emails, expected visitors, a decline, a staff override, the admin screen (history, CSV exports, roll call), end of day with badges not returned and the daily summary, and other tablets joining.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech

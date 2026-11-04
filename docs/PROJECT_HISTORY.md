@@ -107,7 +107,14 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 - **History and CSV export.** A History tab with ranges and search. Exports are CSV with formula-like cells defused. Because a web download does nothing inside the Android app, the app's Kiosk plugin gained `saveFile`, which writes to Downloads.
 - **Roll call.** A full-screen list of everyone inside, with photos fetched one at a time (`adminPhoto`) so the list appears immediately even when photos live in Drive. The same action now shows Drive photos in Needs attention.
 - **End of day.** A daily time when everyone still signed in is signed out. Each kiosk runs it once per cutoff (catching up after being switched off), and the backend action only touches visits from before the cutoff, so two tablets running it is harmless.
-- Backend version 3: kiosks tell admins to update older scripts, and actions an older script doesn't know explain how to update.
+- Backend version 3 (4 with expected visitors): kiosks tell admins to update older scripts, and actions an older script doesn't know explain how to update.
+
+## Expected visitors, badges not returned, daily summary
+
+- **Expected visitors** come from the admin screen or, with Google Sheets, from rows typed straight into a new Expected tab, so staff can pre-register visitors from their desk. The kiosk looks the visitor up after the name step and fills in what staff entered; the backend also matches by name when any visit starts, so returning visitors and face matches are marked arrived without extra steps. Rows typed by hand get an id the first time they match.
+- **Badges not returned.** End of day marks a badge still checked out as "not returned" rather than available, because the badge most likely left with the visitor. Tapping it at the welcome screen clears it, and handing it to the next visitor does too.
+- **Daily summary** (Google Sheets): at the end-of-day time, one email per day to the alert addresses with sign-ins, declines, flags, who was signed out automatically, badges not returned and expected visitors who didn't arrive. A kiosk's very first end-of-day run skips it, so turning the feature on doesn't send a summary for a day before setup.
+- Two fixes found by the new tests: the first tap on the welcome screen after leaving the admin screen was swallowed, and the on-screen keyboard covered forms in the admin screen.
 
 ## Where things are
 
@@ -126,8 +133,6 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 
 Not built yet, in rough order of value:
 
-1. Expected visitors, pre-registered by staff.
+1. Spanish and other languages, including translations for the business's own questions and rules.
 2. Text-message host notifications, and notifying hosts in on-tablet mode.
-3. Badges not returned at the end of the day.
-4. Spanish and other languages.
-5. A daily summary email.
+3. Calendar integration for expected visitors (Google Calendar invites with visitors).

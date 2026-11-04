@@ -159,6 +159,9 @@ function render({ instant = false, back = false } = {}) {
   else if (from !== to) fx.step(from, to, back);
   body().scrollTop = 0;
   ctx.kb.close();
+  // Two fields share the alert addresses (screening alerts and the daily summary).
+  field('s-alerts').value = draft.screening.alertEmails;
+  field('s-summary-to').value = draft.screening.alertEmails;
   $('[data-setup-error]').textContent = '';
 
   const visible = flow.filter((s) => s !== 'ready');
@@ -228,6 +231,12 @@ function validate(name) {
     }
     const bad = draft.screening.alertEmails.split(/[\s,;]+/).filter(Boolean).filter((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
     if (bad.length) return error(`Check this email address: ${bad[0]}`, field('s-alerts'));
+  }
+  if (name === 'touches' && draft.storage === 'cloud' && draft.endOfDay && draft.dailySummary) {
+    const list = draft.screening.alertEmails.split(/[\s,;]+/).filter(Boolean);
+    const bad = list.filter((e) => !EMAIL_RE.test(e));
+    if (!list.length) return error('Add an email address for the daily summary, or turn the summary off.', field('s-summary-to'));
+    if (bad.length) return error(`Check this email address: ${bad[0]}`, field('s-summary-to'));
   }
   return true;
 }
@@ -665,6 +674,9 @@ function renderTouches() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
+  $('[data-summary-box]').hidden = !(draft.storage === 'cloud' && draft.endOfDay);
+  $('[data-summary-toggle]').setAttribute('aria-checked', String(!!draft.dailySummary));
+  $('[data-summary-to]').hidden = !draft.dailySummary;
   $('[data-rules-edit]').innerHTML = draft.form.rules.map((r, i) => `<li>${esc(fill(r, draft))}<button type="button" data-unrule="${i}" aria-label="Remove">×</button></li>`).join('')
     || '<li class="hint small">No rules: the rules step is skipped.</li>';
 }
@@ -687,7 +699,8 @@ function renderReady() {
     ['Hosts', s.hosts.length ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}` : 'None listed',
       s.hosts.length ? (s.storage === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
     ['Photos', { all: 'Every new visitor', declined: 'Declined visitors only', off: 'No photos' }[s.photos], s.quickEntry && s.photos === 'all' ? 'Quick entry is on for returning visitors who opt in.' : ''],
-    ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out', ''],
+    ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out',
+      s.endOfDay && s.storage === 'cloud' && s.dailySummary ? `A daily summary is emailed to ${s.screening.alertEmails}.` : ''],
   ];
   $('[data-summary]').innerHTML = rows.map(([k, v, sub]) => `<li><span class="k">${esc(k)}</span><span class="v">${v}${sub ? `<small>${esc(sub)}</small>` : ''}</span></li>`).join('');
   const steps = [
@@ -726,7 +739,7 @@ function wire() {
       case 's-tagline': draft.org.tagline = v; renderPreview(); break;
       case 's-admin': draft.admin.name = v; break;
       case 's-pin': case 's-pin2': renderPinChecks(); break;
-      case 's-alerts': draft.screening.alertEmails = v; break;
+      case 's-alerts': case 's-summary-to': draft.screening.alertEmails = v; break;
       case 's-key': break;
       case 'q-text': {
         const q = draft.screening.questions.find((x) => x.id === extra.editing);
@@ -941,6 +954,11 @@ function wire() {
     renderHosts();
   });
   $('[data-notify-toggle]').addEventListener('click', () => { draft.notifyHosts = !draft.notifyHosts; renderHosts(); });
+  $('[data-summary-toggle]').addEventListener('click', () => {
+    draft.dailySummary = !draft.dailySummary;
+    renderTouches();
+    if (draft.dailySummary && !draft.screening.alertEmails) setTimeout(() => ctx.kb.open(field('s-summary-to')), 50);
+  });
 
   // "Already set up on another tablet?" from the first step: connect straight to the sheet.
   const joinLink = document.createElement('p');

@@ -96,6 +96,7 @@ export const DEFAULTS = Object.freeze({
   hosts: [],                   // [{ name, email }]: suggested as visitors type, emailed on arrival (Google Sheets)
   notifyHosts: true,
   endOfDay: '',                // 'HH:MM': sign everyone still inside out at this time each day; '' = never
+  dailySummary: false,         // Google Sheets: email the alert addresses a summary at the end-of-day time
 });
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -184,6 +185,7 @@ export function normalize(input) {
     hosts: hostList(s.hosts),
     notifyHosts: s.notifyHosts !== false,
     endOfDay: /^([01]\d|2[0-3]):[0-5]\d$/.test(s.endOfDay || '') ? s.endOfDay : '',
+    dailySummary: s.dailySummary === true,
   };
   // Quick entry recognizes faces, so it needs a photo of every new visitor.
   if (out.photos !== 'all') out.quickEntry = false;
