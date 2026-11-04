@@ -17,3 +17,6 @@ dist/
 test-results/
 /screenshots/
 /e2e-screenshots/
+# License signing key (tools/license/keygen.mjs): never commit it
+license-private.pem
+*.pem

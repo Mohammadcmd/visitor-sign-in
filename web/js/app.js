@@ -12,6 +12,8 @@ import {
 import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
+import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense } from './plans.js';
+import { qrSvg } from './qr.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -57,6 +59,9 @@ const state = {
 };
 
 const kb = new Keyboard($('[data-keyboard]'));
+
+/** Quick entry is on in the settings, and the plan includes it. */
+const quickOn = (s = settings()) => quickEntryOn(s) && can('quickEntry');
 
 // ------------------------------------------------------------------ helpers
 
@@ -134,7 +139,7 @@ function errorText(res) {
 }
 
 async function refreshFaceIndex() {
-  if (!quickEntryOn()) { state.faceIndex = []; return; }
+  if (!quickOn()) { state.faceIndex = []; return; }
   const res = await api('faceIndex');
   if (res.ok) state.faceIndex = res.people;
 }
@@ -195,10 +200,10 @@ function applySettings() {
   $('[data-done-leave]').textContent = s.badges
     ? t('When you leave, tap your badge on the reader to sign out.')
     : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
-  $('[data-find-hint]').textContent = quickEntryOn(s)
+  $('[data-find-hint]').textContent = quickOn(s)
     ? t('Start typing your name. If you turned on quick entry, the camera may recognize you first.')
     : t('Start typing your name.');
-  $('[data-cam-bubble]').hidden = !quickEntryOn(s);
+  $('[data-cam-bubble]').hidden = !quickOn(s);
   buildScreeningSteps();
   translateDom(visitorRoots());
   renderLangPick();
@@ -221,7 +226,7 @@ function useLang(code) {
 
 /** Language buttons on the welcome screen, and a switch on the next screen. */
 function renderLangPick() {
-  const langs = settings().languages.filter((c) => LANGS[c]);
+  const langs = can('languages') ? settings().languages.filter((c) => LANGS[c]) : ['en'];
   const pick = $('[data-lang-pick]');
   pick.hidden = langs.length < 2;
   pick.innerHTML = langs.map((c) => `<button type="button" lang="${c}" data-lang="${c}" class="${c === lang() ? 'on' : ''}">${esc(LANGS[c])}</button>`).join('');
@@ -283,7 +288,7 @@ const ENTER = {
   },
   choice() {
     // Warm the camera so the returning-visitor check starts instantly.
-    if (quickEntryOn()) face.startCamera($('[data-video="return"]')).catch(() => {});
+    if (quickOn()) face.startCamera($('[data-video="return"]')).catch(() => {});
   },
   form() {
     if (state.resume) { state.resume = false; renderStep({ instant: true }); return; }
@@ -315,7 +320,14 @@ const ENTER = {
     $('[data-declined-title]').textContent = first ? t('Thank you, {name}', { name: first }) : t('Thank you');
     $('[data-declined-text]').textContent = fill(tc(settings().screening.declineMessage));
   },
-  admin() { adminTab('inside'); },
+  admin() {
+    adminTab('inside');
+    const e = entitlement();
+    if (PAYWALL.enabled && ['trial-ended', 'expired'].includes(e.status) && !state.planNoted) {
+      state.planNoted = true;
+      setTimeout(() => toast(`${e.status === 'expired' ? 'The Pro license has ended' : 'The Pro trial has ended'}. Some extras are paused: Settings → Plan.`, 6000), 600);
+    }
+  },
 };
 
 // ------------------------------------------------------------------ welcome
@@ -388,7 +400,7 @@ function stepsAfterQuestions() {
   const out = [];
   if (s.photos === 'all') out.push('photo');
   if (s.form.rules.length) out.push('rules');
-  if (quickEntryOn(s)) out.push('quick');
+  if (quickOn(s)) out.push('quick');
   return out;
 }
 
@@ -542,6 +554,7 @@ $('[data-form-back]').addEventListener('click', () => {
 /** Staff expecting this visitor: greet them and fill in what staff already told us. */
 let expectedSeq = 0;
 async function lookUpExpected() {
+  if (!can('expected')) return;
   const first = (state.answers.first || '').trim(), last = (state.answers.last || '').trim();
   const seq = ++expectedSeq;
   const res = await api('findExpected', { first, last });
@@ -676,7 +689,7 @@ $('[data-capture]').addEventListener('click', async () => {
   $('[data-retake]').hidden = false;
   $('[data-form-error]').textContent = '';
   face.stopCamera();
-  if (!quickEntryOn()) return;
+  if (!quickOn()) return;
   // Check the picture shows a face; this descriptor is used only if they opt into quick entry.
   try {
     const d = await face.describe(shot.canvas);
@@ -849,7 +862,7 @@ function resetFind() {
   state.faceHit = null;
   state.faceFrames = [];
   setTimeout(() => { if (state.screen === 'find') kb.open($('input[name="ffirst"]')); }, 450);
-  if (quickEntryOn()) recognizeInBackground();
+  if (quickOn()) recognizeInBackground();
 }
 
 function camStatus(cls, text) {
@@ -993,7 +1006,7 @@ function chooseMatch(m, origin) {
   state.visitor = m;
   state.method = 'returning (name)';
   if (m.quickEntry) { saveSample('return-name'); continueReturning(origin); return; }
-  if (!state.sample || !quickEntryOn()) { continueReturning(origin); return; }
+  if (!state.sample || !quickOn()) { continueReturning(origin); return; }
   $('[data-optin-title]').textContent = t('Hi, {name}!', { name: m.first });
   show('optin');
 }
@@ -1380,6 +1393,8 @@ function dayLabel(key, today) {
 
 async function loadExpected() {
   const list = $('[data-expected-list]');
+  $('[data-expected-new]').hidden = !can('expected');
+  if (!can('expected')) { list.innerHTML = upsell('expected'); return; }
   $('[data-expected-hint]').textContent = MODE === 'cloud'
     ? 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them. Staff can also type rows straight into the Expected tab of your Google Sheet: a date, a first and last name, and anything else.'
     : 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them.';
@@ -1547,6 +1562,7 @@ async function exportFile(name, text) {
 }
 
 $('[data-export-visits]').addEventListener('click', () => {
+  if (!requirePro('export')) return;
   const rows = hist.visits.map((v) => [
     v.signedIn ? new Date(v.signedIn).toLocaleString() : '', v.signedOut ? new Date(v.signedOut).toLocaleString() : '',
     v.first, v.last, v.company, v.visiting, v.purpose, v.kind, v.badge, v.method, v.signedOutBy, v.screening, v.hostNotified,
@@ -1556,6 +1572,7 @@ $('[data-export-visits]').addEventListener('click', () => {
 });
 
 $('[data-export-visitors]').addEventListener('click', async () => {
+  if (!requirePro('export')) return;
   const res = await adminApi('adminVisitors');
   if (!res.ok) { toast(errorText(res)); return; }
   const labels = [...new Set(res.visitors.flatMap((v) => v.answers.map((a) => a.label)))];
@@ -1745,6 +1762,8 @@ function loadSettingsPane() {
   const actions = $('[data-storage-actions]');
   const secret = $('[data-connect-link]');
   secret.hidden = true;
+  $('[data-connect-qr]').hidden = true;
+  renderPlanCard();
   if (MODE === 'cloud') {
     info.textContent = `Every sign-in goes to your Google Sheet${CONFIG.BUILT_IN ? ' (built into this app)' : ''}. Visitor photos are in your Google Drive.`
       + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
@@ -1753,7 +1772,10 @@ function loadSettingsPane() {
     $('[data-connect-another]', actions)?.addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to show the private link', () => {
       const link = `${location.origin}${location.pathname}?api=${encodeURIComponent(CONFIG.API_URL)}&key=${encodeURIComponent(CONFIG.KIOSK_KEY)}`;
       secret.hidden = false;
-      secret.innerHTML = `Open this link once on the other tablet. It connects to the same sheet and settings. Keep it private: it works like a password.<br><code>${esc(link)}</code>`;
+      secret.innerHTML = `Scan this code with the other tablet's camera, or open the link on it once. It connects to the same sheet and settings. Keep it private: it works like a password.<br><code>${esc(link)}</code>`;
+      const qr = $('[data-connect-qr]');
+      qr.hidden = false;
+      qr.innerHTML = `${qrSvg(link, { size: 200, label: 'Link to connect another tablet' })}<span class="small">Android: open the camera app and point it at the code, then open the link in the kiosk's browser. With the Android app, build it with the connection instead (android/README.md).</span>`;
       e.currentTarget.disabled = false;
     }));
     $('[data-copy-latest]', actions).addEventListener('click', async () => {
@@ -1803,13 +1825,154 @@ async function renderDiagnostics() {
   add('Badge reader', !settings().badges ? 'Not used' : state.lastTapAt ? `Last card read ${ago(state.lastTapAt)}` : 'No card read since the kiosk started. Tap one now: it says which badge it is.');
   let cam = 'Not checked';
   try { cam = (await navigator.permissions.query({ name: 'camera' })).state; } catch { /* not supported */ }
-  add('Camera', settings().photos === 'off' && !quickEntryOn() ? 'Not used' : { granted: 'Allowed', denied: 'Blocked: allow the camera for this site or app', prompt: 'Will ask the first time a visitor takes a photo' }[cam] || cam, cam === 'denied');
-  add('Quick entry', quickEntryOn() ? (face.modelsLoaded ? 'Face recognition ready' : 'Face recognition loading…') : 'Off');
+  add('Camera', settings().photos === 'off' && !quickOn() ? 'Not used' : { granted: 'Allowed', denied: 'Blocked: allow the camera for this site or app', prompt: 'Will ask the first time a visitor takes a photo' }[cam] || cam, cam === 'denied');
+  add('Quick entry', quickOn() ? (face.modelsLoaded ? 'Face recognition ready' : 'Face recognition loading…') : 'Off');
   add('Offline start-up', Kiosk ? 'Built into the app' : navigator.serviceWorker?.controller ? 'Ready: the kiosk opens even without Wi-Fi' : 'Not active (needs an HTTPS address)', !Kiosk && !navigator.serviceWorker?.controller);
   add('Screen', `${innerWidth} × ${innerHeight}${document.documentElement.classList.contains('lite') ? ' · light effects for this tablet' : ''}`);
+  if (PAYWALL.enabled) add('Plan', planLine(), ['trial-ended', 'expired'].includes(entitlement().status));
   box.innerHTML = rows.join('');
+  checkForUpdate();
 }
 $('[data-diag-refresh]').addEventListener('click', renderDiagnostics);
+$('[data-run-checks]').addEventListener('click', () => openSetup({ edit: 'device', token: state.adminToken }));
+
+// ------------------------------------------------------------------ updates
+
+let latest = null;
+const newer = (a, b) => {
+  const pa = String(a).replace(/^v/, '').split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+};
+/** Asks GitHub for the latest release, once per session, and offers it in Diagnostics. */
+async function checkForUpdate() {
+  const box = $('[data-update-box]');
+  if (!CONFIG.UPDATES_FROM) return;
+  if (!latest) {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${CONFIG.UPDATES_FROM}/releases/latest`, { cache: 'no-store' });
+      if (!res.ok) return;
+      latest = await res.json();
+    } catch { return; }
+  }
+  if (!latest?.tag_name || !newer(latest.tag_name, APP_VERSION)) { box.hidden = true; return; }
+  const version = latest.tag_name.replace(/^v/, '');
+  const apk = (latest.assets || []).find((a) => /\.apk$/i.test(a.name));
+  const url = Kiosk && apk ? apk.browser_download_url : latest.html_url;
+  box.hidden = false;
+  box.innerHTML = `${qrSvg(url, { size: 120, label: 'Link to the new version' })}<div><strong>Version ${esc(version)} is available.</strong><br>${Kiosk
+    ? 'Scan the code (or open the link) on this tablet to download the new app, then install it over this one. Your settings stay.'
+    : 'This kiosk picks it up by itself the next time it loads (it reloads every night).'}<br><code>${esc(url)}</code>${Kiosk ? '' : '<br><button type="button" class="btn-secondary" data-reload-now>Load it now</button>'}</div>`;
+  $('[data-reload-now]', box)?.addEventListener('click', () => location.reload());
+}
+
+// ------------------------------------------------------------------ plans (only with the paywall switched on)
+
+function planLine() {
+  const e = entitlement();
+  if (e.status === 'licensed') return `Pro, licensed to ${e.license.customer || 'this business'}${e.license.expires ? ` until ${e.license.expires}` : ''}`;
+  if (e.status === 'trial') return `Pro trial: ${e.daysLeft} day${e.daysLeft === 1 ? '' : 's'} left`;
+  if (e.status === 'expired') return 'Free: the Pro license has ended';
+  if (e.status === 'trial-ended') return 'Free: the Pro trial has ended';
+  return 'Free';
+}
+
+function renderPlanCard() {
+  const card = $('[data-plan-card]');
+  card.hidden = !PAYWALL.enabled;
+  if (!PAYWALL.enabled) return;
+  const e = entitlement();
+  const paused = Object.keys(FEATURES).filter((f) => !can(f)).map((f) => FEATURES[f]);
+  $('[data-plan-text]').innerHTML = `<strong>${esc(planLine())}</strong>${e.error ? `<br><span class="warn">${esc(e.error)}</span>` : ''}`
+    + (paused.length ? `<br>Paused until you add a license: ${esc(paused.join(', '))}.` : '')
+    + '<br>Signing visitors in, screening questions, records and the roll call always keep working.';
+}
+
+/** Has the feature, or shows what Pro adds and how to get it. */
+function requirePro(feature) {
+  if (can(feature)) return true;
+  openUpgrade(feature);
+  return false;
+}
+
+function upsell(feature) {
+  return `<div class="empty"><strong>${esc(FEATURES[feature])} is part of Visitor Sign-In Pro.</strong><br>
+    <button type="button" class="btn-primary" onclick="document.dispatchEvent(new CustomEvent('kiosk-upgrade', { detail: '${feature}' }))">See Pro</button></div>`;
+}
+document.addEventListener('kiosk-upgrade', (e) => openUpgrade(e.detail));
+
+let scanStop = null;
+function openUpgrade(feature) {
+  const ov = $('[data-overlay="upgrade"]');
+  const e = entitlement();
+  $('[data-upgrade-title]').textContent = feature && FEATURES[feature] ? `${FEATURES[feature]} is part of Pro` : 'Visitor Sign-In Pro';
+  $('[data-upgrade-text]').textContent = e.status === 'trial' ? `You're on the free Pro trial: ${e.daysLeft} day${e.daysLeft === 1 ? '' : 's'} left.`
+    : e.status === 'licensed' ? `Licensed to ${e.license.customer}${e.license.expires ? ` until ${e.license.expires}` : ''}. To renew or move to a new key, enter it below.`
+      : 'Pro adds:';
+  $('[data-upgrade-list]').innerHTML = Object.values(FEATURES).map((f) => `<li>${esc(f)}</li>`).join('');
+  const buy = $('[data-upgrade-buy]');
+  buy.hidden = !PAYWALL.buyUrl;
+  if (PAYWALL.buyUrl) {
+    $('[data-upgrade-qr]').innerHTML = qrSvg(PAYWALL.buyUrl, { size: 150, label: 'Link to buy Pro' });
+    $('[data-upgrade-url]').textContent = PAYWALL.buyUrl;
+  }
+  $('input[name="license"]').value = '';
+  $('[data-upgrade-error]').textContent = e.error || '';
+  $('[data-license-scan]').hidden = !('BarcodeDetector' in window);
+  ov.hidden = false;
+}
+function closeUpgrade() {
+  scanStop?.();
+  kb.close();
+  $('[data-overlay="upgrade"]').hidden = true;
+}
+$('[data-upgrade-close]').addEventListener('click', closeUpgrade);
+$('[data-plan-open]').addEventListener('click', () => openUpgrade(''));
+$('[data-license-paste]').addEventListener('click', async () => {
+  try {
+    const text = (await navigator.clipboard.readText()).trim();
+    if (text) $('input[name="license"]').value = text;
+  } catch { $('[data-upgrade-error]').textContent = "Pasting isn't allowed here. Type the key, scan its QR code, or open the license link on this tablet."; }
+});
+$('[data-license-scan]').addEventListener('click', async () => {
+  const video = $('[data-video="license"]');
+  try {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    await face.startCamera(video);
+    video.hidden = false;
+    let on = true;
+    scanStop = () => { on = false; video.hidden = true; face.stopCamera(); scanStop = null; };
+    while (on) {
+      const codes = await detector.detect(video).catch(() => []);
+      const hit = codes.map((c) => c.rawValue).find((v) => /VSI1\./.test(v));
+      if (hit) { $('input[name="license"]').value = /VSI1\.[\w.-]+/.exec(hit)[0]; scanStop?.(); break; }
+      await sleep(300);
+    }
+  } catch { $('[data-upgrade-error]').textContent = "The camera couldn't scan here. Type or paste the key instead."; scanStop?.(); }
+});
+$('[data-upgrade-apply]').addEventListener('click', () => applyLicense($('input[name="license"]').value, state.adminToken));
+
+/** Checks a license key and saves it in the settings (so every tablet on the sheet gets it). */
+async function applyLicense(key, token) {
+  const err = $('[data-upgrade-error]');
+  err.textContent = '';
+  let info;
+  try { info = await verifyLicense(key); } catch (e) { err.textContent = e.message; return false; }
+  const next = { ...settings(), license: key.trim() };
+  const toSave = JSON.parse(JSON.stringify(next));
+  if (MODE === 'cloud') toSave.org.logo = '';
+  busy(true, 'Saving…');
+  const res = await api('adminSaveSettings', { token, settings: toSave });
+  busy(false);
+  if (!res.ok) { err.textContent = res.error === 'admin' ? 'The admin session ended. Unlock the admin screen again.' : errorText(res); return false; }
+  useSettings(next, { cache: MODE === 'cloud' });
+  await refreshPlan();
+  applySettings();
+  closeUpgrade();
+  if (state.screen === 'admin') loadSettingsPane();
+  toast(`Pro unlocked: licensed to ${info.customer || 'this business'}${info.expires ? ` until ${info.expires}` : ''}.`, 6000);
+  return true;
+}
 
 $('[data-export-settings]').addEventListener('click', async () => {
   const { exportable } = await import('./settings.js');
@@ -1978,6 +2141,7 @@ async function refreshCloudSettings() {
   const res = await api('getSettings');
   if (!res.ok || !res.settings) return false;
   useSettings({ ...res.settings, storage: 'cloud', org: { ...res.settings.org, logo: res.logo || '' } }, { cache: true });
+  await refreshPlan().catch(() => {});
   applySettings();
   return true;
 }
@@ -1997,10 +2161,11 @@ function startKiosk() {
 }
 
 initSetup({
-  kb, show, toast, busy, confirmTap, esc,
+  kb, show, toast, busy, confirmTap, esc, upgrade: openUpgrade,
   /** Setup finished (or an edit was saved): show the kiosk with the new settings. */
-  done({ reload, toAdmin }) {
+  async done({ reload, toAdmin }) {
     if (reload) { location.replace(location.pathname); return; }
+    await refreshPlan().catch(() => {});
     applySettings();
     refreshFaceIndex();
     if (toAdmin) { show('admin'); adminTab('settings'); } else show('welcome');
@@ -2015,6 +2180,7 @@ initSetup({
     applySettings();
     await refreshCloudSettings();
   }
+  await refreshPlan().catch(() => {});
   applySettings();
   if (!settings().setupComplete) {
     document.body.dataset.view = 'setup';
@@ -2024,7 +2190,13 @@ initSetup({
   } else {
     startKiosk();
   }
-  window.addEventListener('load', () => { if (quickEntryOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
+  // A license link (…/?license=VSI1…) opened on the tablet: an admin confirms it with the PIN.
+  const linkKey = new URLSearchParams(location.search).get('license');
+  if (linkKey && PAYWALL.enabled && settings().setupComplete) {
+    history.replaceState(null, '', location.pathname);
+    openPin({ title: 'Add a license', hint: 'Enter the admin PIN to add the license to this kiosk.', onSuccess(token) { applyLicense(linkKey, token); } });
+  }
+  window.addEventListener('load', () => { if (quickOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
   // Offline start-up for browser kiosks (the Android app has its files built in).
   if (!Kiosk && 'serviceWorker' in navigator && window.isSecureContext && !new URLSearchParams(location.search).has('nosw')) {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline start-up not available:', err));

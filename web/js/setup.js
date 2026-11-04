@@ -11,6 +11,8 @@ import { normalizeTag } from './match.js';
 import * as fx from './transitions.js';
 import { saveFile } from './files.js';
 import { builtIn, LANGS } from './i18n.js';
+import { runChecks, stopChecks, readerTapped } from './checks.js';
+import { can, FREE_LIMITS } from './plans.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -24,6 +26,7 @@ const DECLINE_PRESETS = [
 ];
 
 const STEPS = {
+  device: { title: 'This tablet', hint: 'Camera, reader, internet' },
   company: { title: 'Company', hint: 'Name and brand color' },
   admin: { title: 'Admin login', hint: 'Name and PIN' },
   logo: { title: 'Logo', hint: 'Optional' },
@@ -37,6 +40,7 @@ const STEPS = {
 };
 
 const TIPS = {
+  device: ['Use the tablet where it will stand, with the badge reader plugged in.', 'In the Android app, Android asks for the camera once: tap Allow.', 'You can run this check again any time: Admin → Settings → Diagnostics.'],
   company: ['Everything here can be changed later: hold the logo on the welcome screen, then Settings.', 'Setting up another tablet? Import a settings file, or connect it to the same Google Sheet.'],
   admin: ['The PIN is only stored as a one-way code, never as the digits themselves.', 'After 10 wrong tries the PIN pad locks for 10 minutes.', 'The admin screen closes itself after 3 minutes without a touch.'],
   logo: ['Most design tools (Canva, Figma, Illustrator, Photoshop) can export a PNG with a transparent background.', 'Large files are fine: the kiosk shrinks them.', 'No logo? The kiosk shows your company name in your brand color instead.'],
@@ -98,7 +102,7 @@ export function openSetup(opts = {}) {
 
 function buildFlow() {
   if (extra?.joining) return ['connect'];
-  const f = ['company', 'admin', 'logo', 'badges', 'storage'];
+  const f = ['device', 'company', 'admin', 'logo', 'badges', 'storage'];
   if (draft.storage === 'cloud') f.push('connect');
   f.push('screening', 'hosts', 'touches', 'ready');
   return f;
@@ -133,6 +137,11 @@ function fillForm() {
   renderBadgePanel();
   renderChoice('[data-storage-choice]', draft.storage);
   $$('[data-storage-choice] .option').forEach((o) => { o.disabled = connected() || !!edit; });
+  $('[data-storage-choice] .option[data-value="cloud"]').classList.toggle('pro-locked', !can('cloud'));
+  $('[data-lang-toggle="es"]').classList.toggle('pro-locked', !can('languages'));
+  $('[data-quick-toggle]').classList.toggle('pro-locked', !can('quickEntry'));
+  $('[data-notify-toggle]').classList.toggle('pro-locked', !can('hostEmails'));
+  $('[data-summary-toggle]').classList.toggle('pro-locked', !can('dailySummary'));
   $('[data-storage-builtin]').hidden = !connected();
   renderConnect();
   renderChoice('[data-screening-choice]', extra.screeningOn ? 'yes' : 'no');
@@ -180,7 +189,7 @@ function render({ instant = false, back = false } = {}) {
   const skip = $('[data-setup-skip]');
   backBtn.hidden = !!edit || (idx === 0 && !extra.joining) || name === 'ready';
   skip.hidden = !!edit || !['logo', 'hosts', 'touches'].includes(name);
-  if (edit) next.textContent = 'Save';
+  if (edit) next.textContent = edit === 'device' ? 'Done' : 'Save';
   else if (name === 'ready') next.textContent = 'Open the kiosk';
   else if (flow[idx + 1] === 'ready') next.textContent = 'Finish setup';
   else next.textContent = 'Continue';
@@ -188,6 +197,9 @@ function render({ instant = false, back = false } = {}) {
 
   if (name === 'connect') autoConnect();
   if (name === 'ready') renderReady();
+  // The tablet check runs while its step is showing (it uses the camera).
+  if (name === 'device' && !extra.checking) { extra.checking = true; runChecks(); }
+  if (name !== 'device' && extra.checking) { extra.checking = false; stopChecks(); }
 }
 
 function go(delta) {
@@ -246,6 +258,7 @@ const easyPin = (p) => /^(\d)\1+$/.test(p) || '01234567890123'.includes(p) || '9
 
 async function onNext() {
   const name = flow[idx];
+  if (edit === 'device') { leaveChecks(); ctx.done({ toAdmin: true, cancelled: true }); return; }
   if (name === 'ready') { ctx.done({ reload: draft.storage === 'cloud' && MODE !== 'cloud' }); return; }
   if (!validate(name)) return;
   if (edit) { await saveEdit(); return; }
@@ -267,7 +280,7 @@ async function onNext() {
 
 /** Everything the wizard collected becomes the kiosk's settings. */
 async function finish() {
-  const s = normalize({ ...draft, setupComplete: true });
+  const s = normalize({ ...draft, setupComplete: true, trialStarted: draft.trialStarted || new Date().toISOString() });
   if (!extra.screeningOn) s.screening.questions = [];
   ctx.busy(true, 'Saving your setup…');
   try {
@@ -454,8 +467,13 @@ function renderBadgePanel() {
   $('[data-badge-chips]').innerHTML = list.map((t, i) => `<span class="badge-chip"><b>${esc(t.no || `V${i + 1}`)}</b><span>…${esc(t.tag.slice(-6))}</span>${edit ? '' : `<button type="button" data-unbadge="${i}" aria-label="Remove">×</button>`}</span>`).join('');
 }
 
+function leaveChecks() {
+  if (extra?.checking) { extra.checking = false; stopChecks(); }
+}
+
 /** A card was tapped on the reader while setup is open. */
 export async function setupTap(tag) {
+  if (flow[idx] === 'device') { readerTapped(tag); return; }
   if (flow[idx] !== 'badges' || !draft.badges) { ctx.toast(`Reader works: card …${tag.slice(-6)} read.`); return; }
   if (extra.badges.some((b) => normalizeTag(b.tag) === normalizeTag(tag))) { ctx.toast('That badge is already registered.'); return; }
   if (edit) {
@@ -611,6 +629,7 @@ function questionCard(q, i, n) {
 }
 
 function addQuestion(q) {
+  if (!can('screening') && draft.screening.questions.length >= FREE_LIMITS.screeningQuestions) { ctx.upgrade('screening'); return false; }
   draft.screening.questions.push(q);
   renderBuilder();
 }
@@ -784,7 +803,8 @@ function wire() {
     if (flow[idx] === 'logo') { draft.org.logo = ''; extra.logoNote = null; renderLogo(); }
     if (flow[idx + 1] === 'ready') onNext(); else go(1);
   });
-  $('[data-setup-cancel]').addEventListener('click', () => ctx.done({ toAdmin: true, cancelled: true }));
+  $('[data-setup-cancel]').addEventListener('click', () => { leaveChecks(); ctx.done({ toAdmin: true, cancelled: true }); });
+  $('[data-checks-again]').addEventListener('click', () => { extra.checking = true; runChecks(); });
 
   // Text fields write straight into the draft.
   $('[data-screen="setup"]').addEventListener('input', (e) => {
@@ -874,6 +894,7 @@ function wire() {
   $('[data-storage-choice]').addEventListener('click', (e) => {
     const o = e.target.closest('.option');
     if (!o || o.disabled) return;
+    if (o.dataset.value === 'cloud' && !can('cloud')) { ctx.upgrade('cloud'); return; }
     draft.storage = o.dataset.value;
     renderChoice('[data-storage-choice]', draft.storage);
     const at = flow[idx];
@@ -920,8 +941,9 @@ function wire() {
   });
   $('[data-add-question]').addEventListener('click', () => {
     const q = normalizeQuestion({ id: uid(), text: '', type: 'yesno', rule: { action: 'none', answers: [] } });
+    if (addQuestion(q) === false) return;
     extra.editing = q.id;
-    addQuestion(q);
+    renderBuilder();
     setTimeout(() => ctx.kb.open($('[data-qlist] input[name="q-text"]')), 50);
   });
   $('[data-qlist]').addEventListener('click', (e) => {
@@ -973,6 +995,7 @@ function wire() {
   });
   $('[data-quick-toggle]').addEventListener('click', (e) => {
     if (e.currentTarget.disabled) return;
+    if (!draft.quickEntry && !can('quickEntry')) { ctx.upgrade('quickEntry'); return; }
     extra.quickTouched = true;
     draft.quickEntry = !(draft.quickEntry && draft.photos === 'all');
     renderTouches();
@@ -1020,7 +1043,11 @@ function wire() {
     draft.hosts.splice(Number(b.dataset.unhost), 1);
     renderHosts();
   });
-  $('[data-notify-toggle]').addEventListener('click', () => { draft.notifyHosts = !draft.notifyHosts; renderHosts(); });
+  $('[data-notify-toggle]').addEventListener('click', () => {
+    if (!draft.notifyHosts && !can('hostEmails')) { ctx.upgrade('hostEmails'); return; }
+    draft.notifyHosts = !draft.notifyHosts;
+    renderHosts();
+  });
   $('[data-retention-choice]').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -1028,10 +1055,12 @@ function wire() {
     renderTouches();
   });
   $('[data-lang-toggle="es"]').addEventListener('click', () => {
+    if (!draft.languages.includes('es') && !can('languages')) { ctx.upgrade('languages'); return; }
     draft.languages = draft.languages.includes('es') ? ['en'] : ['en', 'es'];
     renderLanguages();
   });
   $('[data-summary-toggle]').addEventListener('click', () => {
+    if (!draft.dailySummary && !can('dailySummary')) { ctx.upgrade('dailySummary'); return; }
     draft.dailySummary = !draft.dailySummary;
     renderTouches();
     if (draft.dailySummary && !draft.screening.alertEmails) setTimeout(() => ctx.kb.open(field('s-summary-to')), 50);

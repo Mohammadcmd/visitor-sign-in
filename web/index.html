@@ -50,6 +50,20 @@
       </header>
       <div class="form-body setup-body" data-setup-body>
 
+        <div class="step" data-sstep="device">
+          <h2>Let's check this tablet</h2>
+          <p class="hint">A minute now saves surprises later. Each check says how to fix anything that needs a look, and you can carry on either way. Nothing here is saved.</p>
+          <div class="device-grid">
+            <div class="cam-test">
+              <video data-video="check" playsinline muted autoplay></video>
+              <span class="cam-test-label" data-cam-test-label>Starting the camera…</span>
+            </div>
+            <ul class="device-checks" data-checks></ul>
+          </div>
+          <p class="checks-summary" data-checks-summary></p>
+          <div class="row-actions"><button type="button" class="btn-secondary" data-checks-again>Check again</button></div>
+        </div>
+
         <div class="step" data-sstep="company">
           <h2>What's your company called?</h2>
           <p class="hint">It appears on the welcome screen, the visitor badges and the sign-in questions.</p>
@@ -709,11 +723,21 @@
             <p class="set-text" data-storage-info></p>
             <div class="row-actions" data-storage-actions></div>
             <div class="set-secret" data-connect-link hidden></div>
+            <div class="set-qr" data-connect-qr hidden></div>
           </div>
           <div class="set-card">
             <h3>Diagnostics</h3>
             <dl class="diag" data-diagnostics></dl>
-            <div class="row-actions"><button type="button" class="btn-secondary" data-diag-refresh>Check again</button></div>
+            <div class="update-box" data-update-box hidden></div>
+            <div class="row-actions">
+              <button type="button" class="btn-secondary" data-diag-refresh>Refresh</button>
+              <button type="button" class="btn-secondary" data-run-checks>Check this tablet</button>
+            </div>
+          </div>
+          <div class="set-card" data-plan-card hidden>
+            <h3>Plan</h3>
+            <p class="set-text" data-plan-text></p>
+            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>Plans and license</button></div>
           </div>
           <div class="set-card">
             <h3>Backup and reset</h3>
@@ -782,6 +806,32 @@
       <div class="rollcall-bar"><i data-rollcall-progress></i></div>
       <p class="hint small">Tap each visitor once you've seen them. Visitors still missing stay at the top.</p>
       <div class="rollcall-grid" data-rollcall-list></div>
+    </div>
+  </div>
+
+  <!-- Plans: shown only when the paywall is switched on (js/plans.js) -->
+  <div class="overlay with-kb" data-overlay="upgrade" hidden>
+    <div class="center-card upgrade-card">
+      <p class="eyebrow">Visitor Sign-In Pro</p>
+      <h2 data-upgrade-title>Unlock everything</h2>
+      <p class="upgrade-text" data-upgrade-text></p>
+      <ul class="upgrade-list" data-upgrade-list></ul>
+      <div class="upgrade-buy" data-upgrade-buy hidden>
+        <div data-upgrade-qr></div>
+        <p>Scan with your phone to buy Pro, or go to<br><code data-upgrade-url></code><br><span class="small">Your license key arrives by email.</span></p>
+      </div>
+      <label class="field"><span>Have a license key?</span>
+        <input readonly inputmode="none" name="license" data-kb="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="VSI1.…"></label>
+      <div class="row-actions upgrade-key-actions">
+        <button type="button" class="btn-ghost" data-license-paste>Paste</button>
+        <button type="button" class="btn-ghost" data-license-scan hidden>Scan the key's QR code</button>
+      </div>
+      <video class="license-scan" data-video="license" playsinline muted autoplay hidden></video>
+      <p class="form-error" data-upgrade-error role="alert"></p>
+      <div class="quick-actions">
+        <button type="button" class="btn-secondary btn-lg" data-upgrade-close>Not now</button>
+        <button type="button" class="btn-primary btn-lg" data-upgrade-apply>Use this key</button>
+      </div>
     </div>
   </div>
 

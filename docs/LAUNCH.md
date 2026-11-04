@@ -21,8 +21,10 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 
 ## 3. The kiosk on a tablet
 
+**The easy way:** publish the kiosk with GitHub Pages (below), then open `https://<owner>.github.io/<repository>/` on the tablet. The install page offers the Android app on an Android tablet and the browser kiosk on an iPad; on a computer it shows a QR code to scan with the tablet.
+
 **Android tablet (recommended)**
-- [ ] Get the APK: the latest **Release** (`visitor-sign-in-<version>.apk`), or **Actions → Build Android app → visitor-sign-in**.
+- [ ] Get the APK: from the install page, the latest **Release** (`visitor-sign-in-<version>.apk`), or **Actions → Build Android app → visitor-sign-in**.
 - [ ] For updates that install over the old version, set the signing secrets once ([android/README.md](../android/README.md#updates)).
 - [ ] Install, allow the camera, accept app pinning, and choose it as the **Home app** so it returns after a reboot ([android/README.md](../android/README.md)).
 
@@ -33,11 +35,12 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 
 ## 4. Set up
 
-- [ ] Run the setup wizard on the tablet. With Google Sheets, paste the `/exec` URL on the *Connect* step.
+- [ ] Run the setup wizard on the tablet. Its first step checks the tablet: fix anything it flags (it says how), tap a badge on the reader, and look at the camera once.
+- [ ] With Google Sheets, paste the `/exec` URL on the *Connect* step.
 - [ ] Choose an admin PIN only admins know (6 to 8 digits). It's stored as a one-way hash; it can be changed in Admin → Settings → Admin login.
 - [ ] Register the badges by tapping them during setup (or later in Admin → Badges). Label each card with its number (V1, V2, …).
 - [ ] Offer Spanish if your visitors would use it, and translate your own questions and rules (Finishing touches → Languages).
-- [ ] More tablets on the same sheet: Admin → Settings → **Connect another tablet**, and open the private link on each one.
+- [ ] More tablets on the same sheet: Admin → Settings → **Connect another tablet**, then scan the QR code with each tablet (or open the private link on it).
 
 ## 5. Test before the first visitor
 

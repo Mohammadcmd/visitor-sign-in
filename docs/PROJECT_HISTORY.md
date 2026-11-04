@@ -134,6 +134,15 @@ The brief: *go crazy, I want this to be ready to be put into use, a final versio
 - **Docs:** a launch checklist, a privacy notice template, a changelog and screenshots.
 - **A full code review** of the branch found ten issues, all fixed with tests: a retry arriving while the first request still ran could write twice; old Shock Tech sheets would lose the foreign-national flag on returning visitors; device-owner tablets would lose kiosk lock when updated in place; a one-time override was repeated on later visits; a refused settings save could lose the logo; removing a hand-typed expected visitor could hit the wrong row; the outbox dropped items the sheet was too busy to take; a purge emptying a whole tab would fail; expected dates used the script's time zone rather than the sheet's; and every status check read the whole Visits tab.
 
+## Easy setup and a paywall, ready to switch on
+
+The ask: *make the setup process super easy as far as downloading and making sure hardware and software works, and get ready to make a pay wall.*
+
+- **Install page.** The site's home page recognizes the device: Android tablets get the latest APK from the newest GitHub Release, iPads get the kiosk with Add to Home Screen and Guided Access steps, computers get a QR code to scan with the tablet. Setup, demo and license links still go straight to the kiosk.
+- **Checking the tablet** became the first setup step: a live camera preview, face recognition on a real frame, a badge tap, internet and Google reachability, the clock against the server's time, persistent storage, screen size and orientation, and the browser or WebView version. Each result says what to do about it; nothing blocks setup.
+- **QR codes** (an MIT library vendored in `web/vendor/qrcode/`) for connecting another tablet, updates and buying.
+- **The paywall** is built but off: plans in one file, a trial from the end of setup, ECDSA-signed license keys checked offline, gates at the places features are switched on, a few visitor-facing extras that pause at runtime, and tools to make keys. The rule throughout: nothing that protects the business or its visitors (sign-in, screening, records, roll call) ever stops for a plan.
+
 ## Where things are
 
 | Thing | Location |

@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.0.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Privacy notice template](docs/privacy-notice.md)
+**Version 1.0.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
 
 | | | |
 |---|---|---|
@@ -12,6 +12,8 @@ A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android
 | Expected visitors are greeted | Spanish for visitors | A polite decline, with staff alerted |
 | ![Admin: inside now](docs/screenshots/admin-inside.jpg) | ![Roll call](docs/screenshots/roll-call.jpg) | ![Admin: history](docs/screenshots/admin-history.jpg) |
 | Admin: who's inside | Emergency roll call | History and CSV export |
+| ![Install page on an Android tablet](docs/screenshots/install-android.jpg) | ![Checking the tablet](docs/screenshots/setup-device.jpg) | ![Pro upgrade screen](docs/screenshots/upgrade.jpg) |
+| The install page knows the device | Setup checks the tablet first | Ready to sell: plans and licenses |
 
 ```
 web/           the kiosk (static HTML/CSS/JS, no build step)
@@ -28,8 +30,9 @@ How it was designed, and why, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTO
 
 ## Getting started
 
-1. **Try it:** `npm start`, then open `http://localhost:8080/?demo` (sample company, a panel that simulates badge taps, admin PIN `123456`, nothing saved).
-2. **Launch it:** follow the [launch checklist](docs/LAUNCH.md): decide, set up Google Sheets (optional), put the kiosk on a tablet, run setup, test, go.
+1. **Try it:** `npm start`, then open `http://localhost:8080/web/?demo` (sample company, a panel that simulates badge taps, admin PIN `123456`, nothing saved).
+2. **Install it:** open the kiosk's address on the tablet (with GitHub Pages, `https://<owner>.github.io/<repository>/`). The install page recognizes the device: an Android tablet gets the latest app to download, an iPad gets the kiosk and the Add to Home Screen steps, and a computer shows a QR code to scan with the tablet.
+3. **Set it up:** the first setup step checks the tablet (camera, face recognition, badge reader, internet, clock, storage, screen and software) and says how to fix anything. Then a few questions, and you're ready. The [launch checklist](docs/LAUNCH.md) has every step.
 
 ## Setup: the first start
 
@@ -37,6 +40,7 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 
 | Step | What you choose |
 |---|---|
+| **0. This tablet** | Not a question: a check of the camera (with a live preview), face recognition, the badge reader (tap a card), the internet and Google, the clock and time zone, storage, the screen and the software, each with a plain-language fix. Run it again any time from Admin → Settings → Diagnostics. |
 | **1. Company** | Name, a tagline, and one brand color. Every screen's colors are worked out from it, with a live preview. |
 | **2. Admin login** | The admin's name and a 6 to 8 digit PIN. The PIN is only stored as a one-way hash. Easy PINs like `123456` are refused. |
 | **3. Logo** | A PNG with a transparent background. The wizard checks the transparency and shrinks large files. No logo? A clean text logo in your color is made for you. |
@@ -90,7 +94,9 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 - **History:** every visit and decline from today, the last 7 or 30 days, or the last year, with search by name, company or host. **Export visits (CSV)**, and on this tablet also **Export visitors (CSV)** with every screening answer. In the Android app, exports go to the tablet's Downloads folder.
 - **Badges:** add badges by tapping them, link or relink tags, retire or restore badges. Badges signed out by End of day are marked **not returned** until they're tapped again or marked returned.
 - **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
-  - **Diagnostics:** app version, connection and script version, items waiting to be sent, storage used, badge reader, camera, face recognition and offline start-up, so problems can be spotted without a computer.
+  - **Diagnostics:** app version, connection and script version, items waiting to be sent, storage used, badge reader, camera, face recognition and offline start-up, so problems can be spotted without a computer. **Check this tablet** runs the setup check again, and when a newer release is out it says so, with a QR code to get it.
+  - **Connect another tablet** shows a QR code as well as the private link.
+  - **Plan** (only when the paywall is switched on): the trial or license, and **Plans and license** to add a key.
 
 ## Where records are kept
 
@@ -131,6 +137,10 @@ The first kiosk to connect becomes the sheet's owner: its random kiosk key is sa
 
 The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests check they match); the Android version code is worked out from it, so each release installs as an update.
 
+## Selling it
+
+The kiosk includes a plan and license system, **switched off** until you turn it on: Free and Pro plans, a free Pro trial, license keys you sign with your own key and the kiosk checks offline, PRO tags and an upgrade screen with your checkout link as a QR code, and tools to make keys (`npm run license:keygen`, `npm run license:issue`). Visitors are never stopped at the door, screening is always asked, and records keep being saved. See [docs/PAYWALL.md](docs/PAYWALL.md).
+
 ## Privacy
 
 - Face recognition runs on the tablet with [face-api.js](https://github.com/vladmandic/face-api). It's opt-in per visitor; photos are never sent to a recognition service. Biometric privacy laws vary; check the opt-in wording meets yours.
@@ -141,8 +151,8 @@ The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests 
 
 ## Testing
 
-- `npm test`: the backend against an in-memory Google Sheet and Drive, file checks (versions, the offline file list, translation placeholders), and that the wizard's copy of the backend is current.
-- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, and starting with no network. Set `SHOTS=<folder>` to save screenshots.
+- `npm test`: the backend against an in-memory Google Sheet and Drive, file checks (versions, the offline file list, translation placeholders), license keys end to end (signing, checking, trial and expiry), and that the wizard's copy of the backend is current.
+- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, starting with no network, the tablet check, the install page, update notices and the paywall switched on. Set `SHOTS=<folder>` to save screenshots.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech

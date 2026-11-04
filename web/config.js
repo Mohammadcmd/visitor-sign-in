@@ -65,6 +65,9 @@ const saved = connection();
 export const APP_VERSION = '1.0.0';
 
 export const CONFIG = {
+  // Where new versions are published (GitHub owner/repository). Admin → Settings → Diagnostics says when one is out.
+  UPDATES_FROM: 'Mohammadcmd/visitor-sign-in',
+
   // Apps Script web app URL ending in /exec, and the key this kiosk connected with
   API_URL: saved.api || '',
   KIOSK_KEY: saved.key || '',

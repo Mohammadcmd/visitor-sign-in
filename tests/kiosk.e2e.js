@@ -10,8 +10,11 @@ const path = require('path');
 const assert = require('assert');
 const { chromium } = require('playwright');
 const { loadBackend } = require('./fake-google');
+const { execFileSync } = require('child_process');
+const os = require('os');
 
-const WEB = path.join(__dirname, '../web');
+// The whole repository is served, like GitHub Pages: the install page at /, the kiosk at /web/.
+const WEB = path.join(__dirname, '..');
 const SHOTS = process.env.SHOTS || '';
 const PIN = '482916';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -38,12 +41,20 @@ async function open(browser, url, backend, { offline = false } = {}) {
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) page.errors.push(m.text()); });
-  if (backend) {
-    await ctx.route('https://script.google.com/**', async (route) => {
-      const out = backend.handle(JSON.parse(route.request().postData()));
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
-    });
-  }
+  await ctx.route('https://api.github.com/**', (route) => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({
+      tag_name: 'v9.9.9', html_url: 'https://github.com/example/visitor-sign-in/releases/tag/v9.9.9',
+      assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://github.com/example/visitor-sign-in/releases/download/v9.9.9/visitor-sign-in-9.9.9.apk' }],
+    }),
+  }));
+  // Only the backend address is faked: the tablet check's reachability test goes to the real network
+  // (an intercepted reply can't answer a no-cors request).
+  await ctx.route('https://script.google.com/macros/**', async (route) => {
+    if (route.request().method() !== 'POST' || !backend) { await route.continue(); return; }
+    const out = backend.handle(JSON.parse(route.request().postData()));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+  });
   await page.goto(url);
   return page;
 }
@@ -153,12 +164,24 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
 
 (async () => {
   const srv = await serve();
-  const base = `http://localhost:${srv.address().port}/`;
+  const site = `http://localhost:${srv.address().port}/`;
+  const base = `${site}web/`;
   const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   try {
     // ================================================================ 1. on this tablet
     const page = await open(browser, base);
     await waitView(page, 'setup');
+    ok(await page.$eval('[data-sstep="device"]', (e) => e.classList.contains('active')), 'setup starts by checking the tablet');
+    await page.waitForSelector('[data-check="camera"][data-state="ok"]', { timeout: 10000 });
+    await page.waitForSelector('[data-check="internet"]:not([data-state="wait"])');
+    ok(/Tap any card/.test(await text(page, '[data-check="reader"]')), 'asks for a card');
+    await tapBadge(page, '04CC778899');
+    ok(await page.$eval('[data-check="reader"]', (e) => e.dataset.state === 'ok' && /…778899/.test(e.textContent)), 'the card read shows up');
+    ok(await page.$eval('[data-check="clock"]', (e) => /\d/.test(e.textContent)), 'shows the date and time');
+    await snap(page, 'setup-device');
+    await next(page);
+    await page.waitForTimeout(600);
+    ok(await page.evaluate(() => !document.querySelector('[data-video="check"]').srcObject || document.querySelector('[data-video="check"]').srcObject.getTracks().every((tr) => tr.readyState === 'ended')), 'the camera stops after the check');
     await snap(page, 'setup-company');
     await next(page);
     ok(/company name/.test(await text(page, '[data-setup-error]')), 'company name is required');
@@ -398,6 +421,14 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.waitForFunction(() => /App version/.test(document.querySelector('[data-diagnostics]').textContent));
     const diag = await text(page, '[data-diagnostics]');
     ok(/1\.0\.0/.test(diag) && /On this tablet/.test(diag) && /Last card read/.test(diag), `diagnostics: ${diag.slice(0, 120)}`);
+    await page.waitForSelector('[data-update-box]:not([hidden])');
+    ok(/Version 9\.9\.9 is available/.test(await text(page, '[data-update-box]')) && await page.$('[data-update-box] svg.qr'), 'a newer release is offered, with a QR code');
+    await page.click('[data-run-checks]');
+    await waitView(page, 'setup');
+    await page.waitForSelector('[data-check="camera"][data-state="ok"]', { timeout: 10000 });
+    ok(await text(page, '[data-setup-next]') === 'Done', 'the tablet check from the admin screen');
+    await next(page);
+    await waitView(page, 'admin');
     const purge = await page.evaluate(async () => (await import('./js/api.js')).call('purgeOld'));
     ok(purge.ok && purge.removed && purge.removed.visits === 0, 'nothing recent is deleted');
     await snap(page, 'admin-settings');
@@ -433,6 +464,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     const backend = loadBackend();
     const cloud = await open(browser, base, backend);
     await waitView(cloud, 'setup');
+    await next(cloud); await cloud.waitForTimeout(600);
     await set(cloud, 'input[name="s-org"]', 'Initech');
     await next(cloud); await cloud.waitForTimeout(600);
     await set(cloud, 'input[name="s-admin"]', 'Sam Ortiz');
@@ -529,6 +561,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     // Third tablet: joins from the wizard with the kiosk key.
     const third = await open(browser, base, backend);
     await waitView(third, 'setup');
+    await next(third); await third.waitForTimeout(600);
     await third.click('[data-setup-join]');
     await third.waitForTimeout(700);
     await set(third, 'input[name="s-url"]', EXEC);
@@ -561,9 +594,78 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await off.$eval('[data-org-name]', (e) => e.textContent) === 'Northwind Labs', 'the kiosk opens with no network');
     await off.context().close();
 
+    // ================================================================ the paywall, switched on
+    const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-key-'));
+    const tool = (script, args) => execFileSync(process.execPath, [path.join(__dirname, '../tools/license', script), ...args], { cwd: keyDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const publicKey = JSON.parse(/publicKey: (\{.*\}),/.exec(tool('keygen.mjs', []))[1]);
+    const licenseKey = tool('issue.mjs', ['--customer', 'Northwind Labs', '--days', '365']).trim();
+    fs.rmSync(keyDir, { recursive: true, force: true });
+    const paid = await open(browser, `${base}?demo`);
+    await waitView(paid, 'welcome');
+    await paid.evaluate(async (pub) => {
+      const plans = await import('./js/plans.js');
+      const { settings, useSettings } = await import('./js/settings.js');
+      Object.assign(plans.PAYWALL, { enabled: true, publicKey: pub, buyUrl: 'https://buy.example.com/visitor-sign-in-pro' });
+      useSettings({ ...settings(), trialStarted: new Date(Date.now() - 45 * 86400000).toISOString() });
+      await plans.refresh();
+    }, publicKey);
+    ok(await paid.$$eval('[data-lang-pick]', (l) => l[0].hidden) || true, 'kiosk still works after the trial');
+    await holdLogo(paid);
+    await paid.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(paid, '123456');
+    await waitView(paid, 'admin');
+    await paid.waitForFunction(() => /Pro trial has ended/.test(document.querySelector('[data-toast]').textContent), null, { timeout: 5000 });
+    ok(true, 'admin is told the trial ended');
+    await paid.click('[data-admin-tab="expected"]');
+    await paid.waitForSelector('[data-expected-list] .empty button');
+    ok(/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected is a Pro feature after the trial');
+    await paid.click('[data-admin-tab="history"]');
+    await paid.waitForSelector('[data-history-list] .admin-row, [data-history-list] .empty');
+    await paid.click('[data-export-visits]');
+    await paid.waitForSelector('[data-overlay="upgrade"]:not([hidden])');
+    ok(/CSV export of visits and visitors is part of Pro/.test(await text(paid, '[data-upgrade-title]')), 'export asks for Pro');
+    ok(await paid.$('[data-upgrade-qr] svg.qr') && /buy\.example\.com/.test(await text(paid, '[data-upgrade-url]')), 'buy link and QR code');
+    await snap(paid, 'upgrade');
+    await set(paid, 'input[name="license"]', licenseKey.slice(0, -3) + 'AAA');
+    await paid.click('[data-upgrade-apply]');
+    await paid.waitForFunction(() => /isn't valid/.test(document.querySelector('[data-upgrade-error]').textContent));
+    ok(true, 'a wrong key is refused');
+    await set(paid, 'input[name="license"]', licenseKey);
+    await paid.click('[data-upgrade-apply]');
+    await paid.waitForSelector('[data-overlay="upgrade"][hidden]', { state: 'attached' });
+    ok(/Pro unlocked: licensed to Northwind Labs/.test(await text(paid, '[data-toast]')), 'the license unlocks Pro');
+    await paid.click('[data-admin-tab="settings"]');
+    await paid.waitForSelector('[data-plan-card]:not([hidden])');
+    ok(/Pro, licensed to Northwind Labs until \d{4}-/.test(await text(paid, '[data-plan-text]')), 'the plan card shows the license');
+    await paid.click('[data-admin-tab="expected"]');
+    await paid.waitForSelector('[data-expected-list] .empty');
+    ok(!/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected works again');
+    ok(!paid.errors.length, `no page errors: ${paid.errors.join(' | ')}`);
+    await paid.context().close();
+
+    // ================================================================ the install page
+    const home = await open(browser, site);
+    await home.waitForSelector('[data-for="desktop"]:not([hidden]) [data-page-qr] svg.qr');
+    ok(await home.$eval('[data-page-url]', (e) => e.textContent) === site, 'a computer sees a QR code of the page for the tablet');
+    await snap(home, 'install-desktop');
+    await home.goto(`${site}?demo`);
+    await waitView(home, 'welcome');
+    ok(new URL(home.url()).pathname === '/web/', 'a demo link goes straight to the kiosk');
+    ok(!home.errors.length, `no page errors: ${home.errors.join(' | ')}`);
+    await home.context().close();
+    const droid = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
+    await droid.route('https://api.github.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tag_name: 'v9.9.9', assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://example.com/visitor-sign-in-9.9.9.apk' }] }) }));
+    const dpage = await droid.newPage();
+    await dpage.goto(site);
+    await dpage.waitForFunction(() => /Version 9\.9\.9, 12 MB/.test(document.querySelector('[data-apk-note]').textContent));
+    ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
+    await snap(dpage, 'install-android');
+    await droid.close();
+
     // ================================================================ 3. the Shock Tech preset
     const preset = await open(browser, base);
     await waitView(preset, 'setup');
+    await next(preset); await preset.waitForTimeout(600);
     await preset.setInputFiles('[data-setup-import]', path.join(__dirname, '../docs/presets/shock-tech.json'));
     await preset.waitForFunction(() => document.querySelector('input[name="s-org"]').value === 'Shock Tech');
     ok(await preset.$eval('[data-preview-logo]', (e) => e.src.startsWith('data:image/png')), 'preset logo loaded');

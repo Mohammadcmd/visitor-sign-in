@@ -20,6 +20,14 @@ The kiosk that began as Shock Tech's own visitor sign-in, made configurable for 
 - Google Sheets backend (`apps-script/Code.gs`, version 4): tabs for visitors, visits, badges, expected visitors, face data and settings; photos in Drive; alert, host and daily summary emails.
 - Records are deleted automatically after the period chosen in setup.
 
+**Getting started**
+- An install page at the kiosk's address: the Android app download on Android tablets, the browser kiosk with Add to Home Screen steps on iPads, and a QR code on computers.
+- Setup starts by checking the tablet (camera, face recognition, badge reader, internet, clock, storage, screen, software), with fixes in plain words; Diagnostics can run it again.
+- QR codes for connecting another tablet and for updates; Diagnostics says when a new release is out.
+
+**Selling it**
+- A plan and license system, switched off by default: Free and Pro, a Pro trial, signed license keys checked offline, PRO tags and an upgrade screen, and tools to make keys (`docs/PAYWALL.md`).
+
 **Running it**
 - Android app (kiosk mode, starts on boot), or any browser over HTTPS, with offline start-up.
 - GitHub Actions: tests on every push, an APK on every change, a GitHub Release with the APK for every `v*` tag, and GitHub Pages hosting for the browser kiosk.
