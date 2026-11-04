@@ -31,6 +31,7 @@ function fakeGoogle(initialProps = {}) {
           })),
           setValues(vals) { vals.forEach((row, i) => row.forEach((v, j) => { (rows[r - 1 + i] ||= [])[c - 1 + j] = v; })); return this; },
           setValue(v) { (rows[r - 1] ||= [])[c - 1] = v; return this; },
+          clearContent() { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) if (rows[r - 1 + i]) rows[r - 1 + i][c - 1 + j] = ''; return this; },
           setFontWeight() { return this; },
         };
       },
@@ -54,6 +55,7 @@ function fakeGoogle(initialProps = {}) {
     insertSheet: (n) => { order.push(n); return (sheets[n] = makeSheet(n)); },
     getName: () => 'Visitor log',
     getUrl: () => 'https://docs.google.com/spreadsheets/d/FAKE/edit',
+    getSpreadsheetTimeZone: () => 'America/New_York',
   };
 
   function makeFile(blob, folderName) {

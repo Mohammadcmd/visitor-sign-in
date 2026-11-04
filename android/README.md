@@ -114,4 +114,4 @@ The launcher icon and splash screens are rendered by `tools/icons/render.js`. Ch
 
 ## Earlier Shock Tech tablets
 
-Tablets with the earlier Shock Tech build have the app id `com.shocktech.visitorkiosk`. To update them in place instead of installing a second app, build with `KIOSK_APP_ID=com.shocktech.visitorkiosk` and the same signing key. The device-owner command then uses that id too: `com.shocktech.visitorkiosk/com.visitorsignin.kiosk.KioskAdminReceiver`.
+Tablets with the earlier Shock Tech build have the app id `com.shocktech.visitorkiosk`. To update them in place instead of installing a second app, build with `KIOSK_APP_ID=com.shocktech.visitorkiosk` and the same signing key. Tablets already made device owner keep their fully locked kiosk mode: the app still includes the receiver under its original name (`com.shocktech.visitorkiosk/.KioskAdminReceiver`).

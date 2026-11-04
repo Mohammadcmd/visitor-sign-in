@@ -123,6 +123,7 @@ var REPLAY_TTL = 30 * 60;  // seconds
 
 /** Dispatches one API call. Separate from doPost so tests can call it directly. */
 function handle_(req) {
+  settingsMemo_ = undefined;
   if (req && req.action === 'claim') return withLock_(function () { return claim_(req.key); });
   var props = PropertiesService.getScriptProperties();
   var key = props.getProperty('KIOSK_KEY');
@@ -133,11 +134,28 @@ function handle_(req) {
   if (!rid || WRITE_ACTIONS.indexOf(req.action) < 0) return dispatch_(req);
   var cache = CacheService.getScriptCache();
   var seen = cache.get(rid);
+  // A retry that arrives while the first attempt is still running waits for its answer
+  // (well inside the kiosk's 20-second timeout) instead of writing a second time.
+  for (var waited = 0; seen === IN_PROGRESS && waited < 15000; waited += 500) {
+    Utilities.sleep(500);
+    seen = cache.get(rid);
+  }
+  if (seen === IN_PROGRESS) return { ok: false, error: 'busy' };
   if (seen) return JSON.parse(seen);
-  var out = dispatch_(req);
+  cache.put(rid, IN_PROGRESS, REPLAY_TTL);
+  var out;
+  try {
+    out = dispatch_(req);
+  } catch (err) {
+    cache.remove(rid);
+    throw err;
+  }
   if (out && out.error !== 'busy') cache.put(rid, JSON.stringify(out), REPLAY_TTL);
+  else cache.remove(rid);
   return out;
 }
+
+var IN_PROGRESS = '"in progress"';
 
 function dispatch_(req) {
   var a = req.args || {};
@@ -170,7 +188,7 @@ function dispatch_(req) {
     case 'adminBadges': return adminBadges_();
     case 'adminAttention': return adminAttention_();
     case 'adminHistory': return adminHistory_(a);
-    case 'adminExpected': return adminExpected_(a);
+    case 'adminExpected': return withLock_(function () { return adminExpected_(a); });
     case 'adminAddExpected': return withLock_(function () { return adminAddExpected_(a); });
     case 'adminRemoveExpected': return withLock_(function () { return adminRemoveExpected_(a); });
     case 'adminPhoto': return adminPhoto_(a);
@@ -210,7 +228,7 @@ function status_() {
     hasPin: hasPin_(),
     sheetName: ss.getName ? ss.getName() : '',
     sheetUrl: ss.getUrl ? ss.getUrl() : '',
-    attention: attentionRows_().length
+    attention: attentionCount_()
   };
 }
 
@@ -230,27 +248,38 @@ function adminSaveSettings_(a) {
   s.org = s.org || {};
   delete s.org.logo;
   if (s.admin) delete s.admin.pinHash;
-  if (a.logo === '' && oldLogo) { trashFile_(oldLogo); oldLogo = ''; }
-  if (typeof a.logo === 'string' && a.logo) {
-    if (!isPhoto_(a.logo)) return { ok: false, error: 'logo' };
+  var newLogo = typeof a.logo === 'string' && a.logo;
+  if (newLogo && !isPhoto_(a.logo)) return { ok: false, error: 'logo' };
+  // Check the size before touching the logo, so a refused save changes nothing.
+  s.org.logoFileId = newLogo ? 'x'.repeat(44) : a.logo === '' ? '' : oldLogo;
+  if (JSON.stringify(s).length > MAX_SETTINGS_CHARS) return { ok: false, error: 'too_big' };
+  if (newLogo) {
+    s.org.logoFileId = savePhoto_(photoRoot_(), a.logo, 'kiosk logo').getId();
     if (oldLogo) trashFile_(oldLogo);
-    oldLogo = savePhoto_(photoRoot_(), a.logo, 'kiosk logo').getId();
+  } else if (a.logo === '' && oldLogo) {
+    trashFile_(oldLogo);
   }
-  s.org.logoFileId = oldLogo;
   var text = JSON.stringify(s);
-  if (text.length > MAX_SETTINGS_CHARS) return { ok: false, error: 'too_big' };
+  settingsMemo_ = s;
   var row = findRow_(TABS.settings, 'Setting', 'kiosk');
   if (row) setCell_(TABS.settings, row.row, 'Value', text);
   else appendRow_(TABS.settings, { 'Setting': 'kiosk', 'Value': text });
   return { ok: true };
 }
 
+var settingsMemo_;
+
+/** The kiosk settings, read once per request. */
 function readSettings_() {
+  if (settingsMemo_ !== undefined) return settingsMemo_;
   var sh = book_().getSheetByName(TABS.settings);
-  if (!sh || sh.getLastRow() < 2) return null;
-  var row = findRow_(TABS.settings, 'Setting', 'kiosk');
-  if (!row) return null;
-  try { return JSON.parse(row.values['Value']); } catch (err) { return null; }
+  var out = null;
+  if (sh && sh.getLastRow() >= 2) {
+    var row = findRow_(TABS.settings, 'Setting', 'kiosk');
+    if (row) { try { out = JSON.parse(row.values['Value']); } catch (err) { out = null; } }
+  }
+  settingsMemo_ = out;
+  return out;
 }
 
 function readLogo_(fileId) {
@@ -325,6 +354,7 @@ function register_(a) {
     addFaceRow_(id, a.descriptor, 'signup', fileId);
   }
   if (flags.length && !a.override && !pass) alert_('flagged', v, flags, a.photo);
+  attentionChanged_();
   return { ok: true, visitor: publicVisitor_(id, v, screening) };
 }
 
@@ -474,7 +504,7 @@ function startVisit_(person, a, badgeNo, replacedBy) {
   if (open) signOutVisit_(open, replacedBy);
   var p = person.values, now = new Date(), visitId = 'S' + randomCode_(8);
   var flags = cleanFlags_(a.flags);
-  var screening = flags.length || a.override ? screeningText_(flags, a.override) : String(p['Screening'] || 'Clear');
+  var screening = flags.length || a.override ? screeningText_(flags, a.override) : carriedScreening_(p);
   var expected = matchExpected_(p['First Name'], p['Last Name'], a.expectedId);
   var visiting = clean_(a.visiting) || (expected && expected.host) || p['Who are you visiting?'];
   var purpose = clean_(a.purpose) || (expected && expected.purpose) || p['Purpose of your visit'];
@@ -496,6 +526,7 @@ function startVisit_(person, a, badgeNo, replacedBy) {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
   });
   if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
+  if (flags.length || /^flagged/i.test(screening)) attentionChanged_();
   return { visitId: visitId, hostNotified: host, expected: !!expected };
 }
 
@@ -597,7 +628,6 @@ function purgeOld_() {
   var today = dayKey_(new Date());
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('LAST_PURGE') === today) return { ok: true, removed: null };
-  props.setProperty('LAST_PURGE', today);
   var cutoff = new Date(new Date().getTime() - days * 86400000);
   var old = function (v) { var t = new Date(v); return !isNaN(t.getTime()) && t < cutoff; };
 
@@ -619,6 +649,8 @@ function purgeOld_() {
     var day = dayKey_(r['Date']);
     return !day || day >= dayKey_(cutoff);
   }) : 0;
+  props.setProperty('LAST_PURGE', today);
+  attentionChanged_();
   return { ok: true, removed: { visits: visits, visitors: visitors, expected: expected } };
 }
 
@@ -632,8 +664,14 @@ function keepRows_(name, keep) {
   var kept = values.filter(function (v, i) { return keep(rows[i]); });
   var removed = count - kept.length;
   if (!removed) return 0;
-  if (kept.length) sh.getRange(2, 1, kept.length, width).setValues(kept);
-  sh.deleteRows(2 + kept.length, removed);
+  if (kept.length) {
+    sh.getRange(2, 1, kept.length, width).setValues(kept);
+    sh.deleteRows(2 + kept.length, removed);
+  } else {
+    // Sheets won't delete every row below the frozen header, so one empty row stays.
+    sh.getRange(2, 1, 1, width).clearContent();
+    if (removed > 1) sh.deleteRows(3, removed - 1);
+  }
   return removed;
 }
 
@@ -701,11 +739,16 @@ function adminExpected_(a) {
   var from = dayKey_(new Date(new Date().getTime() - 86400000));
   var to = dayKey_(new Date(new Date().getTime() + days * 86400000));
   var list = expectedRows_().filter(function (e) { return e.day >= from && e.day <= to; });
+  list.forEach(function (e) {
+    if (e.id) return;
+    e.id = 'E' + randomCode_(8);
+    setCell_(TABS.expected, e.row, 'Expected ID', e.id);
+  });
   list.sort(function (x, y) { return x.day < y.day ? -1 : x.day > y.day ? 1 : x.row - y.row; });
   return {
     ok: true, today: dayKey_(new Date()),
     expected: list.map(function (e) {
-      return { id: e.id || 'row:' + e.row, day: e.day, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose, note: e.note, arrived: e.arrived, addedBy: e.addedBy };
+      return { id: e.id, day: e.day, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose, note: e.note, arrived: e.arrived, addedBy: e.addedBy };
     })
   };
 }
@@ -725,9 +768,7 @@ function adminAddExpected_(a) {
 }
 
 function adminRemoveExpected_(a) {
-  var list = expectedRows_();
-  var m = /^row:(\d+)$/.exec(String(a.id || ''));
-  var hit = list.filter(function (e) { return m ? e.row === Number(m[1]) : e.id === a.id; })[0];
+  var hit = a.id ? expectedRows_().filter(function (e) { return e.id === a.id; })[0] : null;
   if (!hit) return { ok: false, error: 'not_found' };
   sheet_(TABS.expected).deleteRow(hit.row);
   return { ok: true };
@@ -910,6 +951,20 @@ function adminInside_() {
   return { ok: true, inside: inside };
 }
 
+/**
+ * How many visits need attention. Tablets ask every couple of minutes, so the
+ * count is cached for a minute and dropped whenever it can change.
+ */
+function attentionCount_() {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('attention');
+  if (hit !== null && hit !== undefined && hit !== '') return Number(hit) || 0;
+  var n = attentionRows_().length;
+  cache.put('attention', String(n), 60);
+  return n;
+}
+function attentionChanged_() { CacheService.getScriptCache().remove('attention'); }
+
 /** Recent declines and flagged visits that nobody has reviewed yet. */
 function attentionRows_() {
   var sh = book_().getSheetByName(TABS.visits);
@@ -998,6 +1053,7 @@ function adminReview_(a) {
   var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
   if (!visit) return { ok: false, error: 'not_found' };
   setCell_(TABS.visits, visit.row, 'Reviewed', 'Reviewed by ' + adminName_() + ' (' + stamp_(new Date()) + ')');
+  attentionChanged_();
   return { ok: true };
 }
 
@@ -1011,6 +1067,7 @@ function adminAllow_(a) {
     'Screening': String(visit.values['Screening']) + '. Allowed by ' + by + (reason ? ': ' + reason : ''),
     'Reviewed': 'Reviewed by ' + by + ' (' + stamp_(new Date()) + ')'
   });
+  attentionChanged_();
   return { ok: true, by: by };
 }
 
@@ -1119,12 +1176,28 @@ function screeningText_(flags, override) {
   return 'Clear';
 }
 
+/**
+ * The screening a returning visitor carries from their earlier answers. Flags
+ * from questions asked once (citizenship, say) apply to every visit. A staff
+ * override is not repeated: the visit notes that staff approved them before.
+ * Visitors registered before screening questions existed (the original Shock
+ * Tech sheet) have a Citizenship status column instead.
+ */
+function carriedScreening_(p) {
+  var s = String(p['Screening'] || '');
+  if (/^overridden/i.test(s)) return 'Approved earlier: ' + s;
+  if (s) return s;
+  if (/^not a u\.?s\.? citizen/i.test(String(p['Citizenship status'] || ''))) return 'Flagged: Foreign national';
+  return 'Clear';
+}
+
 /** Visit "Kind": Visitor, the first flag label (e.g. Foreign national), or Visitor (override). */
 function kindOf_(screening) {
   var s = String(screening || '');
   var m = /^Flagged: ([^,]+)/.exec(s);
   if (m) return m[1];
   if (/^Overridden/.test(s)) return 'Visitor (override)';
+  if (/^Approved earlier/.test(s)) return 'Visitor (approved earlier)';
   return 'Visitor';
 }
 
@@ -1466,7 +1539,11 @@ function randomCode_(n) {
   return out;
 }
 
-function tz_() { return Session.getScriptTimeZone() || 'America/New_York'; }
+/** The spreadsheet's time zone: Sheets reads typed dates in it, so the script does too. */
+function tz_() {
+  try { return book_().getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'America/New_York'; }
+  catch (err) { return Session.getScriptTimeZone() || 'America/New_York'; }
+}
 function stamp_(d) { return Utilities.formatDate(d, tz_(), 'M/d/yyyy h:mm a'); }
 function iso_(d) { return d instanceof Date ? d.toISOString() : (d ? String(d) : ''); }
 function dateOnly_(d) { return d instanceof Date ? Utilities.formatDate(d, tz_(), 'MMM d, yyyy') : ''; }

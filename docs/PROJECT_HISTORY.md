@@ -123,6 +123,17 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 - The business's own text is translated in setup, one box per item, falling back to the built-in translation and then English. Options keep their English value underneath, so recorded answers, decline rules and alerts never depend on the language. A reason picked from the Spanish chips is saved in English; the rules agreement notes the language.
 - The on-screen keyboard gained one-shot accented letters.
 
+## Getting it ready for launch (1.0.0)
+
+The brief: *go crazy, I want this to be ready to be put into use, a final version ready for launch.* What stood between "works in tests" and "safe in a lobby":
+
+- **Starting without Wi-Fi.** Browser kiosks reload every night; without a network that meant a blank page. `web/sw.js` keeps a copy (network first, so updates still arrive at once). Records kept on the tablet ask the browser for persistent storage, and face samples are capped per visitor so storage can't fill up.
+- **Data retention.** Records can be deleted automatically after 30 days to 2 years, in both storage modes; the period comes from the saved settings, never from a request.
+- **Diagnostics** in Admin → Settings, and one **version** (1.0.0) shared by `package.json`, the kiosk, the offline cache and the Android version code.
+- **Release pipeline:** a test workflow (including the end-to-end test), GitHub Pages hosting, and tagged releases with the APK, a web zip and `Code.gs`.
+- **Docs:** a launch checklist, a privacy notice template, a changelog and screenshots.
+- **A full code review** of the branch found ten issues, all fixed with tests: a retry arriving while the first request still ran could write twice; old Shock Tech sheets would lose the foreign-national flag on returning visitors; device-owner tablets would lose kiosk lock when updated in place; a one-time override was repeated on later visits; a refused settings save could lose the logo; removing a hand-typed expected visitor could hit the wrong row; the outbox dropped items the sheet was too busy to take; a purge emptying a whole tab would fail; expected dates used the script's time zone rather than the sheet's; and every status check read the whole Visits tab.
+
 ## Where things are
 
 | Thing | Location |
@@ -131,6 +142,7 @@ The next round, picked from the open ideas plus a gap: a kiosk keeping records o
 | Android app | `android/` (guide: `android/README.md`), built with `scripts/build-android.mjs` |
 | Backend | `apps-script/Code.gs`, bundled into the wizard by `scripts/sync-backend.mjs`; tests in `tests/` |
 | Shock Tech preset | `docs/presets/` |
+| Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |
 | Earlier demo APK | `downloads/` (the Shock Tech-only build, demo mode) |
 | Demo video recording kit | `tools/demo-video/` |

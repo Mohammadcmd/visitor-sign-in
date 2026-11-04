@@ -15,4 +15,5 @@ dist/
 *.jks
 # Test output
 test-results/
-screenshots/
+/screenshots/
+/e2e-screenshots/

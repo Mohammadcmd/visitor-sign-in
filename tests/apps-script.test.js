@@ -325,7 +325,7 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   x.sheets.Expected.appendRow([today, 'Samir', 'Nagheenanajar', 'Initech', 'Bill Lumbergh', 'Interview', '', '', '', '']);
   const list = call('adminExpected', { token: tok });
   eq(list.expected.map((e) => e.first), ['Michael', 'Samir', 'Tom'], 'today first, then tomorrow');
-  ok(/^row:\d+$/.test(list.expected[1].id), 'rows typed into the sheet are listed too');
+  ok(/^E[A-Z0-9]{8}$/.test(list.expected[1].id) && x.sheets.Expected.objects().find((r) => r['First Name'] === 'Samir')['Expected ID'] === list.expected[1].id, 'rows typed into the sheet are listed, and get an id');
 
   // The kiosk greets them after the name step (spelling slips allowed).
   const found = call('findExpected', { first: 'michael', last: 'boltan' }).expected;
@@ -434,6 +434,72 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   ok(k.globals.DriveApp.getFolderById(k.ctx.driveId_(folderUrl)).trashed, 'their photo folder is trashed');
   ok(k.files[k.ctx.driveId_(declinePhoto)].trashed, 'the declined visitor photo is trashed');
   eq(call('purgeOld').removed, null, 'once a day');
+}
+
+// ------------------------------------------------------------------ fixes from the launch review
+{
+  const f = loadBackend();
+  f.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => f.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, photos: 'off', form: { rules: [] } } });
+
+  // A retry that arrives while the first attempt is still running doesn't write twice.
+  f.cache['rid:retry-while-running'] = '"in progress"';
+  const before = f.sheets.Visitors.rows.length;
+  eq(f.handle({ key: KEY, action: 'register', args: { first: 'Rita', last: 'Retry', visiting: 'Pat', purpose: 'Meeting' }, rid: 'retry-while-running' }).error, 'busy');
+  eq(f.sheets.Visitors.rows.length, before, 'nothing written while the first attempt runs');
+
+  // A staff override isn't repeated on later visits; the visit notes the earlier approval.
+  const ov = call('register', { first: 'Olga', last: 'Override', visiting: 'Pat', purpose: 'Meeting', override: { by: 'Sam', reason: 'Escorted' } });
+  call('checkIn', { visitorId: ov.visitor.id, override: { by: 'Sam', reason: 'Escorted' } });
+  eq(f.sheets.Visits.objects().at(-1).Kind, 'Visitor (override)');
+  call('checkIn', { visitorId: ov.visitor.id });
+  const later = f.sheets.Visits.objects().at(-1);
+  eq(later.Kind, 'Visitor (approved earlier)', 'a later visit is not counted as another override');
+  ok(/^Approved earlier: Overridden by Sam/.test(later.Screening), later.Screening);
+
+  // A once-only flag (like citizenship) keeps applying on later visits.
+  const fl = call('register', { first: 'Fred', last: 'Flag', visiting: 'Pat', purpose: 'Meeting', flags: [{ label: 'Citizenship status', answer: 'No', flagLabel: 'Foreign national' }] });
+  call('checkIn', { visitorId: fl.visitor.id });
+  eq(f.sheets.Visits.objects().at(-1).Kind, 'Foreign national');
+
+  // A settings save refused for size leaves the logo alone.
+  ok(call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' } }, logo }).ok);
+  const logoId = JSON.parse(f.sheets.Settings.objects()[0].Value).org.logoFileId;
+  const huge = { setupComplete: true, org: { name: 'Initech' }, form: { intro: 'x'.repeat(46000) } };
+  eq(call('adminSaveSettings', { token: tok, settings: huge, logo }).error, 'too_big');
+  eq(JSON.parse(f.sheets.Settings.objects()[0].Value).org.logoFileId, logoId, 'settings still point at the logo');
+  ok(!f.files[logoId].trashed, 'and the logo is still there');
+  eq(call('getSettings').logo, logo);
+
+  // A purge that removes every visit keeps the tab usable.
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, photos: 'off', form: { rules: [] }, retentionDays: 30 } });
+  const head = f.sheets.Visits.rows[0];
+  f.sheets.Visits.rows.slice(1).forEach((r) => { r[head.indexOf('Signed in')] = new Date(Date.now() - 90 * 86400000); r[head.indexOf('Signed out')] = r[head.indexOf('Signed out')] || new Date(Date.now() - 89 * 86400000); });
+  const res = call('purgeOld');
+  ok(res.ok && res.removed.visits === 3, JSON.stringify(res));
+  eq(f.sheets.Visits.objects().filter((r) => r['Visit ID']).length, 0, 'all old visits gone');
+  ok(f.sheets.Visits.rows.length >= 2, 'one empty row stays (Sheets needs one)');
+  ok(call('checkIn', { visitorId: fl.visitor.id }).ok, 'and new visits still work');
+  eq(call('adminHistory', { token: tok, days: 1 }).visits.length, 1);
+}
+
+// The original Shock Tech sheet: foreign nationals stay flagged on every visit.
+{
+  const old = loadBackend({ KIOSK_KEY: KEY });
+  const ss = old.globals.SpreadsheetApp.getActiveSpreadsheet();
+  const vis = ss.insertSheet('Visitors');
+  vis.appendRow(['First Name', 'Last Name', 'Company', 'Who are you visiting at Shock Tech?', 'Purpose of your visit', 'Citizenship status', 'Country of citizenship', 'Visitor acknowledgment', 'Quick entry', 'Registered', 'Last visit', 'Visit count', 'Visitor ID', 'Photo folder']);
+  vis.appendRow(['Hans', 'Gruber', 'Nakatomi', 'Mike', 'Audit', 'Not a U.S. citizen or permanent resident', 'Germany', 'Agreed', 'No', new Date(), new Date(), 3, 'POLD0001', '']);
+  vis.appendRow(['John', 'McClane', 'NYPD', 'Mike', 'Audit', 'U.S. citizen', 'United States', 'Agreed', 'No', new Date(), new Date(), 3, 'POLD0002', '']);
+  old.ctx.setup();
+  const call = (action, args) => old.handle({ key: KEY, action, args });
+  call('checkIn', { visitorId: 'POLD0001' });
+  call('checkIn', { visitorId: 'POLD0002' });
+  const [hans, john] = old.sheets.Visits.objects();
+  eq([hans.Kind, hans.Screening], ['Foreign national', 'Flagged: Foreign national'], 'citizenship from before screening questions still flags');
+  eq([john.Kind, john.Screening], ['Visitor', 'Clear']);
 }
 
 // ------------------------------------------------------------------ retries

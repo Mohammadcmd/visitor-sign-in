@@ -49,7 +49,7 @@ public class KioskPlugin extends Plugin {
         String pkg = activity.getPackageName();
         try {
             if (dpm != null && dpm.isDeviceOwnerApp(pkg)) {
-                dpm.setLockTaskPackages(new ComponentName(activity, KioskAdminReceiver.class), new String[] { pkg });
+                dpm.setLockTaskPackages(admin(activity, dpm), new String[] { pkg });
                 activity.startLockTask();
             } else if (!askedToPin) {
                 // Without device owner, Android asks the person to confirm pinning. Ask once per start.
@@ -59,6 +59,13 @@ public class KioskPlugin extends Plugin {
         } catch (RuntimeException e) {
             // Lock task isn't available on this device; the kiosk still runs full screen.
         }
+    }
+
+    /** The device-admin component that's active: today's name, or the original one on older tablets. */
+    static ComponentName admin(Context context, DevicePolicyManager dpm) {
+        ComponentName legacy = new ComponentName(context, "com.shocktech.visitorkiosk.KioskAdminReceiver");
+        if (dpm.isAdminActive(legacy)) return legacy;
+        return new ComponentName(context, KioskAdminReceiver.class);
     }
 
     static boolean isLocked(Activity activity) {

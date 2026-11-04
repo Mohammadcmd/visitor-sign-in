@@ -93,11 +93,14 @@ export async function flushOutbox() {
   try {
     for (let box = readOutbox(); box.length; box = readOutbox()) {
       const item = box[0];
+      let res;
       try {
-        await call(item.action, item.args, item.rid);
+        res = await call(item.action, item.args, item.rid);
       } catch {
         return; // still offline; try again later
       }
+      // The sheet was busy: keep it for the next round (the request id stops it being written twice).
+      if (res && res.ok === false && res.error === 'busy') return;
       writeOutbox(readOutbox().filter((x) => x.rid !== item.rid));
     }
   } finally {
@@ -259,6 +262,7 @@ function kindOf(screening) {
   const m = /^Flagged: ([^,]+)/.exec(screening || '');
   if (m) return m[1];
   if (/^Overridden/.test(screening || '')) return 'Visitor (override)';
+  if (/^Approved earlier/.test(screening || '')) return 'Visitor (approved earlier)';
   return 'Visitor';
 }
 const passKey = (first, last) => `${nameKey(first)}|${nameKey(last)}`;
@@ -300,7 +304,8 @@ function startVisit(s, v, a, badgeNo, replacedBy) {
   const expected = matchExpected(s, v.first, v.last, a.expectedId);
   if (expected) expected.arrived = `Signed in ${new Date().toLocaleString()}`;
   const flags = cleanFlags(a.flags);
-  const screening = flags.length || a.override ? screeningText(flags, a.override) : (v.screening || 'Clear');
+  const carried = /^overridden/i.test(v.screening || '') ? `Approved earlier: ${v.screening}` : (v.screening || 'Clear');
+  const screening = flags.length || a.override ? screeningText(flags, a.override) : carried;
   const visit = {
     id: randomId('S'), visitorId: v.id, first: v.first, last: v.last, company: v.company,
     visiting: clean(a.visiting) || expected?.host || v.visiting, purpose: clean(a.purpose) || expected?.purpose || v.purpose,
