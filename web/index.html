@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Shock Tech Visitor Sign-In</title>
+  <meta name="description" content="Visitor sign-in kiosk for Shock Tech, Inc.">
+  <meta name="theme-color" content="#062f5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Shock Tech Visitors">
+  <link rel="apple-touch-icon" href="assets/icon-512.png">
+  <link rel="icon" href="assets/icon-512.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // The kiosk is laid out for at least 1180 x 820. On smaller tablets, widen the
+    // layout viewport so the browser scales the whole kiosk down to fit the screen.
+    (function () {
+      var w = Math.max(screen.width, screen.height), h = Math.min(screen.width, screen.height);
+      if (!w || !h || (w >= 1180 && h >= 820)) return;
+      var width = Math.max(1180, Math.ceil(820 * w / h));
+      document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=' + width + ', user-scalable=no, viewport-fit=cover');
+    })();
+  </script>
+  <script src="kiosk-connection.js"></script>
+  <script defer src="vendor/face-api/face-api.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- 1. Welcome / attract screen. Tap anywhere to start; tap a badge to sign out. -->
+  <section class="screen screen-welcome active" data-screen="welcome" aria-label="Welcome">
+    <div class="aurora" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="rings" aria-hidden="true"><span></span><span></span><span></span></div>
+    <header class="welcome-top">
+      <div class="clock" data-clock></div>
+    </header>
+    <div class="welcome-center">
+      <div class="logo-card" data-admin-hold>
+        <img src="assets/shocktech-logo.png" alt="Shock Tech, Safer World Group">
+      </div>
+      <h1 class="welcome-title">Welcome to <span>Shock&nbsp;Tech</span></h1>
+      <p class="welcome-sub">Noise, Vibration &amp; Shock Experts</p>
+      <div class="tap-cta"><span class="tap-dot" aria-hidden="true"></span>Tap anywhere to get started</div>
+    </div>
+    <footer class="welcome-foot">
+      <div class="mini-reader" aria-hidden="true"><div class="mini-badge"></div><div class="mini-pad"></div></div>
+      <p><strong>Leaving?</strong> Tap your visitor badge on the reader to sign out.</p>
+    </footer>
+  </section>
+
+  <!-- 2. New or returning -->
+  <section class="screen screen-choice" data-screen="choice" aria-label="Choose">
+    <header class="bar">
+      <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
+      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
+      <span class="bar-spacer"></span>
+    </header>
+    <div class="choice-wrap">
+      <h2>Have you visited Shock Tech before?</h2>
+      <div class="choice-grid">
+        <button type="button" class="choice-card choice-new" data-action="new">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><circle cx="24" cy="17" r="8"/><path d="M8 42c2-9 9-13 16-13s14 4 16 13"/><path d="M38 6v10M33 11h10"/></svg>
+          </span>
+          <span class="choice-title">New visitor</span>
+          <span class="choice-text">First time here? Sign in in about two minutes.</span>
+        </button>
+        <button type="button" class="choice-card choice-return" data-action="returning">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><circle cx="24" cy="17" r="8"/><path d="M8 42c2-9 9-13 16-13s14 4 16 13"/><path d="M33 9l3 3 6-6"/></svg>
+          </span>
+          <span class="choice-title">Returning visitor</span>
+          <span class="choice-text">Been here before? We'll find you in seconds.</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. New visitor form, one step at a time -->
+  <section class="screen screen-form" data-screen="form" aria-label="New visitor sign-in">
+    <header class="bar">
+      <button type="button" class="btn-ghost" data-form-back>‹ Back</button>
+      <div class="progress" aria-hidden="true"><div class="progress-fill" data-progress></div></div>
+      <button type="button" class="btn-ghost" data-go="welcome">Cancel</button>
+    </header>
+
+    <div class="form-body">
+      <!-- step: intro -->
+      <div class="step" data-step="intro">
+        <p class="eyebrow">New visitor</p>
+        <h2>Welcome to Shock Tech, Inc.</h2>
+        <div class="intro-text">
+          <p>Please sign in before your visit. It takes about two minutes.</p>
+          <p>Some of the products and technical data we work with are controlled under U.S. export laws (ITAR and EAR). To follow these laws, we need to know each visitor's citizenship status before they go past the front desk.</p>
+          <p>We use this information only to manage your visit and meet U.S. security and export requirements. Please don't enter ID numbers or other sensitive details.</p>
+          <p>Need help? Ask at the front desk.</p>
+        </div>
+      </div>
+
+      <!-- step: name -->
+      <div class="step" data-step="name">
+        <p class="eyebrow">Step 1 of 6</p>
+        <h2>What's your name?</h2>
+        <p class="hint">As shown on your photo ID.</p>
+        <label class="field"><span>First name</span>
+          <input readonly inputmode="none" name="first" data-cap="words" maxlength="60" autocomplete="off"></label>
+        <label class="field"><span>Last name</span>
+          <input readonly inputmode="none" name="last" data-cap="words" maxlength="60" autocomplete="off"></label>
+      </div>
+
+      <!-- step: visit -->
+      <div class="step" data-step="visit">
+        <p class="eyebrow">Step 2 of 6</p>
+        <h2>About your visit</h2>
+        <label class="field"><span>Company</span>
+          <input readonly inputmode="none" name="company" data-cap="words" maxlength="80" autocomplete="off">
+          <small>Write “N/A” if you're visiting on your own.</small></label>
+        <label class="field"><span>Who are you visiting at Shock Tech?</span>
+          <input readonly inputmode="none" name="visiting" data-cap="words" maxlength="80" autocomplete="off">
+          <small>The Shock Tech employee you're meeting.</small></label>
+        <label class="field"><span>Purpose of your visit</span>
+          <input readonly inputmode="none" name="purpose" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+        <div class="chips" data-chips="purpose">
+          <button type="button" class="chip">Meeting</button>
+          <button type="button" class="chip">Quality audit</button>
+          <button type="button" class="chip">Supplier visit</button>
+          <button type="button" class="chip">First article review</button>
+          <button type="button" class="chip">Equipment service</button>
+          <button type="button" class="chip">Interview</button>
+          <button type="button" class="chip">Delivery</button>
+        </div>
+      </div>
+
+      <!-- step: citizenship -->
+      <div class="step" data-step="citizenship">
+        <p class="eyebrow">Step 3 of 6</p>
+        <h2>Citizenship status</h2>
+        <p class="hint">Required by U.S. export law. The front desk may confirm it against your photo ID.</p>
+        <div class="options" data-options="citizenship" role="radiogroup">
+          <button type="button" class="option" role="radio" data-value="U.S. citizen">U.S. citizen</button>
+          <button type="button" class="option" role="radio" data-value="Lawful permanent resident (green card holder)">Lawful permanent resident <small>(green card holder)</small></button>
+          <button type="button" class="option" role="radio" data-value="Protected individual (asylee or refugee)">Protected individual <small>(asylee or refugee)</small></button>
+          <button type="button" class="option" role="radio" data-value="Not a U.S. citizen or permanent resident">Not a U.S. citizen or permanent resident</button>
+        </div>
+        <label class="field" data-country hidden><span>Country of citizenship</span>
+          <input readonly inputmode="none" name="country" data-cap="words" maxlength="60" autocomplete="off"></label>
+      </div>
+
+      <!-- step: photo -->
+      <div class="step" data-step="photo">
+        <p class="eyebrow">Step 4 of 6</p>
+        <h2>Take your picture</h2>
+        <p class="hint">Look at the camera. We use it on your visit record so our team knows who you are.</p>
+        <div class="camera-frame">
+          <video class="camera" data-video="photo" playsinline muted></video>
+          <img class="camera-shot" data-shot alt="Your picture" hidden>
+          <div class="face-guide" aria-hidden="true"></div>
+          <div class="countdown" data-countdown hidden></div>
+          <div class="camera-error" data-camera-error hidden>The camera isn't available. Please ask the front desk for help.</div>
+        </div>
+        <div class="camera-actions">
+          <button type="button" class="btn-primary btn-lg" data-capture>📸 Take picture</button>
+          <button type="button" class="btn-secondary btn-lg" data-retake hidden>Retake</button>
+        </div>
+      </div>
+
+      <!-- step: rules -->
+      <div class="step" data-step="rules">
+        <p class="eyebrow">Step 5 of 6</p>
+        <h2>Visitor rules</h2>
+        <ol class="rules">
+          <li>I will stay with my Shock Tech escort at all times while I am past the front desk.</li>
+          <li>I will not take photos, video or audio recordings, and I will keep my phone put away in production and controlled areas.</li>
+          <li>Drawings, parts and processes I see may be controlled under the International Traffic in Arms Regulations (ITAR) and the Export Administration Regulations (EAR), and are confidential to Shock Tech and its customers. I will not copy, remove or disclose them.</li>
+          <li>The citizenship status I gave Shock Tech is true. I will tell my escort if it changes.</li>
+          <li>I will follow all safety instructions and wear any protective equipment I am given.</li>
+          <li>I will return my visitor badge before I leave.</li>
+        </ol>
+        <button type="button" class="agree" data-agree role="checkbox" aria-checked="false">
+          <span class="agree-box" aria-hidden="true">✓</span>
+          <span>I agree to the visitor rules. Checking this box is my electronic signature on these rules.</span>
+        </button>
+      </div>
+
+      <!-- step: quick entry opt-in -->
+      <div class="step" data-step="quick">
+        <p class="eyebrow">Step 6 of 6</p>
+        <h2>Want quick entry next time?</h2>
+        <div class="quick-card">
+          <div class="quick-art" aria-hidden="true">
+            <div class="quick-face"></div><div class="quick-scan"></div>
+          </div>
+          <div>
+            <p>Next time, tap <strong>Returning visitor</strong> and the kiosk recognizes you from the camera. No typing.</p>
+            <p class="small">If you say yes, Shock Tech keeps your photos and a numeric face signature made from them, only to recognize you at this kiosk. Each visit adds a fresh photo so it keeps working as you change. Ask the front desk any time to turn it off and delete it.</p>
+          </div>
+        </div>
+        <div class="quick-actions">
+          <button type="button" class="btn-primary btn-lg" data-quick="yes">Yes, turn on quick entry</button>
+          <button type="button" class="btn-secondary btn-lg" data-quick="no">No thanks</button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="form-foot">
+      <p class="form-error" data-form-error role="alert"></p>
+      <button type="button" class="btn-primary btn-lg" data-form-next>Continue</button>
+    </footer>
+  </section>
+
+  <!-- 4. Returning visitor: type your name while the camera looks for you in the background -->
+  <section class="screen screen-find" data-screen="find" aria-label="Returning visitor">
+    <header class="bar">
+      <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
+      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
+      <span class="bar-spacer"></span>
+      <div class="cam-bubble" data-cam-bubble aria-live="polite">
+        <div class="cam-ring"><video class="cam-video" data-video="return" playsinline muted></video></div>
+        <span class="cam-label" data-cam-label>Looking for you…</span>
+      </div>
+    </header>
+    <div class="form-body find-body">
+      <div class="face-match" data-face-match hidden>
+        <div class="face-match-check" aria-hidden="true">✓</div>
+        <div class="face-match-text">
+          <p class="eyebrow" data-face-title>Welcome back!</p>
+          <strong data-face-name></strong>
+          <span data-face-company></span>
+        </div>
+        <button type="button" class="btn-primary btn-lg" data-face-yes>That's me</button>
+      </div>
+      <h2>Welcome back!</h2>
+      <p class="hint">Start typing your name. If you turned on quick entry, the camera may recognize you first.</p>
+      <div class="find-fields">
+        <label class="field"><span>First name</span>
+          <input readonly inputmode="none" name="ffirst" data-cap="words" maxlength="60" autocomplete="off"></label>
+        <label class="field"><span>Last name</span>
+          <input readonly inputmode="none" name="flast" data-cap="words" maxlength="60" autocomplete="off"></label>
+        <label class="field"><span>Company <em>(optional)</em></span>
+          <input readonly inputmode="none" name="fcompany" data-cap="words" maxlength="80" autocomplete="off"></label>
+      </div>
+      <div class="matches" data-matches></div>
+    </div>
+    <footer class="form-foot">
+      <p class="form-error" data-find-error role="alert"></p>
+      <div class="suggest" data-suggest></div>
+      <button type="button" class="btn-primary btn-lg" data-find-go>Find me</button>
+    </footer>
+  </section>
+
+  <!-- 6. Opt in later (returning visitor found by name, quick entry off) -->
+  <section class="screen screen-optin" data-screen="optin" aria-label="Quick entry">
+    <div class="center-card">
+      <h2 data-optin-title>Hi!</h2>
+      <p>Want the kiosk to recognize you next time, so you skip the typing?</p>
+      <p class="small">Shock Tech keeps your photos and a numeric face signature, only for this kiosk. Ask the front desk any time to delete it.</p>
+      <div class="quick-actions">
+        <button type="button" class="btn-primary btn-lg" data-optin="yes">Yes, turn on quick entry</button>
+        <button type="button" class="btn-secondary btn-lg" data-optin="no">No thanks</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Tap a badge to finish -->
+  <section class="screen screen-badge" data-screen="badge" aria-label="Tap your badge">
+    <div class="badge-wrap">
+      <p class="eyebrow light" data-badge-eyebrow>Almost done</p>
+      <h2 data-badge-title>Tap any visitor badge on the reader</h2>
+      <p class="badge-sub">Pick up a visitor badge from the tray and hold it flat on the reader for a second.</p>
+      <div class="tap-scene" data-tap-scene aria-hidden="true">
+        <div class="stage3d">
+          <!-- NFC reader, lying flat -->
+          <div class="reader3d">
+            <div class="reader-shadow"></div>
+            <div class="reader-side"></div>
+            <div class="reader-top">
+              <div class="reader-glass"></div>
+              <div class="reader-glow"></div>
+              <div class="badge-shadow"></div>
+              <div class="ripples"><span></span><span></span></div>
+              <svg class="reader-ring" viewBox="0 0 120 120">
+                <circle class="ring-track" cx="60" cy="60" r="52"/>
+                <circle class="ring-fill" cx="60" cy="60" r="52"/>
+              </svg>
+              <svg class="reader-nfc" viewBox="0 0 48 48"><path d="M17 14c4 5 4 15 0 20M24 9c7 8 7 22 0 30M31 4c10 11 10 29 0 40"/></svg>
+              <svg class="reader-check" viewBox="0 0 52 52"><path d="M14 27l8 8 16-17"/></svg>
+              <svg class="reader-x" viewBox="0 0 52 52"><path d="M17 17l18 18M35 17L17 35"/></svg>
+            </div>
+          </div>
+          <!-- Visitor badge on a lanyard -->
+          <div class="badge-rig">
+            <div class="badge-sway">
+              <div class="lanyard"></div>
+              <div class="badge-card">
+                <div class="badge-band"><div class="badge-slot"></div></div>
+                <img class="badge-logo" src="assets/shocktech-logo.png" alt="">
+                <div class="badge-photo"><svg viewBox="0 0 40 40"><circle cx="20" cy="15" r="7"/><path d="M6 38c1-9 7-13 14-13s13 4 14 13z"/></svg></div>
+                <div class="badge-word">VISITOR</div>
+                <div class="badge-number" data-badge-no></div>
+                <svg class="badge-chip" viewBox="0 0 24 24"><path d="M8 7c2 3 2 7 0 10M12 5c3 4 3 10 0 14M16 3c4 5 4 13 0 18"/></svg>
+                <div class="badge-sheen"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="badge-status" data-badge-status role="status"></p>
+      <button type="button" class="btn-ghost light" data-go="welcome">Cancel</button>
+    </div>
+  </section>
+
+  <!-- 8. All set -->
+  <section class="screen screen-done" data-screen="done" aria-label="Signed in">
+    <div class="done-wrap">
+      <div class="done-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
+      <h2 data-done-title>You're all set!</h2>
+      <p class="done-badge" data-done-badge></p>
+      <p class="done-text">Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
+      <p class="done-text small">When you leave, tap your badge on the reader to sign out.</p>
+      <button type="button" class="btn-secondary btn-lg" data-go="welcome">Done</button>
+    </div>
+  </section>
+
+  <!-- Admin -->
+  <section class="screen screen-admin" data-screen="admin" aria-label="Admin">
+    <header class="bar admin-bar">
+      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
+      <nav class="tabs" role="tablist">
+        <button type="button" class="tab active" data-admin-tab="inside">Inside now</button>
+        <button type="button" class="tab" data-admin-tab="badges">Badges</button>
+      </nav>
+      <button type="button" class="btn-ghost" data-kiosk-unlock hidden>Unlock tablet</button>
+      <button type="button" class="btn-secondary" data-admin-exit>Exit admin</button>
+    </header>
+    <div class="admin-body">
+      <div class="admin-pane" data-admin-pane="inside">
+        <div class="admin-head"><h2>Inside now <span class="count" data-inside-count></span></h2>
+          <button type="button" class="btn-ghost" data-admin-refresh>Refresh</button></div>
+        <div class="admin-list" data-inside-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="badges" hidden>
+        <div class="admin-head"><h2>Badges</h2>
+          <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button></div>
+        <p class="admin-banner" data-admin-banner hidden></p>
+        <div class="admin-list" data-badge-list></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Overlays -->
+  <div class="overlay" data-overlay="signout" hidden>
+    <div class="signout-card">
+      <div class="done-check small" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
+      <h2 data-signout-title>Goodbye!</h2>
+      <p data-signout-text></p>
+      <button type="button" class="btn-ghost" data-undo>Undo</button>
+    </div>
+  </div>
+
+  <div class="overlay" data-overlay="pin" hidden>
+    <div class="pin-card">
+      <h2>Admin</h2>
+      <p class="hint">Enter the admin PIN</p>
+      <div class="pin-dots" data-pin-dots></div>
+      <p class="form-error" data-pin-error></p>
+      <div class="pin-pad" data-pin-pad>
+        <button type="button">1</button><button type="button">2</button><button type="button">3</button>
+        <button type="button">4</button><button type="button">5</button><button type="button">6</button>
+        <button type="button">7</button><button type="button">8</button><button type="button">9</button>
+        <button type="button" data-pin="cancel">Cancel</button><button type="button">0</button><button type="button" data-pin="back">⌫</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" data-overlay="idle" hidden>
+    <div class="center-card">
+      <h2>Are you still there?</h2>
+      <p>Starting over in <strong data-idle-count>10</strong> seconds.</p>
+      <button type="button" class="btn-primary btn-lg" data-idle-stay>I'm still here</button>
+    </div>
+  </div>
+
+  <div class="overlay saving" data-overlay="busy" hidden>
+    <div class="spinner" aria-hidden="true"></div>
+    <p data-busy-text>One moment…</p>
+  </div>
+
+  <div class="net-pill" data-net hidden>Offline · reconnecting…</div>
+  <div class="toast" data-toast role="status" hidden></div>
+  <div class="keyboard" data-keyboard hidden></div>
+
+  <div class="demo-panel" data-demo hidden>
+    <strong>Demo mode</strong> · no backend connected · admin PIN 123456
+    <div class="demo-taps" data-demo-taps></div>
+  </div>
+</div>
+</body>
+</html>

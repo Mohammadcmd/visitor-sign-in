@@ -2,14 +2,18 @@
   "name": "visitor-sign-in",
   "version": "1.0.0",
   "private": true,
-  "description": "A configurable visitor sign-in kiosk with screening questions, NFC/RFID cards, visitor photos and Google Sheets cloud sync. No build step: the app is plain HTML, CSS and JavaScript.",
+  "description": "Visitor sign-in kiosks: a configurable kiosk for any business (repository root) and the Shock Tech kiosk (web app + Android app)",
   "scripts": {
     "start": "python3 -m http.server 8080",
-    "test": "npm run test:connector && npm run test:e2e",
+    "test": "node tests/apps-script.test.js && node tests/connector.test.js",
     "test:connector": "node tests/connector.test.js",
-    "test:e2e": "node tests/e2e.test.js"
+    "test:e2e": "node tests/e2e.test.js",
+    "android:sync": "cap sync android",
+    "android:build": "node scripts/build-android.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.40.0"
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
   }
 }

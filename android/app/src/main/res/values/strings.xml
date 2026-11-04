@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Shock Tech Visitors</string>
+    <string name="title_activity_main">Shock Tech Visitors</string>
+    <string name="package_name">com.shocktech.visitorkiosk</string>
+    <string name="custom_url_scheme">com.shocktech.visitorkiosk</string>
+</resources>

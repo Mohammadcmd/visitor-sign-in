@@ -1,8 +1,11 @@
-/* Offline support for the kiosk.
+/* Offline support for the configurable kiosk.
  * Network first, so updates show up straight away, with a fallback to the cached copy when offline.
- * Only this site's own files are cached. Google Sheets requests always go to the network. */
+ * Only this kiosk's own files are handled. Everything else, including the Shock Tech kiosk in web/
+ * (which this worker's scope also covers when both are hosted together) and Google Sheets requests,
+ * goes straight to the network untouched. */
 const CACHE = 'vsi-v1';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './apps-script.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
+const OWN_PATHS = new Set(ASSETS.map(a => new URL(a, self.registration.scope).pathname));
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -24,7 +27,7 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !OWN_PATHS.has(url.pathname)) return;
   event.respondWith(
     fetch(req)
       .then(res => {

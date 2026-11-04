@@ -1,0 +1,11 @@
+{
+  "appId": "com.shocktech.visitorkiosk",
+  "appName": "Shock Tech Visitors",
+  "webDir": "web",
+  "android": {
+    "backgroundColor": "#031d38",
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  }
+}
