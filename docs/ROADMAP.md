@@ -13,7 +13,7 @@ This file is the plan and the progress. Each work session updates the checklists
 | Office dashboard, website, browser kiosk | Cloudflare (static hosting) | Free |
 | Domain | Cloudflare Registrar (sold at cost) | About $10 a year for a .com |
 | Email (alerts, host notices, signed copies, sign-in codes) | Resend, then Amazon SES at volume | Free up to 3,000 a month (100 a day); SES is $0.10 per 1,000 |
-| Payments | Stripe Billing: per-tablet subscriptions (the subscription's quantity is the number of tablets) | No monthly fee. About 2.9% + 30¢ per card payment plus 0.7% for Billing: about $1.70 on a $39 charge. Yearly plans by bank transfer (ACH): 0.8%, capped at $5. Stripe Tax (0.5%) only in states where you register |
+| Payments | Stripe Billing: per-tablet subscriptions (the subscription's quantity is the number of tablets). Or a check for a yearly plan, recorded by you | Stripe: no monthly fee. About 2.9% + 30¢ per card payment plus 0.7% for Billing: about $1.70 on a $39 charge. Yearly plans by bank transfer (ACH): 0.8%, capped at $5. Stripe Tax (0.5%) only in states where you register. Checks: no fee |
 | Android app | Google Play | **$25 once** |
 | iPad | The browser kiosk at first (Add to Home Screen, Guided Access) | Free. The App Store ($99 a year) when iPad customers justify it |
 | Error reports, uptime | Sentry free plan, Cloudflare's own logs | Free |
@@ -26,7 +26,11 @@ Why one Durable Object per company: each company's records live in their own sma
 ## Plans and licensing
 
 - **Free:** one tablet, records kept on the tablet, no account needed.
-- **Paid, per kiosk tablet, monthly or yearly:** the cloud (several tablets, office dashboard, emails, signed-copy PDFs), and every Pro feature.
+- **Paid, per kiosk tablet, monthly or yearly:** the cloud (several tablets, office dashboard, emails, signed-copy PDFs), and every Pro feature. Proposed: $349 a year or $35 a month per kiosk (to be confirmed).
+- **Two ways to pay:**
+  - **Card or bank transfer through Stripe:** monthly or yearly, automatic.
+  - **Check:** yearly plans only. The customer gets an invoice saying who to make the check payable to and where to mail it. Their kiosks work straight away, with 30 days to pay. When the check arrives you record it, and that extends their plan a year.
+  - Either way it's the same plan record: how many kiosks, paid until when, and how they pay. So everything else (tablet limits, reminders, pausing) works the same.
 - **Locked to the tablet, not transferable:** each tablet makes a key it can't export (a non-extractable browser key now; the Android security chip later) and registers it with the company. Check-ins are signed with that key. A tablet keeps working offline for 30 days.
 - **Replacements:** retire a tablet in the dashboard to activate another, 2 per tablet per year. Resetting the same tablet is free. More through support.
 - Only kiosk tablets count. The office dashboard is free on any number of phones and computers.
@@ -38,6 +42,7 @@ Why one Durable Object per company: each company's records live in their own sma
 - [ ] Product name and a domain
 - [ ] Cloudflare account (free)
 - [ ] Stripe account (free; needs business and bank details)
+- [ ] For checks: a business bank account with mobile deposit, the name checks are made payable to, a mailing address, and a W-9 ready (businesses often ask for one before paying a vendor)
 - [ ] Google Play Console as an **organization** ($25; an organization skips Google's 12-tester, 14-day test for new personal accounts)
 - [ ] Resend account (free) and the domain's email records
 - [ ] Support email address
@@ -66,6 +71,10 @@ Why one Durable Object per company: each company's records live in their own sma
 - [ ] Stripe's customer portal for cards, invoices and cancelling
 - [ ] Failed payments: Stripe's reminder emails, then Pro pauses (visitors are never blocked)
 - [ ] The replacement rule
+- [ ] One plan per company (kiosks, paid until, card or check), used for the tablet limit whichever way they pay
+- [ ] Pay by check: an emailed invoice (number, kiosks, period, amount, PO number if they have one, "make checks payable to" and your mailing address) with a "pay online instead" link
+- [ ] Your operator screen: every company and its plan, **Record a check** (amount, check number, date received), and a payments list to export (CSV) for your accountant
+- [ ] Renewal reminders by email: 30 and 7 days before the plan ends, and when it's overdue. After a 30-day grace period the Pro extras pause (visitors are never blocked)
 
 ### Phase 4: store-ready apps
 - [ ] Polish: first-run experience, app icon, store screenshots and listing
