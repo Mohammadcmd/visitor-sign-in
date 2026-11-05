@@ -1,88 +1,71 @@
-# Roadmap: from kiosk to a real app
+# Roadmap: selling the kiosk
 
-The goal: a business downloads the app, signs up, and pays per kiosk tablet. Tablets, the office and billing are all connected, with no Google script to copy and no files to download from GitHub. Built the most cost-effective way: close to nothing until there are paying customers.
+The plan: sell the Android app (the APK) directly, priced per kiosk tablet, with a yearly fee for updates and support. A license is locked to one tablet and paid until a date. If the yearly fee isn't paid, new sign-ins pause until it's renewed. There's no Google Play listing and no servers to run. Customers keep their records on the tablet or in their own Google Sheet.
 
 This file is the plan and the progress. Each work session updates the checklists.
 
-## What it's built on, and what it costs
+## What it costs
 
 | Part | Choice | Cost |
 |---|---|---|
-| Cloud service (accounts, records, tablets) | Cloudflare Workers, with one Durable Object per company holding that company's records | Free plan to build and test (100,000 requests a day). **$5 a month** (the Workers Paid plan, with far higher limits) once paying customers rely on it |
-| Photos, signatures, PDFs, logos | Cloudflare R2 | Free up to 10 GB, then about $0.015 per GB a month. No download fees |
-| Office dashboard, website, browser kiosk | Cloudflare (static hosting) | Free |
+| The app | The APK from your own website (built by GitHub Actions) | Free |
+| Google's developer verification | Google is making Android tablets install apps only from verified developers, even outside the Play Store (in four countries since September 2026, worldwide from 2027). Register once in the Android Developer Console | **$25 once**, with an ID check |
+| Licenses | Signed keys made on your computer (`npm run license:*`), checked by the kiosk offline | Free |
+| License status files (renewals, switching off) and APK downloads | Any static website, such as Cloudflare Pages | Free |
 | Domain | Cloudflare Registrar (sold at cost) | About $10 a year for a .com |
-| Email (alerts, host notices, signed copies, sign-in codes) | Resend, then Amazon SES at volume | Free up to 3,000 a month (100 a day); SES is $0.10 per 1,000 |
-| Payments | Stripe Billing: per-tablet subscriptions (the subscription's quantity is the number of tablets). Or a check for a yearly plan, recorded by you | Stripe: no monthly fee. About 2.9% + 30¢ per card payment plus 0.7% for Billing: about $1.70 on a $39 charge. Yearly plans by bank transfer (ACH): 0.8%, capped at $5. Stripe Tax (0.5%) only in states where you register. Checks: no fee |
-| Android app | Google Play | **$25 once** |
-| iPad | The browser kiosk at first (Add to Home Screen, Guided Access) | Free. The App Store ($99 a year) when iPad customers justify it |
-| Error reports, uptime | Sentry free plan, Cloudflare's own logs | Free |
-| Terms of service, privacy policy | Drafted here; a lawyer's review is worth paying for before launch | Review fee only |
+| Payments | Checks (no fee), or a Stripe Payment Link for cards | Stripe: about 2.9% + 30¢ per card payment, and no monthly fee |
+| Customer records | On their tablet, or in their own Google Sheet (their Google account) | Nothing to you |
+| Terms of service, license agreement, privacy policy | Drafted here; a lawyer's review is worth paying for before launch | Review fee only |
 
-**To build and test: $0. To launch: $25 + a domain. With paying customers: about $5 a month**, plus Stripe's share of each payment.
+**To launch: about $36**: $25 for Google's registration and about $11 for a domain.
 
-Why one Durable Object per company: each company's records live in their own small database, so one company's data can never leak into another's. The object handles one request at a time, which keeps tablets from overwriting each other. And it runs the same business rules as the on-tablet kiosk (`web/js/engine.js`), so the tablet and the cloud behave the same and share tests.
+## Pricing (proposed)
 
-## Plans and licensing
+- **$499 per kiosk**, including the first year of updates and support.
+- **$149 per kiosk per year** after that.
+- Paid by check or card. Checks are recorded with `npm run license:issue` / `license:renew -- --paid check --amount … --ref <check number>`.
 
-- **Free:** one tablet, records kept on the tablet, no account needed.
-- **Paid, per kiosk tablet, monthly or yearly:** the cloud (several tablets, office dashboard, emails, signed-copy PDFs), and every Pro feature. Proposed: $349 a year or $35 a month per kiosk (to be confirmed).
-- **Two ways to pay:**
-  - **Card or bank transfer through Stripe:** monthly or yearly, automatic.
-  - **Check:** yearly plans only. The customer gets an invoice saying who to make the check payable to and where to mail it. Their kiosks work straight away, with 30 days to pay. When the check arrives you record it, and that extends their plan a year.
-  - Either way it's the same plan record: how many kiosks, paid until when, and how they pay. So everything else (tablet limits, reminders, pausing) works the same.
-- **Locked to the tablet, not transferable:** each tablet makes a key it can't export (a non-extractable browser key now; the Android security chip later) and registers it with the company. Check-ins are signed with that key. A tablet keeps working offline for 30 days.
-- **Replacements:** retire a tablet in the dashboard to activate another, 2 per tablet per year. Resetting the same tablet is free. More through support.
-- Only kiosk tablets count. The office dashboard is free on any number of phones and computers.
-- Google Sheets stays for setups already using it (Shock Tech's own included), but isn't offered to new customers.
+## How licensing works (built: `web/js/plans.js`, `tools/license/`)
+
+- **One license per tablet.** Each tablet shows its code (such as `K7M2-9XQ4`) in Admin → Settings → License, and the key you issue names it. A key won't work on another tablet.
+- **Paid until a date.** The admin screen reminds the staff 30 days before. After the date there's a 14-day grace period where everything still works and the admin screen says it's overdue.
+- **Not paid: new sign-ins pause.** The welcome screen asks visitors to see the front desk. Signing out, badge returns, the roll call, the admin screen and exports keep working. Nothing is deleted, and the business always has its records. A renewed key turns it straight back on.
+- **Switching a kiosk off early** (for example, a bounced check): `npm run license:off`. The kiosk pauses the next time it's online.
+- **Renewing without anyone typing a key:** `npm run license:renew` writes the new key into the license's status file. Once the status folder is on your website, the kiosk picks it up by itself.
+- **Clock tricks don't work.** Once the kiosk has heard the real date from your website, setting the tablet's clock back doesn't stretch a license.
+- **The trial:** 30 days from setup, then a license is needed.
+- **Your records:** `licenses.json` lists every license and payment. `npm run license:list -- --due 30` shows what's coming up, and `npm run license:payments -- --csv payments.csv` is for your accountant.
 
 ## Phases
 
-### Phase 0: owner's to-dos (some take weeks, so start now)
+### Phase 0: owner's to-dos
+- [ ] **Make the GitHub repository private.** It's public under the Apache 2.0 license, which lets anyone build the app for free and remove the license check. Settings → General → Danger Zone → Change visibility.
 - [ ] Product name and a domain
-- [ ] Cloudflare account (free)
-- [ ] Stripe account (free; needs business and bank details)
+- [ ] Your signing key: `npm run license:keygen`, then paste the public key into `web/js/plans.js`. Back up `license-private.pem` and `licenses.json` in two safe places.
+- [ ] The Android signing key, set once in GitHub secrets ([android/README.md](../android/README.md#updates)) and backed up. Every update must be signed with it, or customers must uninstall and reinstall.
+- [ ] Google's Android Developer Console: register as an organization ($25, ID check) before Google's verification reaches your customers' countries (from 2027)
 - [ ] For checks: a business bank account with mobile deposit, the name checks are made payable to, a mailing address, and a W-9 ready (businesses often ask for one before paying a vendor)
-- [ ] Google Play Console as an **organization** ($25; an organization skips Google's 12-tester, 14-day test for new personal accounts)
-- [ ] Resend account (free) and the domain's email records
-- [ ] Support email address
-- [ ] Later, for the App Store: a D-U-N-S number (free, 1–2 weeks) and Apple Developer as an organization ($99 a year)
+- [ ] Optional: a Stripe account and a Payment Link for card payments
+- [ ] A support email address and phone number to show on the license screen
 
-### Phase 1: the cloud service and accounts
-- [x] Shared business rules for the tablet and the cloud (`web/js/engine.js`)
-- [x] Cloud service skeleton: a Worker, one Durable Object per company, files in R2, tested locally (`cloud/`)
-- [x] Sign-up and sign-in by emailed code (no passwords to store or leak)
-- [x] Companies and staff logins with roles (owner, admin, front desk)
-- [ ] Locations (several sites under one company)
-- [x] Tablet activation in the cloud: device keys, signed check-ins, device tokens, retiring
-- [ ] On the tablet: the key pair, daily check-in, 30-day offline grace
-- [ ] The kiosk's third storage option, "Your account", next to "This tablet" and "Google Sheets"
-- [ ] Emails from the cloud: alerts, host notices, signed copies (PDF), daily summary
-- [ ] Import from Google Sheets or a tablet
-- [ ] Deploy: one command (`wrangler deploy`), documented
+### Phase 1: licenses per tablet, with a pause when unpaid
+- [x] Tablet codes, keys naming a tablet and a paid-until date, reminders, grace period, pause
+- [x] The paused welcome screen (signing out, badges, roll call, admin and exports still work)
+- [x] License status files: renewals picked up automatically, switching off and on
+- [x] The real date from your website, so setting the clock back doesn't help
+- [x] Seller tools: issue, renew, switch off/on, list what's due, payments (checks included) to CSV
+- [ ] Switch it on: your public key, seller details and price in `PAYWALL` (`web/js/plans.js`), then a release
 
-### Phase 2: the office dashboard
-- [ ] Everything in today's admin screen, from any computer or phone
-- [ ] Live "who's inside", tablets and their last check-in, staff and roles
+### Phase 2: selling without Google Play
+- [ ] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private)
+- [ ] Updates that install themselves overnight on tablets in locked kiosk mode (no one has to tap Install)
+- [ ] The website: what it does, the price, how to buy (check or card), the APK download, the license status folder
+- [ ] A license agreement shown at setup (per tablet, yearly fee, what happens if it isn't paid), plus terms and a privacy policy
 
-### Phase 3: subscriptions
-- [ ] Stripe Checkout for sign-up, per-tablet quantity, free trial
-- [ ] Adding a tablet adds one to the subscription (prorated); retiring one removes it
-- [ ] Stripe's customer portal for cards, invoices and cancelling
-- [ ] Failed payments: Stripe's reminder emails, then Pro pauses (visitors are never blocked)
-- [ ] The replacement rule
-- [ ] One plan per company (kiosks, paid until, card or check), used for the tablet limit whichever way they pay
-- [ ] Pay by check: an emailed invoice (number, kiosks, period, amount, PO number if they have one, "make checks payable to" and your mailing address) with a "pay online instead" link
-- [ ] Your operator screen: every company and its plan, **Record a check** (amount, check number, date received), and a payments list to export (CSV) for your accountant
-- [ ] Renewal reminders by email: 30 and 7 days before the plan ends, and when it's overdue. After a 30-day grace period the Pro extras pause (visitors are never blocked)
+### Phase 3: less work for you
+- [ ] A renewal invoice to email or print, with "make checks payable to" and your mailing address
+- [ ] Renewal reminder emails to customers, 30 and 7 days before
+- [ ] A simple seller page instead of the command line, if you'd rather click than type
 
-### Phase 4: store-ready apps
-- [ ] Polish: first-run experience, app icon, store screenshots and listing
-- [ ] Google Play: internal test, then production
-- [ ] Google Play Integrity check, so only the genuine app can activate
-- [ ] Later: the iPad app on the App Store
-
-### Phase 5: launch operations
-- [ ] Website: what it does, pricing, sign-up, terms, privacy policy
-- [ ] Error reporting, uptime alerts, backups (exports from each company's records)
-- [ ] Security review of the cloud service
+### Parked: the cloud service (`cloud/`)
+Built and tested, but not needed for this plan. It includes per-company storage on Cloudflare, sign-up by emailed code, staff roles, and tablets locked by device keys. It's there if you later want an office dashboard, several sites in sync, or records kept for customers. Running it would cost about $5 a month plus email.

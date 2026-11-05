@@ -173,6 +173,15 @@ Asked for next: a true app, sold per kiosk tablet (non-transferable), the most c
 - **Accounts** (`cloud/src/directory.js`): sign-up and sign-in by six-digit emailed code (Resend; logged in tests), sessions, companies, and roles (owner, admin, front desk). Codes and sessions are stored only as hashes; guessing is limited.
 - **Tablets locked to a company:** a manager activates a tablet's public key; the tablet checks in by signing a one-time challenge (ECDSA P-256) and gets a 7-day device token for kiosk calls; retiring revokes it. Kiosk-key companies (like a Google Sheet) only where `ALLOW_KIOSK_KEY_COMPANIES` is set, never in production.
 
+## Selling the APK directly, per kiosk
+
+The plan changed: no Google Play. The APK is sold directly, per kiosk tablet, with a yearly fee for updates and support (proposed: $499, then $149 a year), and the kiosk pauses if it isn't paid. The cloud service stays in `cloud/`, parked.
+
+- **Per-tablet licenses** (`web/js/plans.js`): each tablet makes a code once, and a key names that tablet and a paid-until date. Reminders start 30 days before, a 14-day grace period follows, then new sign-ins pause. The welcome screen asks visitors to see the front desk. Signing out, badge returns, the roll call, the admin screen and exports keep working, and nothing is deleted. The Free/Pro split is gone: a license includes everything.
+- **Status files** the seller publishes on any static site: one signed file per license, read by its kiosk a few times a day. Renewals are picked up without typing a key, and a license can be switched off (a bounced check) and on. The site's date header stops clock rollback.
+- **Seller tools** (`tools/license/`): issue, renew, switch off/on, list what's due, and payments to CSV, with checks recorded. The ledger (`licenses.json`) and status folder stay on the seller's computer and are git-ignored.
+- **Tests:** 53 license checks (tools and kiosk logic, including the clock) and an end-to-end paused kiosk. In it, a visitor badges out while paused, the wrong tablet's key is refused, a key restores sign-ins, and the seller switches the license off and on.
+
 ## Where things are
 
 | Thing | Location |
@@ -183,6 +192,7 @@ Asked for next: a true app, sold per kiosk tablet (non-transferable), the most c
 | Shared engine (every action) | `web/js/engine.js`, run by the tablet (`web/js/api.js`) and the cloud |
 | Cloud service | `cloud/` (guide: `cloud/README.md`) |
 | Roadmap | `docs/ROADMAP.md` |
+| Licenses: kiosk side, seller tools, guide | `web/js/plans.js`, `tools/license/`, `docs/PAYWALL.md` |
 | Shock Tech preset | `docs/presets/` |
 | Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |

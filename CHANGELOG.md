@@ -2,11 +2,20 @@
 
 ## Unreleased
 
+**Selling the kiosk per tablet**
+- Licenses are per tablet. Each tablet has a code, and a key names one tablet and the date it's paid until.
+- Reminders start 30 days before the paid-until date, and a 14-day grace period follows it. Then new sign-ins pause: visitors are asked to see the front desk.
+- While paused, signing out, badge returns, the roll call, the admin screen and exports keep working. Nothing is deleted.
+- The seller can renew a kiosk, or switch it off early (a bounced check), through signed status files on their website. The kiosk picks up renewals by itself.
+- Setting the tablet's clock back doesn't stretch a license once the kiosk has heard the real date.
+- Seller tools: `license:issue`, `license:renew`, `license:off` / `license:on`, `license:list` (what's due) and `license:payments` (a CSV with checks included). The ledger stays on the seller's computer.
+- This replaces the earlier Free/Pro plans: a license includes every feature.
+
 - The kiosk's actions are now one shared engine (`web/js/engine.js`), used by the on-tablet kiosk and by the new cloud service. No change in behavior.
 - The start of the cloud service (`cloud/`): Cloudflare Workers with one Durable Object per company, photos in R2, the same actions as the Google Sheets script. Tested in Cloudflare's local runtime. Not used by the kiosk yet.
 - Cloud accounts: sign up and sign in with a six-digit code sent by email (no passwords), companies with owners, admins and front-desk staff.
 - Tablets locked to a company: a tablet registers a key it can't export, checks in by signing a one-time challenge, and gets a device token; retiring a tablet stops it at once. In production, companies can only be made by signing up.
-- The plan for becoming a real app, built the most cost-effective way: [docs/ROADMAP.md](docs/ROADMAP.md).
+- The plan: sell the APK directly, per kiosk, with a yearly fee; no Google Play. The cloud service is parked for later ([docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## 1.1.0 — signatures
 

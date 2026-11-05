@@ -353,6 +353,12 @@
       <p class="welcome-sub" data-org-tagline data-no-i18n></p>
       <div class="tap-cta"><span class="tap-dot" aria-hidden="true"></span>Tap anywhere to get started</div>
       <div class="lang-pick" data-lang-pick hidden></div>
+      <!-- Only when this kiosk's license has ended (js/plans.js): signing out still works. -->
+      <div class="paused-card" data-paused hidden>
+        <strong>Sign-ins are paused</strong>
+        <p>Please see the front desk.</p>
+        <p class="paused-staff" data-paused-staff data-no-i18n></p>
+      </div>
     </div>
     <footer class="welcome-foot">
       <div class="foot-badge" data-foot-badge>
@@ -757,9 +763,9 @@
             </div>
           </div>
           <div class="set-card" data-plan-card hidden>
-            <h3>Plan</h3>
+            <h3>License</h3>
             <p class="set-text" data-plan-text></p>
-            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>Plans and license</button></div>
+            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>License and renewal</button></div>
           </div>
           <div class="set-card">
             <h3>Backup and reset</h3>
@@ -848,13 +854,14 @@
   <!-- Plans: shown only when the paywall is switched on (js/plans.js) -->
   <div class="overlay with-kb" data-overlay="upgrade" hidden>
     <div class="center-card upgrade-card">
-      <p class="eyebrow">Visitor Sign-In Pro</p>
-      <h2 data-upgrade-title>Unlock everything</h2>
+      <p class="eyebrow">Kiosk license</p>
+      <h2 data-upgrade-title>This tablet's license</h2>
       <p class="upgrade-text" data-upgrade-text></p>
-      <ul class="upgrade-list" data-upgrade-list></ul>
+      <p class="tablet-code">Tablet code <strong data-tablet-code></strong><br><span class="small">Give this code when you buy or renew: each license works on one tablet.</span></p>
+      <p class="upgrade-seller" data-upgrade-seller></p>
       <div class="upgrade-buy" data-upgrade-buy hidden>
         <div data-upgrade-qr></div>
-        <p>Scan with your phone to buy Pro, or go to<br><code data-upgrade-url></code><br><span class="small">Your license key arrives by email.</span></p>
+        <p>Scan with your phone to buy or renew, or go to<br><code data-upgrade-url></code><br><span class="small">Paying by check is fine too. Your license key arrives by email.</span></p>
       </div>
       <label class="field"><span>Have a license key?</span>
         <input readonly inputmode="none" name="license" data-kb="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="VSI1.…"></label>

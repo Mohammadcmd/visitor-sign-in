@@ -12,7 +12,12 @@
     "android:sync": "node scripts/sync-backend.mjs && cap sync android",
     "android:build": "node scripts/build-android.mjs",
     "license:keygen": "node tools/license/keygen.mjs",
-    "license:issue": "node tools/license/issue.mjs"
+    "license:issue": "node tools/license/issue.mjs",
+    "license:renew": "node tools/license/renew.mjs",
+    "license:off": "node tools/license/switch.mjs off",
+    "license:on": "node tools/license/switch.mjs on",
+    "license:list": "node tools/license/list.mjs",
+    "license:payments": "node tools/license/list.mjs payments"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",

@@ -901,6 +901,18 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; p
 .sign-clear { position: absolute; right: 10px; top: 8px; }
 .sign-box .field { margin-top: 14px; }
 .signed-card { text-align: left; width: min(760px, calc(100% - 48px)); max-height: calc(100% - 48px); overflow-y: auto; }
+/* A kiosk whose license has ended: visitors are asked to see the front desk; signing out still works. */
+.paused-card { margin-top: 28px; padding: 22px 30px; border-radius: 20px; background: rgba(255,255,255,0.92); color: var(--ink); text-align: center; max-width: 520px; box-shadow: var(--shadow-lg, 0 10px 40px rgba(0,0,0,0.18)); }
+.paused-card[hidden] { display: none; }
+.paused-card strong { display: block; font-size: 28px; margin-bottom: 6px; }
+.paused-card p { margin: 0; font-size: 20px; }
+.paused-card .paused-staff { margin-top: 12px; font-size: 14px; color: var(--ink-soft); }
+.screen-welcome.paused .tap-cta, .screen-welcome.paused [data-lang-pick] { display: none; }
+.paused-card.nudge { animation: nudge 0.45s ease; }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+.tablet-code { margin: 10px 0; }
+.tablet-code strong { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 22px; letter-spacing: 0.06em; }
+.upgrade-seller { margin: 6px 0 10px; }
 .signed-card .rules { margin: 10px 0; gap: 6px; }
 /* A record to read, not a form: compact rules so the signature shows without scrolling. */
 .signed-card .rules li { padding: 9px 14px 9px 48px; border-radius: 12px; font-size: 16px; line-height: 1.4; }

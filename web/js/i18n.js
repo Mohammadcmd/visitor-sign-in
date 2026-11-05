@@ -16,6 +16,8 @@ const ES = {
   // ------------------------------------------------ welcome and choice
   'Welcome to': 'Bienvenidos a',
   'Tap anywhere to get started': 'Toque la pantalla para empezar',
+  'Sign-ins are paused': 'El registro está en pausa',
+  'Please see the front desk.': 'Por favor, acérquese a la recepción.',
   'Leaving?': '¿Se va?',
   'Tap your visitor badge on the reader to sign out.': 'Acerque su credencial de visitante al lector para registrar su salida.',
   'Tap here to sign out': 'Toque aquí para registrar su salida',

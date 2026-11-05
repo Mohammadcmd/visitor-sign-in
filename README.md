@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: becoming a real app](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
+**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: selling the kiosk](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: licenses per kiosk](docs/PAYWALL.md)
 
 | | | |
 |---|---|---|
@@ -14,8 +14,8 @@ A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android
 | Admin: who's inside | Emergency roll call | History and CSV export |
 | ![Signing the visitor rules](docs/screenshots/signature.jpg) | ![A signed copy in History](docs/screenshots/signed-copy.jpg) | ![Setup: signatures](docs/screenshots/setup-signature.jpg) |
 | Visitors sign the rules with a finger | The signed copy, as the visitor saw it | Setup: who signs, and an emailed copy |
-| ![Install page on an Android tablet](docs/screenshots/install-android.jpg) | ![Checking the tablet](docs/screenshots/setup-device.jpg) | ![Pro upgrade screen](docs/screenshots/upgrade.jpg) |
-| The install page knows the device | Setup checks the tablet first | Ready to sell: plans and licenses |
+| ![Install page on an Android tablet](docs/screenshots/install-android.jpg) | ![Checking the tablet](docs/screenshots/setup-device.jpg) | ![A kiosk whose license has ended](docs/screenshots/license-paused.jpg) |
+| The install page knows the device | Setup checks the tablet first | Sold per tablet: unpaid, new sign-ins pause |
 
 ```
 web/           the kiosk (static HTML/CSS/JS, no build step)
@@ -112,7 +112,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 - **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
   - **Diagnostics:** app version, connection and script version, items waiting to be sent, storage used, badge reader, camera, face recognition and offline start-up, so problems can be spotted without a computer. **Check this tablet** runs the setup check again, and when a newer release is out it says so, with a QR code to get it.
   - **Connect another tablet** shows a QR code as well as the private link.
-  - **Plan** (only when the paywall is switched on): the trial or license, and **Plans and license** to add a key.
+  - **License** (only when licensing is switched on): this tablet's code, the trial or license and its paid-until date, and **License and renewal** to add a key.
 
 ## Where records are kept
 
@@ -155,7 +155,15 @@ The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests 
 
 ## Selling it
 
-The kiosk includes a plan and license system, **switched off** until you turn it on: Free and Pro plans, a free Pro trial, license keys you sign with your own key and the kiosk checks offline, PRO tags and an upgrade screen with your checkout link as a QR code, and tools to make keys (`npm run license:keygen`, `npm run license:issue`). Visitors are never stopped at the door, screening is always asked, and records keep being saved. See [docs/PAYWALL.md](docs/PAYWALL.md).
+The kiosk includes per-tablet licensing, **switched off** until you turn it on. It's made for selling the app directly, priced per kiosk with a yearly fee:
+
+- **Keys for one tablet:** each key names a tablet (by its code) and the date it's paid until. You sign them with your own key, and the kiosk checks them offline.
+- **Reminders, a grace period, then a pause:** the admin screen reminds staff before the date and allows a grace period after it. Then new sign-ins pause until the license is renewed.
+- **Nothing is lost while paused:** signing out, the roll call, the admin screen and exports keep working, and records are never deleted.
+- **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check) through small signed status files on your website.
+- **Tools on your computer:** issue, renew, switch off and on, list what's due, and keep a payments ledger with checks included (`npm run license:*`).
+
+See [docs/PAYWALL.md](docs/PAYWALL.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Speed
 
@@ -173,7 +181,7 @@ Built for modest tablets. On a CPU slowed to a quarter of a laptop's, the kiosk 
 ## Testing
 
 - `npm test`: the backend against an in-memory Google Sheet and Drive, file checks (versions, the offline file list, translation placeholders), license keys end to end (signing, checking, trial and expiry), and that the wizard's copy of the backend is current.
-- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, signing the rules (a tap isn't a signature, Clear, the signed copy in History and the CSV, and with Google Sheets the PDF, its links and the emailed copy), host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, starting with no network, the tablet check, the install page, update notices and the paywall switched on. Set `SHOTS=<folder>` to save screenshots.
+- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, signing the rules (a tap isn't a signature, Clear, the signed copy in History and the CSV, and with Google Sheets the PDF, its links and the emailed copy), host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, starting with no network, the tablet check, the install page, update notices, and licensing switched on (the paused screen, signing out while paused, keys for the wrong tablet refused, adding a key, switching a license off and on from the seller's status file). Set `SHOTS=<folder>` to save screenshots.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech
