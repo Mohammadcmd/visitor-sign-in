@@ -46,9 +46,11 @@ Why one Durable Object per company: each company's records live in their own sma
 ### Phase 1: the cloud service and accounts
 - [x] Shared business rules for the tablet and the cloud (`web/js/engine.js`)
 - [x] Cloud service skeleton: a Worker, one Durable Object per company, files in R2, tested locally (`cloud/`)
-- [ ] Sign-up and sign-in by emailed code (no passwords to store or leak)
-- [ ] Companies, locations, staff logins with roles (admin, front desk)
-- [ ] Tablet activation: device keys, signed check-ins, 30-day offline grace
+- [x] Sign-up and sign-in by emailed code (no passwords to store or leak)
+- [x] Companies and staff logins with roles (owner, admin, front desk)
+- [ ] Locations (several sites under one company)
+- [x] Tablet activation in the cloud: device keys, signed check-ins, device tokens, retiring
+- [ ] On the tablet: the key pair, daily check-in, 30-day offline grace
 - [ ] The kiosk's third storage option, "Your account", next to "This tablet" and "Google Sheets"
 - [ ] Emails from the cloud: alerts, host notices, signed copies (PDF), daily summary
 - [ ] Import from Google Sheets or a tablet

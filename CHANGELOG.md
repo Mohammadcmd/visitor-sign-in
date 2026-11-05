@@ -4,6 +4,8 @@
 
 - The kiosk's actions are now one shared engine (`web/js/engine.js`), used by the on-tablet kiosk and by the new cloud service. No change in behavior.
 - The start of the cloud service (`cloud/`): Cloudflare Workers with one Durable Object per company, photos in R2, the same actions as the Google Sheets script. Tested in Cloudflare's local runtime. Not used by the kiosk yet.
+- Cloud accounts: sign up and sign in with a six-digit code sent by email (no passwords), companies with owners, admins and front-desk staff.
+- Tablets locked to a company: a tablet registers a key it can't export, checks in by signing a one-time challenge, and gets a device token; retiring a tablet stops it at once. In production, companies can only be made by signing up.
 - The plan for becoming a real app, built the most cost-effective way: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## 1.1.0 — signatures

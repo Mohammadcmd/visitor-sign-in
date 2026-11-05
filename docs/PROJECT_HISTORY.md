@@ -170,6 +170,8 @@ Asked for next: a true app, sold per kiosk tablet (non-transferable), the most c
 
 - **One engine:** every action moved out of the on-tablet backend into `web/js/engine.js`, which takes its storage, settings and calendar from the caller. The tablet runs it in the browser; the cloud runs it in a Durable Object. The 139-check kiosk test passed unchanged, and `tests/engine.test.mjs` runs it in Node.
 - **The cloud service** (`cloud/`): a Worker sends each company to its own Durable Object, whose SQLite database holds one row per record (only changed rows are written), with photos and signatures in R2. Same API and kiosk-key model as the Google script, retries answered once, one request at a time, each company on its own calendar, and the admin PIN's hash never sent to tablets. `cloud/test/` runs it in Cloudflare's local runtime.
+- **Accounts** (`cloud/src/directory.js`): sign-up and sign-in by six-digit emailed code (Resend; logged in tests), sessions, companies, and roles (owner, admin, front desk). Codes and sessions are stored only as hashes; guessing is limited.
+- **Tablets locked to a company:** a manager activates a tablet's public key; the tablet checks in by signing a one-time challenge (ECDSA P-256) and gets a 7-day device token for kiosk calls; retiring revokes it. Kiosk-key companies (like a Google Sheet) only where `ALLOW_KIOSK_KEY_COMPANIES` is set, never in production.
 
 ## Where things are
 

@@ -5,9 +5,9 @@
   "type": "module",
   "description": "The cloud service for Visitor Sign-In: one Durable Object per company on Cloudflare Workers",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --env test",
     "deploy": "wrangler deploy",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning test/store.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/worker.test.js"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning test/store.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/worker.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/accounts.test.js"
   },
   "devDependencies": {
     "wrangler": "4.157.0"

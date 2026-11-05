@@ -7,7 +7,7 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-const server = createTestHarness({ root: new URL('..', import.meta.url).pathname, workers: [{ configPath: './wrangler.jsonc' }] });
+const server = createTestHarness({ root: new URL('..', import.meta.url).pathname, workers: [{ configPath: './wrangler.jsonc', env: 'test' }] });
 await server.listen();
 
 try {
