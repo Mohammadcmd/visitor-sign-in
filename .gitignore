@@ -13,3 +13,10 @@ android/capacitor-cordova-android-plugins/
 dist/
 *.keystore
 *.jks
+# Test output
+test-results/
+/screenshots/
+/e2e-screenshots/
+# License signing key (tools/license/keygen.mjs): never commit it
+license-private.pem
+*.pem

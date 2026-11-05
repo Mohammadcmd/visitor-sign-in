@@ -5,6 +5,26 @@ import { CONFIG } from '../config.js';
 
 let stream = null;
 let modelsReady = null;
+let libraryReady = null;
+
+/**
+ * face-api.js is large (1.3 MB), so it's only fetched when face recognition is
+ * actually needed, never as part of starting the kiosk.
+ */
+function loadLibrary() {
+  if (window.faceapi) return Promise.resolve(window.faceapi);
+  if (!libraryReady) {
+    libraryReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = new URL('../vendor/face-api/face-api.js', import.meta.url).href;
+      s.async = true;
+      s.onload = () => (window.faceapi ? resolve(window.faceapi) : reject(new Error('face-api.js did not load')));
+      s.onerror = () => { libraryReady = null; s.remove(); reject(new Error('face-api.js did not load')); };
+      document.head.appendChild(s);
+    });
+  }
+  return libraryReady;
+}
 
 export async function startCamera(video) {
   if (!stream || !stream.active) {
@@ -37,17 +57,20 @@ export function snapshot(video, maxSide = 900, quality = 0.85) {
   return { canvas, dataUrl: canvas.toDataURL('image/jpeg', quality) };
 }
 
+/** True once the face models have loaded (shown in Diagnostics). */
+export let modelsLoaded = false;
+
 export function loadModels() {
   if (!modelsReady) {
     modelsReady = (async () => {
-      const api = window.faceapi;
-      if (!api) throw new Error('face-api.js did not load');
+      const api = await loadLibrary();
       const url = CONFIG.FACE_MODEL_URL;
       await Promise.all([
         api.nets.tinyFaceDetector.loadFromUri(url),
         api.nets.faceLandmark68Net.loadFromUri(url),
         api.nets.faceRecognitionNet.loadFromUri(url),
       ]);
+      modelsLoaded = true;
     })();
     modelsReady.catch(() => { modelsReady = null; });
   }

@@ -2,11 +2,17 @@
   "name": "visitor-sign-in",
   "version": "1.0.0",
   "private": true,
-  "description": "Shock Tech visitor sign-in kiosk (web app + Android app)",
+  "description": "Visitor sign-in kiosk for any business: setup wizard, NFC/RFID badges, screening questions, records on the tablet or in Google Sheets, and an Android app",
   "scripts": {
-    "test": "node tests/apps-script.test.js",
-    "android:sync": "cap sync android",
-    "android:build": "node scripts/build-android.mjs"
+    "start": "python3 -m http.server 8080",
+    "test": "node tests/apps-script.test.js && node tests/web.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/license.test.mjs && node scripts/sync-backend.mjs --check",
+    "test:e2e": "node tests/kiosk.e2e.js",
+    "sync-backend": "node scripts/sync-backend.mjs",
+    "icons": "node tools/icons/render.js",
+    "android:sync": "node scripts/sync-backend.mjs && cap sync android",
+    "android:build": "node scripts/build-android.mjs",
+    "license:keygen": "node tools/license/keygen.mjs",
+    "license:issue": "node tools/license/issue.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",

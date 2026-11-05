@@ -1,14 +1,18 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.shocktech.visitorkiosk"
+    namespace = "com.visitorsignin.kiosk"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.shocktech.visitorkiosk"
+        // KIOSK_APP_ID lets a business keep its own app id, so tablets that already
+        // have an earlier build installed take new versions as updates.
+        applicationId System.getenv("KIOSK_APP_ID") ?: "com.visitorsignin.kiosk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Set by scripts/build-android.mjs from package.json's version (1.2.3 → 10203),
+        // so every release installs as an update.
+        versionCode Integer.parseInt(System.getenv("KIOSK_VERSION_CODE") ?: "1")
+        versionName System.getenv("KIOSK_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

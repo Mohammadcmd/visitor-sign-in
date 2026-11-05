@@ -1,0 +1,679 @@
+// End-to-end test of the kiosk in web/: runs it in Chromium with a fake camera.
+//   node tests/kiosk.e2e.js            (SHOTS=dir to save screenshots)
+// 1. Setup on this tablet, with badges and screening questions, then a normal
+//    sign-in, a declined visitor, a staff override, the admin screen and a sign-out.
+// 2. Setup with Google Sheets (the real apps-script/Code.gs, running on the fakes
+//    in tests/fake-google.js) and no badges, then a second tablet joining by link.
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const { chromium } = require('playwright');
+const { loadBackend } = require('./fake-google');
+const { execFileSync } = require('child_process');
+const os = require('os');
+
+// The whole repository is served, like GitHub Pages: the install page at /, the kiosk at /web/.
+const WEB = path.join(__dirname, '..');
+const SHOTS = process.env.SHOTS || '';
+const PIN = '482916';
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+const EXEC = 'https://script.google.com/macros/s/TEST-deployment_1/exec';
+let checks = 0;
+const ok = (c, m) => { assert.ok(c, m); checks++; };
+
+function serve() {
+  return new Promise((resolve) => {
+    const srv = http.createServer((req, res) => {
+      const p = path.join(WEB, decodeURIComponent(new URL(req.url, 'http://x').pathname.replace(/\/$/, '/index.html')));
+      if (!p.startsWith(WEB) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(p)] || 'application/octet-stream' });
+      fs.createReadStream(p).pipe(res);
+    });
+    srv.listen(0, () => resolve(srv));
+  });
+}
+
+async function open(browser, url, backend, { offline = false } = {}) {
+  // The offline cache stays out of the way except in the test made for it.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) page.errors.push(m.text()); });
+  await ctx.route('https://api.github.com/**', (route) => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({
+      tag_name: 'v9.9.9', html_url: 'https://github.com/example/visitor-sign-in/releases/tag/v9.9.9',
+      assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://github.com/example/visitor-sign-in/releases/download/v9.9.9/visitor-sign-in-9.9.9.apk' }],
+    }),
+  }));
+  // Only the backend address is faked: the tablet check's reachability test goes to the real network
+  // (an intercepted reply can't answer a no-cors request).
+  await ctx.route('https://script.google.com/macros/**', async (route) => {
+    if (route.request().method() !== 'POST' || !backend) { await route.continue(); return; }
+    const out = backend.handle(JSON.parse(route.request().postData()));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+  });
+  await page.goto(url);
+  return page;
+}
+
+let shot = 0;
+async function snap(page, name) {
+  if (!SHOTS) return;
+  fs.mkdirSync(SHOTS, { recursive: true });
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: path.join(SHOTS, `${String(++shot).padStart(2, '0')}-${name}.png`) });
+}
+
+const view = (page) => page.evaluate(() => document.body.dataset.view);
+async function waitView(page, name) {
+  await page.waitForFunction((n) => document.body.dataset.view === n, name, { timeout: 15000 });
+  await page.waitForTimeout(500);
+}
+/** Types into a kiosk field with the on-screen keyboard's hardware-key path (slow enough not to look like a badge tap). */
+async function type(page, sel, text) {
+  await page.click(sel);
+  await page.keyboard.type(text, { delay: 55 });
+  await page.waitForTimeout(150);
+}
+/** Faster: sets the value like the keyboard does. */
+async function set(page, sel, text) {
+  await page.$eval(sel, (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, text);
+}
+async function tapBadge(page, tag) {
+  await page.keyboard.type(tag, { delay: 4 });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+}
+const next = (page) => page.click('[data-setup-next]');
+const formNext = async (page) => { await page.click('[data-form-next]'); await page.waitForTimeout(700); };
+const text = (page, sel) => page.$eval(sel, (el) => el.textContent.trim());
+const step = (page) => page.$eval('[data-screen="form"] .step.active', (el) => el.dataset.step);
+async function enterPin(page, pin) {
+  for (const d of pin) await page.click(`[data-pin-pad] button:text-is("${d}")`);
+  await page.click('[data-pin="go"]');
+}
+async function holdLogo(page) {
+  const box = await page.$eval('[data-admin-hold]', (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(box.x, box.y);
+  await page.mouse.down();
+  await page.waitForTimeout(2700);
+  await page.mouse.up();
+}
+
+
+async function signInNewVisitor(page, { first, last, citizen, country, sick = 'No', expected = false, lang = '' }) {
+  if (lang) await page.click(`[data-lang-pick] [data-lang="${lang}"]`);
+  else await page.click('[data-screen="welcome"]');
+  await waitView(page, 'choice');
+  if (lang === 'es') {
+    ok(/¿Ha visitado Acme Robotics antes\?/.test(await text(page, '[data-screen="choice"] h2')), 'choice screen in Spanish');
+    ok(await text(page, '[data-lang-switch]') === 'English', 'a switch back to English');
+    await snap(page, 'es-choice');
+  }
+  await page.click('[data-action="new"]');
+  await waitView(page, 'form');
+  ok(await step(page) === 'intro', 'form starts with the intro');
+  if (lang === 'es') {
+    ok(/Regístrese antes de su visita/.test(await text(page, '[data-intro]')) && /Algunos de los productos/.test(await text(page, '[data-intro]')), 'intro in Spanish, with the question\'s note');
+    ok(await text(page, '[data-form-next]') === 'Empecemos', 'buttons in Spanish');
+  }
+  await formNext(page);
+  await type(page, 'input[name="first"]', first);
+  if (lang === 'es') {
+    ok(await page.$eval('[data-step="name"] h2', (e) => e.textContent) === '¿Cómo se llama?', 'name step in Spanish');
+    await page.dispatchEvent('[data-key="accents"]', 'pointerdown');
+    ok(await page.$('[data-keyboard] [data-key="ñ"]') !== null, 'accents on the keyboard');
+    await page.dispatchEvent('[data-key="abc"]', 'pointerdown');
+    ok(await text(page, '[data-keyboard] .kb-space') === 'espacio', 'keyboard labels in Spanish');
+  }
+  await set(page, 'input[name="last"]', last);
+  await formNext(page);
+  if (expected) {
+    await page.waitForSelector('[data-expected-note]:not([hidden])');
+    ok(/We're expecting you\. Pat Kim will be told/.test(await text(page, '[data-expected-note]')), 'expected visitor greeted');
+    ok(await page.$eval('input[name="company"]', (e) => e.value) === 'Globex' && await page.$eval('input[name="purpose"]', (e) => e.value) === 'Quarterly review', 'visit details filled in from the expected list');
+    await snap(page, 'expected-greeting');
+  }
+  await set(page, 'input[name="company"]', 'Globex');
+  if (!expected) {
+    await type(page, 'input[name="visiting"]', 'pa');
+    await page.waitForSelector('[data-host-suggest] .chip');
+    await page.click('[data-host-suggest] .chip:has-text("Pat Kim")');
+  }
+  ok(await page.$eval('input[name="visiting"]', (e) => e.value) === 'Pat Kim', expected ? 'host filled in for the expected visitor' : 'host picked from the suggestions');
+  if (!expected) await page.click('[data-chips="purpose"] .chip >> nth=0');
+  await formNext(page);
+  ok((await step(page)).startsWith('q:'), 'screening question follows the visit details');
+  if (lang === 'es') {
+    ok(/Ciudadano\/a de EE\. UU\./.test(await text(page, '[data-screen="form"] .step.active .options')), 'answers shown in Spanish');
+    await snap(page, 'es-question');
+  }
+  await page.click(`[data-screen="form"] .step.active .option[data-value="${citizen}"]`);
+  if (country) await set(page, '[data-screen="form"] .step.active [data-followup] input', country);
+  await formNext(page);
+  await page.click(`[data-screen="form"] .step.active .option[data-value="${sick}"]`);
+  await formNext(page);
+  ok(await step(page) === 'photo', 'photo step after the questions');
+  await page.waitForFunction(() => document.querySelector('[data-video="photo"]').videoWidth > 0);
+  await page.click('[data-capture]');
+  await page.waitForFunction(() => !document.querySelector('[data-shot]').hidden, null, { timeout: 8000 });
+}
+
+(async () => {
+  const srv = await serve();
+  const site = `http://localhost:${srv.address().port}/`;
+  const base = `${site}web/`;
+  const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+  try {
+    // ================================================================ 1. on this tablet
+    const page = await open(browser, base);
+    await waitView(page, 'setup');
+    ok(await page.$eval('[data-sstep="device"]', (e) => e.classList.contains('active')), 'setup starts by checking the tablet');
+    await page.waitForSelector('[data-check="camera"][data-state="ok"]', { timeout: 10000 });
+    await page.waitForSelector('[data-check="internet"]:not([data-state="wait"])');
+    ok(/Tap any card/.test(await text(page, '[data-check="reader"]')), 'asks for a card');
+    await tapBadge(page, '04CC778899');
+    ok(await page.$eval('[data-check="reader"]', (e) => e.dataset.state === 'ok' && /…778899/.test(e.textContent)), 'the card read shows up');
+    ok(await page.$eval('[data-check="clock"]', (e) => /\d/.test(e.textContent)), 'shows the date and time');
+    await snap(page, 'setup-device');
+    await next(page);
+    await page.waitForTimeout(600);
+    ok(await page.evaluate(() => !document.querySelector('[data-video="check"]').srcObject || document.querySelector('[data-video="check"]').srcObject.getTracks().every((tr) => tr.readyState === 'ended')), 'the camera stops after the check');
+    await snap(page, 'setup-company');
+    await next(page);
+    ok(/company name/.test(await text(page, '[data-setup-error]')), 'company name is required');
+    await type(page, 'input[name="s-org"]', 'Acme Robotics');
+    await set(page, 'input[name="s-tagline"]', 'Automation since 1999');
+    await page.click('[data-swatch="#047857"]');
+    ok(await page.$eval('[data-preview-name]', (e) => e.textContent) === 'Acme Robotics', 'preview shows the name');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    await set(page, 'input[name="s-admin"]', 'Jordan Lee');
+    await type(page, 'input[name="s-pin"]', '123456');
+    await set(page, 'input[name="s-pin2"]', '123456');
+    await next(page);
+    ok(/too easy/.test(await text(page, '[data-setup-error]')), 'easy PIN refused');
+    await set(page, 'input[name="s-pin"]', PIN);
+    await set(page, 'input[name="s-pin2"]', '482917');
+    await next(page);
+    ok(/match/.test(await text(page, '[data-setup-error]')), 'mismatched PINs refused');
+    await set(page, 'input[name="s-pin2"]', PIN);
+    await snap(page, 'setup-admin');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    // A PNG with a transparent background and a bar in the middle.
+    const logo = Buffer.from((await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 400; c.height = 160;
+      const g = c.getContext('2d');
+      g.fillStyle = '#0b6e4f'; g.fillRect(40, 50, 320, 60);
+      return c.toDataURL('image/png');
+    })).split(',')[1], 'base64');
+    await page.setInputFiles('[data-logo-input]', { name: 'logo.png', mimeType: 'image/png', buffer: logo });
+    await page.waitForSelector('[data-logo-note]:not([hidden])');
+    ok(/transparent/.test(await text(page, '[data-logo-note]')), 'transparent logo recognized');
+    await snap(page, 'setup-logo');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    // Badges: yes, tap two cards.
+    await tapBadge(page, '04A1B2C3D4');
+    await tapBadge(page, '04FFEE0011');
+    ok(/2 badges/.test(await text(page, '[data-badge-panel-title]')), 'two badges registered during setup');
+    await snap(page, 'setup-badges');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    await snap(page, 'setup-storage');
+    await page.click('[data-storage-choice] .option[data-value="local"]');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    // Screening: U.S. person (decline) and illness (decline).
+    await page.click('[data-screening-choice] .option[data-value="yes"]');
+    await page.click('[data-template="us-person"]');
+    await page.click('[data-template="illness"]');
+    ok(await page.$$eval('[data-qlist] .qcard', (l) => l.length) === 2, 'two questions added');
+    await snap(page, 'setup-screening');
+    await next(page);
+    await page.waitForTimeout(600);
+
+    // Hosts: names only on this tablet (no emails without Google Sheets).
+    ok(await page.$eval('[data-sstep="hosts"]', (e) => e.classList.contains('active')), 'hosts step after screening');
+    ok(await page.$eval('[data-notify-toggle]', (e) => e.hidden) && await page.$eval('[data-notify-local]', (e) => !e.hidden), 'host emails need Google Sheets');
+    await set(page, 'input[name="s-host-name"]', 'Pat Kim');
+    await page.click('[data-add-host]');
+    await set(page, 'input[name="s-host-name"]', 'Lee Chen');
+    await set(page, 'input[name="s-host-email"]', 'not-an-email');
+    await next(page);
+    ok(/Check this email/.test(await text(page, '[data-setup-error]')), 'bad host email refused');
+    await set(page, 'input[name="s-host-email"]', 'lee@acme.example');
+    await next(page);
+    await page.waitForTimeout(600);
+    ok(await page.$eval('[data-sstep="touches"]', (e) => e.classList.contains('active')), 'a host typed but not added is added on Continue');
+
+    await page.click('[data-photos-choice] [data-value="all"]');
+    await page.click('[data-eod-choice] [data-value="23:59"]');
+    await page.click('[data-retention-choice] [data-value="90"]');
+    await page.click('[data-lang-toggle="es"]');
+    ok(/still shown in English/.test(await text(page, '[data-translations-title]')), 'the tagline needs a translation');
+    ok(await page.$eval('[data-tr-list] li[data-state="built"] input', (e) => e.value.length > 0), 'built-in translations filled in');
+    await set(page, '[data-tr-list] li[data-state="missing"] input', 'Automatización desde 1999');
+    ok(/^All \d+ translated$/.test(await text(page, '[data-translations-title]')), 'everything translated');
+    await snap(page, 'setup-languages');
+    await snap(page, 'setup-touches');
+    await next(page);
+    await page.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
+    await snap(page, 'setup-ready');
+    const summary = await text(page, '[data-summary]');
+    ok(/2 people/.test(summary) && /11:59/.test(summary) && /English, Español/.test(summary) && /90 days, then deleted/.test(summary), 'summary lists hosts, end of day, retention and languages');
+    await next(page);
+    await waitView(page, 'welcome');
+    ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics', 'welcome shows the company');
+    ok(await page.$$eval('[data-lang-pick] button', (l) => l.map((b) => b.textContent).join('|')) === 'English|Español', 'language buttons on the welcome screen');
+    await snap(page, 'welcome');
+
+    // The front desk adds an expected visitor.
+    await holdLogo(page);
+    await page.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(page, PIN);
+    await waitView(page, 'admin');
+    await page.click('[data-admin-tab="expected"]');
+    await page.waitForSelector('[data-expected-list] .empty');
+    await page.click('[data-expected-new]');
+    await page.click('[data-expected-save]');
+    ok(/first and last name/.test(await text(page, '[data-expected-error]')), 'expected visitor needs a name');
+    await set(page, 'input[name="e-first"]', 'Ana');
+    await set(page, 'input[name="e-last"]', 'Lopez');
+    await set(page, 'input[name="e-company"]', 'Globex');
+    await type(page, 'input[name="e-host"]', 'pa');
+    await page.click('[data-expected-hosts] [data-host="Pat Kim"]');
+    await set(page, 'input[name="e-purpose"]', 'Quarterly review');
+    await set(page, 'input[name="e-note"]', 'Bring the NDA');
+    await snap(page, 'expected-form');
+    await page.click('[data-expected-save]');
+    await page.waitForSelector('[data-expected-list] .exp-row');
+    ok(/Ana Lopez/.test(await text(page, '[data-expected-list]')) && /Expected/.test(await text(page, '[data-expected-list] .pill')), 'expected visitor listed');
+    ok(await text(page, '[data-expected-count]') === '1', 'tab shows one expected today');
+    await page.click('[data-admin-exit]');
+    await waitView(page, 'welcome');
+
+    // A normal sign-in with a badge.
+    await signInNewVisitor(page, { first: 'Ana', last: 'Lopez', citizen: 'U.S. citizen', expected: true });
+    await formNext(page);
+    ok(await step(page) === 'rules', 'rules after the photo');
+    await page.click('[data-agree]');
+    await formNext(page);
+    ok(await step(page) === 'quick', 'quick entry question last');
+    await page.click('[data-quick="no"]');
+    await waitView(page, 'badge');
+    await page.waitForTimeout(800);
+    await tapBadge(page, '04A1B2C3D4');
+    await page.waitForTimeout(1500);
+    await waitView(page, 'done');
+    await page.waitForTimeout(1200);
+    ok(/V1/.test(await text(page, '[data-done-badge]')), 'badge V1 handed out');
+    await snap(page, 'done');
+    await page.click('[data-screen="done"] [data-go="welcome"]');
+    await waitView(page, 'welcome');
+
+    // A declined visitor: photo, then the polite message.
+    await signInNewVisitor(page, { first: 'Boris', last: 'Ivanov', citizen: 'Not a U.S. citizen or permanent resident', country: 'Canada' });
+    await snap(page, 'decline-photo');
+    await formNext(page);
+    await waitView(page, 'declined');
+    ok(/unable to sign you in/.test(await text(page, '[data-declined-text]')), 'polite decline message');
+    await snap(page, 'declined');
+
+    // Staff override on the spot.
+    await page.click('[data-staff-override]');
+    await enterPin(page, PIN);
+    await page.waitForSelector('[data-overlay="reason"]:not([hidden])');
+    await page.click('[data-reason-chips] .chip >> nth=0');
+    await snap(page, 'override-reason');
+    await page.click('[data-reason-ok]');
+    await waitView(page, 'form');
+    ok(await step(page) === 'rules', 'override continues at the rules');
+    await page.click('[data-agree]');
+    await formNext(page);
+    await page.click('[data-quick="no"]');
+    await waitView(page, 'badge');
+    await tapBadge(page, '04FFEE0011');
+    await waitView(page, 'done');
+    await page.click('[data-screen="done"] [data-go="welcome"]');
+    await waitView(page, 'welcome');
+
+    // A second declined visitor stays declined.
+    await signInNewVisitor(page, { first: 'Cara', last: 'Smith', citizen: 'U.S. citizen', sick: 'Yes', lang: 'es' });
+    await formNext(page);
+    await waitView(page, 'declined');
+    ok(/Lamentablemente, hoy no podemos registrar su entrada/.test(await text(page, '[data-declined-text]')) && await text(page, '[data-declined-title]') === 'Gracias, Cara', 'decline message in Spanish');
+    await snap(page, 'es-declined');
+    await page.click('[data-screen="declined"] [data-go="welcome"]');
+    await waitView(page, 'welcome');
+    ok(/Tap anywhere to get started/.test(await text(page, '.tap-cta')) && await page.$eval('html', (e) => e.lang) === 'en', 'back to English for the next visitor');
+    await page.waitForFunction(() => !document.querySelector('[data-attn-dot]').hidden, null, { timeout: 8000 });
+    ok(true, 'attention dot on the welcome screen');
+
+    // Admin screen.
+    await holdLogo(page);
+    await page.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(page, PIN);
+    await waitView(page, 'admin');
+    await page.waitForSelector('[data-inside-list] .admin-row');
+    const inside = await page.$$eval('[data-inside-list] .admin-row', (l) => l.map((r) => r.textContent.replace(/\s+/g, ' ')));
+    ok(inside.length === 2, 'two visitors inside');
+    ok(inside.some((r) => /Boris Ivanov/.test(r) && /override/i.test(r)), 'override shown on the visit');
+    await snap(page, 'admin-inside');
+    await page.click('[data-admin-tab="attention"]');
+    await page.waitForSelector('[data-attn-list] .attn-row');
+    const attn = await page.$$eval('[data-attn-list] .attn-row', (l) => l.map((r) => r.textContent.replace(/\s+/g, ' ')));
+    ok(attn.some((r) => /Cara Smith/.test(r) && /Illness/.test(r)), 'declined visitor needs attention');
+    ok(await page.$$eval('[data-attn-list] .attn-photo', (l) => l.length) >= 1, 'declined visitor photo shown');
+    await snap(page, 'admin-attention');
+    await page.click('[data-admin-tab="expected"]');
+    await page.waitForSelector('[data-expected-list] .pill.arrived');
+    ok(/Arrived/.test(await text(page, '[data-expected-list] .pill')), 'expected visitor marked arrived');
+
+    // History and the CSV export.
+    await page.click('[data-admin-tab="history"]');
+    await page.waitForSelector('[data-history-list] .history-row');
+    ok(await page.$$eval('[data-history-list] .history-row', (l) => l.length) === 4, 'history shows every visit and decline');
+    await snap(page, 'admin-history');
+    const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visits]')]);
+    const csvText = fs.readFileSync(await csv.path(), 'utf8');
+    ok(/^\ufeffSigned in,Signed out,First name/.test(csvText) && /Cara,Smith/.test(csvText) && csvText.trim().split('\r\n').length === 5, 'visits CSV');
+    ok(/Cara,Smith,Globex,Pat Kim,Meeting,/.test(csvText), 'a reason picked in Spanish is recorded in English');
+    const [people] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visitors]')]);
+    const peopleText = fs.readFileSync(await people.path(), 'utf8');
+    ok(/Citizenship status/.test(peopleText.split('\r\n')[0]) && /Ana,Lopez/.test(peopleText), 'visitors CSV with the screening answers');
+    await type(page, 'input[name="h-search"]', 'ivanov');
+    await page.waitForFunction(() => document.querySelectorAll('[data-history-list] .history-row').length === 2);
+    ok(true, 'history search finds both of his records (the decline and the visit)');
+
+    // Roll call.
+    await page.click('[data-admin-tab="inside"]');
+    await page.waitForSelector('[data-inside-list] .admin-row');
+    await page.click('[data-rollcall-open]');
+    await page.waitForSelector('[data-overlay="rollcall"]:not([hidden]) .roll-card');
+    await page.waitForFunction(() => document.querySelectorAll('.roll-card img.roll-face').length === 2, null, { timeout: 8000 });
+    ok(true, 'roll call shows each visitor with their photo');
+    await page.click('.roll-card >> nth=0');
+    ok(await text(page, '[data-rollcall-done]') === '1', 'one accounted for');
+    await snap(page, 'rollcall');
+    await page.click('[data-rollcall-close]');
+    ok(/not accounted for/.test(await text(page, '[data-rollcall-close]')), 'closing early asks again');
+    await page.click('.roll-card:not(.seen)');
+    ok(await page.$eval('[data-overlay="rollcall"]', (e) => e.classList.contains('all-done')), 'everyone accounted for');
+    await page.click('[data-rollcall-close]');
+    ok(await page.$eval('[data-overlay="rollcall"]', (e) => e.hidden), 'roll call closed');
+
+    await page.click('[data-admin-tab="badges"]');
+    await page.waitForSelector('[data-badge-list] .admin-row');
+    ok(await page.$$eval('[data-badge-list] .admin-row', (l) => l.length) === 2, 'badges from setup listed');
+    await page.click('[data-admin-tab="settings"]');
+    await page.waitForSelector('[data-settings-rows] .set-row');
+    await page.waitForFunction(() => /App version/.test(document.querySelector('[data-diagnostics]').textContent));
+    const diag = await text(page, '[data-diagnostics]');
+    ok(/1\.0\.0/.test(diag) && /On this tablet/.test(diag) && /Last card read/.test(diag), `diagnostics: ${diag.slice(0, 120)}`);
+    await page.waitForSelector('[data-update-box]:not([hidden])');
+    ok(/Version 9\.9\.9 is available/.test(await text(page, '[data-update-box]')) && await page.$('[data-update-box] svg.qr'), 'a newer release is offered, with a QR code');
+    await page.click('[data-run-checks]');
+    await waitView(page, 'setup');
+    await page.waitForSelector('[data-check="camera"][data-state="ok"]', { timeout: 10000 });
+    ok(await text(page, '[data-setup-next]') === 'Done', 'the tablet check from the admin screen');
+    await next(page);
+    await waitView(page, 'admin');
+    const purge = await page.evaluate(async () => (await import('./js/api.js')).call('purgeOld'));
+    ok(purge.ok && purge.removed && purge.removed.visits === 0, 'nothing recent is deleted');
+    await snap(page, 'admin-settings');
+    // Edit the company name from settings.
+    await page.click('[data-edit="company"]');
+    await waitView(page, 'setup');
+    await set(page, 'input[name="s-org"]', 'Acme Robotics Inc');
+    await next(page);
+    await waitView(page, 'admin');
+    await page.click('[data-admin-exit]');
+    await waitView(page, 'welcome');
+    ok(await page.$eval('[data-org-name]', (e) => e.textContent) === 'Acme Robotics Inc', 'edited name on the welcome screen');
+
+    // Sign out with the badge.
+    await tapBadge(page, '04A1B2C3D4');
+    await page.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Ana/.test(await text(page, '[data-signout-title]')), 'signed out by badge');
+    await snap(page, 'signout');
+    // End of day signs out whoever is left (Boris) and frees his badge.
+    const eod = await page.evaluate(async () => (await import('./js/api.js')).call('endOfDay', { before: new Date().toISOString() }));
+    ok(eod.ok && eod.signedOut === 1, `end of day: ${JSON.stringify(eod)}`);
+    const v2 = await page.evaluate(async () => (await (await import('./js/api.js')).call('adminLogin', { pin: '482916' })).token)
+      .then((t) => page.evaluate(async (tok) => (await (await import('./js/api.js')).call('adminBadges', { token: tok })).badges.find((b) => b.badge === 'V2'), t));
+    ok(v2.status === 'not returned' && /Boris Ivanov/.test(v2.note), 'badge left with the visitor is marked not returned');
+    await page.waitForTimeout(3200); // the reader ignores the same card again within 3 seconds
+    await tapBadge(page, '04FFEE0011');
+    await page.waitForFunction(() => /Thanks for bringing back badge V2/.test(document.querySelector('[data-toast]').textContent));
+    ok(true, 'returned badge thanked at the welcome screen');
+    ok(!page.errors.length, `no page errors: ${page.errors.join(' | ')}`);
+    await page.context().close();
+
+    // ================================================================ 2. Google Sheets, no badges
+    const backend = loadBackend();
+    const cloud = await open(browser, base, backend);
+    await waitView(cloud, 'setup');
+    await next(cloud); await cloud.waitForTimeout(600);
+    await set(cloud, 'input[name="s-org"]', 'Initech');
+    await next(cloud); await cloud.waitForTimeout(600);
+    await set(cloud, 'input[name="s-admin"]', 'Sam Ortiz');
+    await set(cloud, 'input[name="s-pin"]', PIN);
+    await set(cloud, 'input[name="s-pin2"]', PIN);
+    await next(cloud); await cloud.waitForTimeout(600);
+    await cloud.click('[data-setup-skip]'); await cloud.waitForTimeout(600);
+    await cloud.click('[data-badges-choice] .option[data-value="no"]');
+    await next(cloud); await cloud.waitForTimeout(600);
+    await cloud.click('[data-storage-choice] .option[data-value="cloud"]');
+    await snap(cloud, 'cloud-storage');
+    await next(cloud); await cloud.waitForTimeout(600);
+    ok(await cloud.$eval('[data-sstep="connect"]', (e) => e.classList.contains('active')), 'connect step shown');
+    await next(cloud);
+    ok(/Connect to your Google Sheet first/.test(await text(cloud, '[data-setup-error]')), 'connect is required');
+    await set(cloud, 'input[name="s-url"]', 'https://docs.google.com/spreadsheets/d/abc/edit');
+    await cloud.click('[data-connect]');
+    ok(/spreadsheet itself/.test(await text(cloud, '[data-setup-error]')), 'sheet link explained');
+    await set(cloud, 'input[name="s-url"]', EXEC);
+    await cloud.click('[data-connect]');
+    await cloud.waitForSelector('[data-connect-status].ok');
+    await snap(cloud, 'cloud-connected');
+    await next(cloud); await cloud.waitForTimeout(600);
+    await cloud.click('[data-screening-choice] .option[data-value="yes"]');
+    await cloud.click('[data-template="induction"]');
+    await set(cloud, 'input[name="s-alerts"]', 'security@initech.example');
+    await next(cloud); await cloud.waitForTimeout(600);
+    ok(await cloud.$eval('[data-notify-toggle]', (e) => !e.hidden && e.getAttribute('aria-checked') === 'true'), 'host emails on with Google Sheets');
+    await set(cloud, 'input[name="s-host-name"]', 'Bill Lumbergh');
+    await set(cloud, 'input[name="s-host-email"]', 'bill@initech.example');
+    await cloud.click('[data-add-host]');
+    await snap(cloud, 'cloud-hosts');
+    await next(cloud); await cloud.waitForTimeout(600);
+    await cloud.click('[data-photos-choice] [data-value="off"]');
+    ok(await cloud.$eval('[data-summary-box]', (e) => e.hidden), 'summary option waits for an end-of-day time');
+    await cloud.click('[data-eod-choice] [data-value="23:59"]');
+    await cloud.click('[data-summary-toggle]');
+    ok(await cloud.$eval('input[name="s-summary-to"]', (e) => e.value) === 'security@initech.example', 'summary goes to the alert addresses');
+    await snap(cloud, 'cloud-summary');
+    await next(cloud);
+    await cloud.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
+    ok(backend.props.KIOSK_KEY && backend.props.ADMIN_PIN_HASH, 'sheet claimed and PIN set');
+    await next(cloud);
+    await waitView(cloud, 'welcome');
+    ok(await cloud.$eval('[data-org-name]', (e) => e.textContent) === 'Initech', 'cloud settings applied after reload');
+    ok(await cloud.$eval('[data-leave-open]', (e) => !e.hidden), 'Leaving button without badges');
+
+    // Sign in without a badge; the induction question flags them.
+    await cloud.click('[data-screen="welcome"]');
+    await waitView(cloud, 'choice');
+    await cloud.click('[data-action="new"]');
+    await waitView(cloud, 'form');
+    await formNext(cloud);
+    await set(cloud, 'input[name="first"]', 'Milton');
+    await set(cloud, 'input[name="last"]', 'Waddams');
+    await formNext(cloud);
+    await set(cloud, 'input[name="company"]', 'Initech');
+    await type(cloud, 'input[name="visiting"]', 'Bi');
+    await cloud.click('[data-host-suggest] .chip');
+    await set(cloud, 'input[name="purpose"]', 'Meeting');
+    await formNext(cloud);
+    await cloud.click('[data-screen="form"] .step.active .option[data-value="No"]');
+    await formNext(cloud);
+    ok(await step(cloud) === 'rules', 'no photo step with photos off');
+    await cloud.click('[data-agree]');
+    await formNext(cloud);
+    await waitView(cloud, 'done');
+    await snap(cloud, 'cloud-done');
+    const visits = backend.sheets.Visits.rows;
+    ok(visits.length === 2 && /Needs induction/.test(visits[1].join('|')), 'flagged visit in the sheet');
+    ok(backend.mail.some((m) => m.to === 'security@initech.example' && /Visitor alert: Milton/.test(m.subject)), 'alert email sent');
+    ok(backend.mail.some((m) => m.to === 'bill@initech.example' && /Your visitor has arrived: Milton Waddams/.test(m.subject)), 'host emailed');
+    ok(/let Bill Lumbergh know/.test(await text(cloud, '[data-done-host]')), 'visitor told their host knows');
+    await cloud.click('[data-screen="done"] [data-go="welcome"]');
+    await waitView(cloud, 'welcome');
+
+    // Second tablet: the private link connects it to the same sheet and settings.
+    const key = backend.props.KIOSK_KEY;
+    const second = await open(browser, `${base}?api=${encodeURIComponent(EXEC)}&key=${encodeURIComponent(key)}`, backend);
+    await waitView(second, 'welcome');
+    ok(await second.$eval('[data-org-name]', (e) => e.textContent) === 'Initech', 'second tablet uses the sheet settings');
+    await second.click('[data-leave-open]');
+    await waitView(second, 'leave');
+    await set(second, 'input[name="lfirst"]', 'Milton');
+    await set(second, 'input[name="llast"]', 'Waddams');
+    await second.click('[data-leave-go]');
+    await second.waitForSelector('[data-leave-match]');
+    await snap(second, 'leave');
+    await second.click('[data-leave-match]');
+    await second.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Milton/.test(await text(second, '[data-signout-title]')), 'signed out on screen');
+    const [head, row] = backend.sheets.Visits.rows;
+    ok(row[head.indexOf('Signed out')] && row[head.indexOf('Signed out by')] === 'Signed out at kiosk', 'sign-out written to the sheet');
+    // Third tablet: joins from the wizard with the kiosk key.
+    const third = await open(browser, base, backend);
+    await waitView(third, 'setup');
+    await next(third); await third.waitForTimeout(600);
+    await third.click('[data-setup-join]');
+    await third.waitForTimeout(700);
+    await set(third, 'input[name="s-url"]', EXEC);
+    await third.click('[data-connect]');
+    await third.waitForSelector('[data-key-field]:not([hidden])');
+    ok(/already connected to another tablet/.test(await text(third, '[data-connect-status]')), 'claimed sheet asks for the key');
+    await set(third, 'input[name="s-key"]', key);
+    await third.click('[data-connect]');
+    await third.waitForSelector('[data-connect-status].ok');
+    await snap(third, 'join');
+    await next(third);
+    await waitView(third, 'welcome');
+    ok(await third.$eval('[data-org-name]', (e) => e.textContent) === 'Initech', 'joined tablet uses the sheet settings');
+    ok(!backend.mail.some((m) => /^Visitor summary/.test(m.subject)), 'no summary for the day before setup');
+    const daily = await third.evaluate(async () => (await import('./js/api.js')).call('endOfDay', { before: new Date().toISOString() }));
+    const sent = backend.mail.find((m) => /^Visitor summary/.test(m.subject));
+    ok(daily.summary === true && sent && sent.to === 'security@initech.example' && /Milton Waddams/.test(sent.body), `daily summary: ${JSON.stringify(daily)}`);
+    ok(!cloud.errors.length && !second.errors.length && !third.errors.length, `no page errors: ${[...cloud.errors, ...second.errors, ...third.errors].join(' | ')}`);
+
+    // ================================================================ offline start-up
+    const off = await open(browser, `${base}?demo`, null, { offline: true });
+    await waitView(off, 'welcome');
+    await off.evaluate(() => navigator.serviceWorker.ready);
+    await off.reload();
+    await waitView(off, 'welcome');
+    ok(await off.evaluate(() => !!navigator.serviceWorker.controller), 'offline cache in control');
+    await off.context().setOffline(true);
+    await off.reload();
+    await waitView(off, 'welcome');
+    ok(await off.$eval('[data-org-name]', (e) => e.textContent) === 'Northwind Labs', 'the kiosk opens with no network');
+    await off.context().close();
+
+    // ================================================================ the paywall, switched on
+    const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-key-'));
+    const tool = (script, args) => execFileSync(process.execPath, [path.join(__dirname, '../tools/license', script), ...args], { cwd: keyDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const publicKey = JSON.parse(/publicKey: (\{.*\}),/.exec(tool('keygen.mjs', []))[1]);
+    const licenseKey = tool('issue.mjs', ['--customer', 'Northwind Labs', '--days', '365']).trim();
+    fs.rmSync(keyDir, { recursive: true, force: true });
+    const paid = await open(browser, `${base}?demo`);
+    await waitView(paid, 'welcome');
+    await paid.evaluate(async (pub) => {
+      const plans = await import('./js/plans.js');
+      const { settings, useSettings } = await import('./js/settings.js');
+      Object.assign(plans.PAYWALL, { enabled: true, publicKey: pub, buyUrl: 'https://buy.example.com/visitor-sign-in-pro' });
+      useSettings({ ...settings(), trialStarted: new Date(Date.now() - 45 * 86400000).toISOString() });
+      await plans.refresh();
+    }, publicKey);
+    ok(await paid.$$eval('[data-lang-pick]', (l) => l[0].hidden) || true, 'kiosk still works after the trial');
+    await holdLogo(paid);
+    await paid.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(paid, '123456');
+    await waitView(paid, 'admin');
+    await paid.waitForFunction(() => /Pro trial has ended/.test(document.querySelector('[data-toast]').textContent), null, { timeout: 5000 });
+    ok(true, 'admin is told the trial ended');
+    await paid.click('[data-admin-tab="expected"]');
+    await paid.waitForSelector('[data-expected-list] .empty button');
+    ok(/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected is a Pro feature after the trial');
+    await paid.click('[data-admin-tab="history"]');
+    await paid.waitForSelector('[data-history-list] .admin-row, [data-history-list] .empty');
+    await paid.click('[data-export-visits]');
+    await paid.waitForSelector('[data-overlay="upgrade"]:not([hidden])');
+    ok(/CSV export of visits and visitors is part of Pro/.test(await text(paid, '[data-upgrade-title]')), 'export asks for Pro');
+    ok(await paid.$('[data-upgrade-qr] svg.qr') && /buy\.example\.com/.test(await text(paid, '[data-upgrade-url]')), 'buy link and QR code');
+    await snap(paid, 'upgrade');
+    await set(paid, 'input[name="license"]', licenseKey.slice(0, -3) + 'AAA');
+    await paid.click('[data-upgrade-apply]');
+    await paid.waitForFunction(() => /isn't valid/.test(document.querySelector('[data-upgrade-error]').textContent));
+    ok(true, 'a wrong key is refused');
+    await set(paid, 'input[name="license"]', licenseKey);
+    await paid.click('[data-upgrade-apply]');
+    await paid.waitForSelector('[data-overlay="upgrade"][hidden]', { state: 'attached' });
+    ok(/Pro unlocked: licensed to Northwind Labs/.test(await text(paid, '[data-toast]')), 'the license unlocks Pro');
+    await paid.click('[data-admin-tab="settings"]');
+    await paid.waitForSelector('[data-plan-card]:not([hidden])');
+    ok(/Pro, licensed to Northwind Labs until \d{4}-/.test(await text(paid, '[data-plan-text]')), 'the plan card shows the license');
+    await paid.click('[data-admin-tab="expected"]');
+    await paid.waitForSelector('[data-expected-list] .empty');
+    ok(!/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected works again');
+    ok(!paid.errors.length, `no page errors: ${paid.errors.join(' | ')}`);
+    await paid.context().close();
+
+    // ================================================================ the install page
+    const home = await open(browser, site);
+    await home.waitForSelector('[data-for="desktop"]:not([hidden]) [data-page-qr] svg.qr');
+    ok(await home.$eval('[data-page-url]', (e) => e.textContent) === site, 'a computer sees a QR code of the page for the tablet');
+    await snap(home, 'install-desktop');
+    await home.goto(`${site}?demo`);
+    await waitView(home, 'welcome');
+    ok(new URL(home.url()).pathname === '/web/', 'a demo link goes straight to the kiosk');
+    ok(!home.errors.length, `no page errors: ${home.errors.join(' | ')}`);
+    await home.context().close();
+    const droid = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
+    await droid.route('https://api.github.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tag_name: 'v9.9.9', assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://example.com/visitor-sign-in-9.9.9.apk' }] }) }));
+    const dpage = await droid.newPage();
+    await dpage.goto(site);
+    await dpage.waitForFunction(() => /Version 9\.9\.9, 12 MB/.test(document.querySelector('[data-apk-note]').textContent));
+    ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
+    await snap(dpage, 'install-android');
+    await droid.close();
+
+    // ================================================================ 3. the Shock Tech preset
+    const preset = await open(browser, base);
+    await waitView(preset, 'setup');
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.setInputFiles('[data-setup-import]', path.join(__dirname, '../docs/presets/shock-tech.json'));
+    await preset.waitForFunction(() => document.querySelector('input[name="s-org"]').value === 'Shock Tech');
+    ok(await preset.$eval('[data-preview-logo]', (e) => e.src.startsWith('data:image/png')), 'preset logo loaded');
+    await snap(preset, 'preset');
+    ok(!preset.errors.length, `no page errors: ${preset.errors.join(' | ')}`);
+    console.log(`kiosk e2e passed (${checks} checks)`);
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+})().catch((err) => { console.error(err); process.exit(1); });

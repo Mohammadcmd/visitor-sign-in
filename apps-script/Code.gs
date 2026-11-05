@@ -1,57 +1,81 @@
 /**
- * Shock Tech visitor kiosk: Google Apps Script backend.
+ * Visitor sign-in kiosk: Google Apps Script backend.
  *
- * The kiosk (web/) is a static page on the iPad. It calls this script as a
+ * The kiosk (web/) is a static page on the tablet. It calls this script as a
  * JSON API (POST, text/plain body) because Apps Script's own page sandbox
  * blocks camera access. This script owns the Google Sheet and the Drive
  * photo folders; the kiosk never touches either directly.
  *
- * Script properties (Project Settings > Script properties):
- *   KIOSK_KEY        shared secret the kiosk sends with every call (required)
- *   ADMIN_PIN        6 to 8 digits for the admin screen (required)
- *   PHOTO_FOLDER_ID  parent Drive folder for visitor photos (optional;
- *                    a folder named "Shock Tech visitor photos" is created otherwise)
+ * Connecting: deploy this script as a web app (Execute as: Me, Who has access:
+ * Anyone) and paste its /exec URL into the kiosk's setup screen. The first
+ * kiosk that connects becomes the owner: its key is saved as KIOSK_KEY, and
+ * every later call must carry that key. Settings chosen on the kiosk (company
+ * name, logo, questions…) are kept in the hidden "Settings" tab, so every
+ * tablet connected to this sheet shares them.
+ *
+ * Script properties (Project Settings > Script properties), set automatically:
+ *   KIOSK_KEY        shared secret the kiosk sends with every call
+ *   ADMIN_PIN_HASH   hash of the admin PIN chosen on the kiosk. A plain ADMIN_PIN
+ *                    (6 to 8 digits) set by hand works too.
+ *   PHOTO_FOLDER_ID  parent Drive folder for visitor photos (created if missing)
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
+
+var BACKEND_VERSION = 4;
 
 var TABS = {
   visitors: 'Visitors',
   visits: 'Visits',
   badges: 'Badges',
-  faces: 'Face data'
+  faces: 'Face data',
+  settings: 'Settings',
+  expected: 'Expected'
 };
 
 var HEADERS = {
   Visitors: [
-    'First Name', 'Last Name', 'Company',
-    'Who are you visiting at Shock Tech?', 'Purpose of your visit',
-    'Citizenship status', 'Country of citizenship', 'Visitor acknowledgment',
-    'Quick entry', 'Registered', 'Last visit', 'Visit count', 'Visitor ID', 'Photo folder'
+    'First Name', 'Last Name', 'Company', 'Who are you visiting?', 'Purpose of your visit',
+    'Visitor acknowledgment', 'Quick entry', 'Screening', 'Registered', 'Last visit', 'Visit count',
+    'Visitor ID', 'Photo folder'
   ],
   Visits: [
     'Signed in', 'First Name', 'Last Name', 'Company', 'Visiting', 'Purpose',
     'Kind', 'Badge', 'How they signed in', 'Signed out', 'Signed out by',
-    'Visitor ID', 'Visit ID'
+    'Screening', 'Reviewed', 'Photo', 'Host notified', 'Visitor ID', 'Visit ID'
   ],
   Badges: ['Badge', 'NFC tag', 'Status', 'Holder', 'Visitor ID', 'Visit ID', 'Since', 'Note'],
-  'Face data': ['Visitor ID', 'Descriptor', 'Captured', 'Source', 'Photo file ID']
+  'Face data': ['Visitor ID', 'Descriptor', 'Captured', 'Source', 'Photo file ID'],
+  Settings: ['Setting', 'Value'],
+  // Visitors staff are expecting. Staff can add rows here by hand: a date, a name, and the rest if they like.
+  Expected: ['Date', 'First Name', 'Last Name', 'Company', 'Host', 'Purpose', 'Note', 'Arrived', 'Added by', 'Expected ID']
 };
 
-var CITIZENSHIP_OPTIONS = [
-  'U.S. citizen',
-  'Lawful permanent resident (green card holder)',
-  'Protected individual (asylee or refugee)',
-  'Not a U.S. citizen or permanent resident'
-];
+// Older sheets named this column after the company ("Who are you visiting at …?").
+var HEADER_PATTERNS = { 'who are you visiting?': /^who are you visiting\b/ };
+
+// Screening answers get their own Visitors column, placed just before this one,
+// so the tab reads: names, then every answer, then the bookkeeping columns.
+var ANSWERS_BEFORE = 'Visitor acknowledgment';
 
 var ADMIN_TOKEN_TTL = 15 * 60;   // seconds
+var PASS_TTL = 2 * 60 * 60;      // an admin's "let them in" lasts 2 hours
+var ATTENTION_DAYS = 14;
 var MAX_TEXT = 120;
 var MAX_PHOTO_CHARS = 4 * 1024 * 1024;
+var MAX_SETTINGS_CHARS = 45000;  // a sheet cell holds 50,000 characters
 
 // ---------------------------------------------------------------- setup
 
-/** Run once by hand: creates the tabs and headers, and triggers the Drive permission prompt. */
+/** Optional: run once by hand to create the tabs. Connecting a kiosk does the same. */
 function setup() {
+  setupTabs_();
+  var props = PropertiesService.getScriptProperties();
+  Logger.log('Setup done. Paste this web app\'s /exec URL into the kiosk to connect it.' +
+    (props.getProperty('KIOSK_KEY') ? ' (A kiosk is already connected.)' : ''));
+}
+
+function setupTabs_() {
+  forgetTabs_();
   var ss = book_();
   Object.keys(HEADERS).forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
@@ -60,26 +84,20 @@ function setup() {
       sh.setFrozenRows(1);
     } else {
       // Add any missing headers on the right; never reorder or clear data.
-      var have = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(lower_);
       HEADERS[name].forEach(function (h) {
-        if (have.indexOf(h.toLowerCase()) < 0) {
-          sh.getRange(1, sh.getLastColumn() + 1).setValue(h).setFontWeight('bold');
-        }
+        if (!findCol_(headerMap_(sh), h)) sh.getRange(1, sh.getLastColumn() + 1).setValue(h).setFontWeight('bold');
       });
     }
   });
   ss.getSheetByName(TABS.faces).hideSheet();
+  ss.getSheetByName(TABS.settings).hideSheet();
   photoRoot_();
-  var props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('KIOSK_KEY')) props.setProperty('KIOSK_KEY', Utilities.getUuid());
-  Logger.log('Setup done. KIOSK_KEY = ' + props.getProperty('KIOSK_KEY'));
-  if (!props.getProperty('ADMIN_PIN')) Logger.log('Set an ADMIN_PIN script property (6 to 8 digits).');
 }
 
 // ---------------------------------------------------------------- HTTP
 
 function doGet() {
-  return json_({ ok: true, service: 'shocktech-visitor-kiosk' });
+  return json_({ ok: true, service: 'visitor-sign-in-kiosk', version: BACKEND_VERSION });
 }
 
 function doPost(e) {
@@ -97,41 +115,72 @@ function doPost(e) {
   }
 }
 
-/** Dispatches one API call. Separate from doPost so tests can call it directly. */
 // Calls that change the sheet. The kiosk retries these after a network hiccup
 // with the same request id, so the first result is remembered and replayed.
-var WRITE_ACTIONS = ['register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'tapAtWelcome',
-  'undoSignOut', 'adminSignOut', 'adminAddBadge', 'adminLinkTag', 'adminRetireBadge', 'adminRestoreBadge'];
+var WRITE_ACTIONS = ['purgeOld', 'endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
+  'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
+  'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow'];
 var REPLAY_TTL = 30 * 60;  // seconds
 
+/** Dispatches one API call. Separate from doPost so tests can call it directly. */
 function handle_(req) {
+  settingsMemo_ = undefined;
+  forgetTabs_();
+  if (req && req.action === 'claim') return withLock_(function () { return claim_(req.key); });
   var props = PropertiesService.getScriptProperties();
   var key = props.getProperty('KIOSK_KEY');
-  if (!key || req.key !== key) return { ok: false, error: 'kiosk_key' };
+  if (!key) return { ok: false, error: 'not_connected' };
+  if (req.key !== key) return { ok: false, error: 'kiosk_key' };
 
   var rid = typeof req.rid === 'string' && /^[A-Za-z0-9-]{6,64}$/.test(req.rid) ? 'rid:' + req.rid : '';
   if (!rid || WRITE_ACTIONS.indexOf(req.action) < 0) return dispatch_(req);
   var cache = CacheService.getScriptCache();
   var seen = cache.get(rid);
+  // A retry that arrives while the first attempt is still running waits for its answer
+  // (well inside the kiosk's 20-second timeout) instead of writing a second time.
+  for (var waited = 0; seen === IN_PROGRESS && waited < 15000; waited += 500) {
+    Utilities.sleep(500);
+    seen = cache.get(rid);
+  }
+  if (seen === IN_PROGRESS) return { ok: false, error: 'busy' };
   if (seen) return JSON.parse(seen);
-  var out = dispatch_(req);
+  cache.put(rid, IN_PROGRESS, REPLAY_TTL);
+  var out;
+  try {
+    out = dispatch_(req);
+  } catch (err) {
+    cache.remove(rid);
+    throw err;
+  }
   if (out && out.error !== 'busy') cache.put(rid, JSON.stringify(out), REPLAY_TTL);
+  else cache.remove(rid);
   return out;
 }
+
+var IN_PROGRESS = '"in progress"';
 
 function dispatch_(req) {
   var a = req.args || {};
   switch (req.action) {
-    case 'ping': return { ok: true, citizenship: CITIZENSHIP_OPTIONS };
+    case 'ping': return status_();
+    case 'getSettings': return getSettings_();
     case 'faceIndex': return faceIndex_();
     case 'register': return withLock_(function () { return register_(a); });
+    case 'recordDecline': return withLock_(function () { return recordDecline_(a); });
     case 'findVisitor': return findVisitor_(a);
+    case 'findOpenVisits': return findOpenVisits_(a);
     case 'addFaceSample': return withLock_(function () { return addFaceSample_(a); });
     case 'setQuickEntry': return withLock_(function () { return setQuickEntry_(a); });
     case 'assignBadge': return withLock_(function () { return assignBadge_(a); });
+    case 'checkIn': return withLock_(function () { return checkIn_(a); });
     case 'tapAtWelcome': return withLock_(function () { return tapAtWelcome_(a); });
+    case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
+    case 'endOfDay': return withLock_(function () { return endOfDay_(a); });
+    case 'purgeOld': return withLock_(function () { return purgeOld_(); });
+    case 'findExpected': return withLock_(function () { return findExpected_(a); });
     case 'adminLogin': return adminLogin_(a);
+    case 'adminSetPin': return withLock_(function () { return adminSetPin_(a); });
   }
 
   // Everything below needs an admin token.
@@ -139,51 +188,209 @@ function dispatch_(req) {
   switch (req.action) {
     case 'adminInside': return adminInside_();
     case 'adminBadges': return adminBadges_();
+    case 'adminAttention': return adminAttention_();
+    case 'adminHistory': return adminHistory_(a);
+    case 'adminExpected': return withLock_(function () { return adminExpected_(a); });
+    case 'adminAddExpected': return withLock_(function () { return adminAddExpected_(a); });
+    case 'adminRemoveExpected': return withLock_(function () { return adminRemoveExpected_(a); });
+    case 'adminPhoto': return adminPhoto_(a);
     case 'adminSignOut': return withLock_(function () { return adminSignOut_(a); });
     case 'adminAddBadge': return withLock_(function () { return adminAddBadge_(a); });
     case 'adminLinkTag': return withLock_(function () { return adminLinkTag_(a); });
     case 'adminRetireBadge': return withLock_(function () { return adminRetireBadge_(a, true); });
     case 'adminRestoreBadge': return withLock_(function () { return adminRetireBadge_(a, false); });
+    case 'adminSaveSettings': return withLock_(function () { return adminSaveSettings_(a); });
+    case 'adminReview': return withLock_(function () { return adminReview_(a); });
+    case 'adminAllow': return withLock_(function () { return adminAllow_(a); });
   }
   return { ok: false, error: 'unknown_action' };
 }
 
+// ---------------------------------------------------------------- connecting and settings
+
+/** The first kiosk to connect claims the sheet with its key; the same key may reconnect. */
+function claim_(key) {
+  if (typeof key !== 'string' || !/^[A-Za-z0-9-]{24,64}$/.test(key)) return { ok: false, error: 'bad_key' };
+  var props = PropertiesService.getScriptProperties();
+  var have = props.getProperty('KIOSK_KEY');
+  if (have && have !== key) return { ok: false, error: 'claimed' };
+  if (!have) props.setProperty('KIOSK_KEY', key);
+  setupTabs_();
+  var out = status_();
+  out.claimed = !have;
+  return out;
+}
+
+function status_() {
+  var settings = readSettings_();
+  var ss = book_();
+  return {
+    ok: true, version: BACKEND_VERSION,
+    setupComplete: !!(settings && settings.setupComplete),
+    hasPin: hasPin_(),
+    sheetName: ss.getName ? ss.getName() : '',
+    sheetUrl: ss.getUrl ? ss.getUrl() : '',
+    attention: attentionCount_()
+  };
+}
+
+function getSettings_() {
+  var settings = readSettings_();
+  var logo = '';
+  if (settings && settings.org && settings.org.logoFileId) logo = readLogo_(settings.org.logoFileId);
+  return { ok: true, settings: settings, logo: logo };
+}
+
+/** Saves the kiosk's settings. args.logo: a data URL to replace the logo, '' to remove it, or absent to keep it. */
+function adminSaveSettings_(a) {
+  var s = a.settings;
+  if (!s || typeof s !== 'object') return { ok: false, error: 'missing' };
+  var old = readSettings_() || {};
+  var oldLogo = old.org && old.org.logoFileId || '';
+  s.org = s.org || {};
+  delete s.org.logo;
+  if (s.admin) delete s.admin.pinHash;
+  var newLogo = typeof a.logo === 'string' && a.logo;
+  if (newLogo && !isPhoto_(a.logo)) return { ok: false, error: 'logo' };
+  // Check the size before touching the logo, so a refused save changes nothing.
+  s.org.logoFileId = newLogo ? 'x'.repeat(44) : a.logo === '' ? '' : oldLogo;
+  if (JSON.stringify(s).length > MAX_SETTINGS_CHARS) return { ok: false, error: 'too_big' };
+  if (newLogo) {
+    s.org.logoFileId = savePhoto_(photoRoot_(), a.logo, 'kiosk logo').getId();
+    if (oldLogo) trashFile_(oldLogo);
+  } else if (a.logo === '' && oldLogo) {
+    trashFile_(oldLogo);
+  }
+  var text = JSON.stringify(s);
+  settingsMemo_ = s;
+  var row = findRow_(TABS.settings, 'Setting', 'kiosk');
+  if (row) setCell_(TABS.settings, row.row, 'Value', text);
+  else appendRow_(TABS.settings, { 'Setting': 'kiosk', 'Value': text });
+  return { ok: true };
+}
+
+var settingsMemo_;
+
+/** The kiosk settings, read once per request. */
+function readSettings_() {
+  if (settingsMemo_ !== undefined) return settingsMemo_;
+  var sh = book_().getSheetByName(TABS.settings);
+  var out = null;
+  if (sh && sh.getLastRow() >= 2) {
+    var row = findRow_(TABS.settings, 'Setting', 'kiosk');
+    if (row) { try { out = JSON.parse(row.values['Value']); } catch (err) { out = null; } }
+  }
+  settingsMemo_ = out;
+  return out;
+}
+
+function readLogo_(fileId) {
+  try {
+    var blob = DriveApp.getFileById(fileId).getBlob();
+    return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+  } catch (err) {
+    return '';
+  }
+}
+
+function trashFile_(fileId) {
+  try { DriveApp.getFileById(fileId).setTrashed(true); } catch (err) { /* already gone */ }
+}
+
 // ---------------------------------------------------------------- visitors
 
+/**
+ * A new visitor finished the sign-in questions. args:
+ *   first, last, company, visiting, purpose, agreed, quickEntry, photo, descriptor
+ *   answers   [{ label, value }]  one column each on the Visitors tab
+ *   flags     [{ label, answer, flagLabel }]  answers that need staff attention
+ *   override  { reason }  a staff member let them in after a decline
+ */
 function register_(a) {
+  var s = readSettings_();
+  var form = (s && s.form) || {};
   var v = {
     first: clean_(a.first), last: clean_(a.last), company: clean_(a.company) || 'N/A',
     visiting: clean_(a.visiting), purpose: clean_(a.purpose),
-    citizenship: clean_(a.citizenship), country: clean_(a.country),
     agreed: a.agreed === true, quickEntry: a.quickEntry === true
   };
-  var missing = ['first', 'last', 'visiting', 'purpose', 'citizenship'].filter(function (k) { return !v[k]; });
-  if (CITIZENSHIP_OPTIONS.indexOf(v.citizenship) < 0) missing.push('citizenship');
-  if (v.citizenship === CITIZENSHIP_OPTIONS[0]) v.country = 'United States';
-  if (!v.country) missing.push('country');
-  if (!v.agreed) missing.push('agreed');
-  if (!isPhoto_(a.photo)) missing.push('photo');
+  var missing = ['first', 'last'].filter(function (k) { return !v[k]; });
+  if (form.askHost !== false && !v.visiting) missing.push('visiting');
+  if (form.askPurpose !== false && !v.purpose) missing.push('purpose');
+  var rulesShown = !s || !Array.isArray(form.rules) || form.rules.length > 0;
+  if (rulesShown && !v.agreed) missing.push('agreed');
+  var photoRequired = !s || s.photos === 'all' || s.photos === undefined;
+  if (a.photo ? !isPhoto_(a.photo) : photoRequired) missing.push('photo');
   if (missing.length) return { ok: false, error: 'missing', fields: missing };
 
+  var answers = cleanAnswers_(a.answers);
+  var flags = cleanFlags_(a.flags);
+  // The language the visitor read the questions and rules in, when it wasn't English.
+  var language = /^[A-Za-zÀ-ÿ ]{2,20}$/.test(String(a.language || '')) && a.language !== 'English' ? a.language : '';
+  var pass = takePass_(v.first, v.last);
+  var screening = screeningText_(flags, a.override || pass);
+
   var id = 'P' + randomCode_(8);
-  var folder = photoRoot_().createFolder(v.last + ', ' + v.first + ' (' + v.company + ') ' + id);
-  var file = savePhoto_(folder, a.photo, 'signup');
-  var now = new Date();
-
-  appendRow_(TABS.visitors, {
-    'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
-    'Who are you visiting at Shock Tech?': v.visiting, 'Purpose of your visit': v.purpose,
-    'Citizenship status': v.citizenship, 'Country of citizenship': v.country,
-    'Visitor acknowledgment': 'Agreed to the Shock Tech visitor rules on the kiosk (' + stamp_(now) + ')',
-    'Quick entry': v.quickEntry ? 'Yes' : 'No',
-    'Registered': now, 'Last visit': now, 'Visit count': 0,
-    'Visitor ID': id, 'Photo folder': folder.getUrl()
-  });
-
-  if (v.quickEntry && isDescriptor_(a.descriptor)) {
-    addFaceRow_(id, a.descriptor, 'signup', file.getId());
+  var folderUrl = '', fileId = '';
+  if (a.photo) {
+    var folder = photoRoot_().createFolder(v.last + ', ' + v.first + ' (' + v.company + ') ' + id);
+    fileId = savePhoto_(folder, a.photo, 'signup').getId();
+    folderUrl = folder.getUrl();
   }
-  return { ok: true, visitor: publicVisitor_(id, v) };
+  var now = new Date();
+  var row = {
+    'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
+    'Who are you visiting?': v.visiting, 'Purpose of your visit': v.purpose,
+    'Visitor acknowledgment': v.agreed ? 'Agreed to the visitor rules on the kiosk' + (language ? ', in ' + language : '') + ' (' + stamp_(now) + ')' : '',
+    'Quick entry': v.quickEntry ? 'Yes' : 'No', 'Screening': screening,
+    'Registered': now, 'Last visit': now, 'Visit count': 0,
+    'Visitor ID': id, 'Photo folder': folderUrl
+  };
+  answers.forEach(function (ans) {
+    ensureColumn_(TABS.visitors, ans.label, ANSWERS_BEFORE);
+    row[ans.label] = ans.value;
+  });
+  appendRow_(TABS.visitors, row);
+
+  if (v.quickEntry && fileId && isDescriptor_(a.descriptor)) {
+    addFaceRow_(id, a.descriptor, 'signup', fileId);
+  }
+  if (flags.length && !a.override && !pass) alert_('flagged', v, flags, a.photo);
+  attentionChanged_();
+  return { ok: true, visitor: publicVisitor_(id, v, screening) };
+}
+
+/**
+ * Screening declined someone. Nothing is signed in: the attempt is kept on the
+ * Visits tab (with their photo) for staff, and the alert emails go out. If an
+ * admin already let this person in (adminAllow), the pass is used instead.
+ */
+function recordDecline_(a) {
+  var v = {
+    first: clean_(a.first), last: clean_(a.last), company: clean_(a.company) || 'N/A',
+    visiting: clean_(a.visiting), purpose: clean_(a.purpose)
+  };
+  if (!v.first || !v.last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
+  var pass = takePass_(v.first, v.last);
+  if (pass) return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
+  var expected = matchExpected_(v.first, v.last, a.expectedId);
+  if (expected) setCell_(TABS.expected, expected.row, 'Arrived', 'Declined at the kiosk ' + stamp_(new Date()));
+
+  var reasons = cleanFlags_(a.reasons);
+  var photoUrl = '';
+  if (isPhoto_(a.photo)) {
+    photoUrl = savePhoto_(declinedFolder_(), a.photo, v.last + ', ' + v.first + ' (declined)').getUrl();
+  }
+  var now = new Date(), id = 'D' + randomCode_(8);
+  appendRow_(TABS.visits, {
+    'Signed in': now, 'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
+    'Visiting': v.visiting, 'Purpose': v.purpose, 'Kind': 'Declined', 'Badge': '',
+    'How they signed in': clean_(a.method) || 'new visitor', 'Signed out': now, 'Signed out by': 'Declined at the kiosk',
+    'Screening': 'Declined: ' + reasonList_(reasons), 'Photo': photoUrl,
+    'Visitor ID': clean_(a.visitorId), 'Visit ID': id
+  });
+  alert_('declined', v, reasons, a.photo);
+  return { ok: true, declineId: id };
 }
 
 /**
@@ -209,7 +416,7 @@ function findVisitor_(a) {
   };
 }
 
-/** Every opted-in visitor's face descriptors, for matching on the iPad. */
+/** Every opted-in visitor's face descriptors, for matching on the tablet. */
 function faceIndex_() {
   var people = {};
   readTab_(TABS.visitors).forEach(function (r) {
@@ -272,29 +479,313 @@ function assignBadge_(a) {
     if (b['Visitor ID'] === a.visitorId) return { ok: true, badge: b['Badge'], already: true };
     return { ok: false, error: 'badge_in_use', badge: b['Badge'] };
   }
+  var started = startVisit_(person, a, b['Badge'], 'Switched to badge ' + b['Badge']);
+  var visitId = started.visitId;
+  var p = person.values, now = new Date();
+  setCells_(TABS.badges, badge.row, {
+    'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
+    'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now, 'Note': ''
+  });
+  return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified, expected: started.expected };
+}
 
-  // One open visit per person: a second badge replaces the first.
+/** Signs a visitor in without a badge (kiosks set up without visitor badges). */
+function checkIn_(a) {
+  var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
+  if (!person) return { ok: false, error: 'not_found' };
+  var started = startVisit_(person, a, '', 'Signed in again');
+  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified, expected: started.expected };
+}
+
+/**
+ * Creates the Visits row. One open visit per person: a new one replaces the old.
+ * Returns { visitId, hostNotified } (the host's name when their arrival email went out).
+ */
+function startVisit_(person, a, badgeNo, replacedBy) {
   var open = openVisitFor_(a.visitorId);
-  if (open) signOutVisit_(open, 'Switched to badge ' + b['Badge']);
-
+  if (open) signOutVisit_(open, replacedBy);
   var p = person.values, now = new Date(), visitId = 'S' + randomCode_(8);
+  var flags = cleanFlags_(a.flags);
+  var screening = flags.length || a.override ? screeningText_(flags, a.override) : carriedScreening_(p);
+  var expected = matchExpected_(p['First Name'], p['Last Name'], a.expectedId);
+  var visiting = clean_(a.visiting) || (expected && expected.host) || p['Who are you visiting?'];
+  var purpose = clean_(a.purpose) || (expected && expected.purpose) || p['Purpose of your visit'];
+  if (expected) setCell_(TABS.expected, expected.row, 'Arrived', 'Signed in ' + stamp_(now));
+  var host = notifyHost_(visiting, { first: p['First Name'], last: p['Last Name'], company: p['Company'], purpose: purpose }, badgeNo, now);
+  if (host) ensureColumn_(TABS.visits, 'Host notified', 'Visitor ID');
   appendRow_(TABS.visits, {
     'Signed in': now, 'First Name': p['First Name'], 'Last Name': p['Last Name'],
     'Company': p['Company'],
-    'Visiting': clean_(a.visiting) || p['Who are you visiting at Shock Tech?'],
-    'Purpose': clean_(a.purpose) || p['Purpose of your visit'],
-    'Kind': isUsPerson_(p['Citizenship status']) ? 'Visitor' : 'Foreign national',
-    'Badge': b['Badge'], 'How they signed in': clean_(a.method) || 'kiosk',
+    'Visiting': visiting,
+    'Purpose': purpose,
+    'Kind': kindOf_(screening), 'Badge': badgeNo,
+    'How they signed in': (clean_(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
+    'Screening': screening,
+    'Host notified': host ? host + ' (' + stamp_(now) + ')' : '',
     'Visitor ID': a.visitorId, 'Visit ID': visitId
-  });
-  setCells_(TABS.badges, badge.row, {
-    'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
-    'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now
   });
   setCells_(TABS.visitors, person.row, {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
   });
-  return { ok: true, badge: b['Badge'], visitId: visitId };
+  if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
+  if (flags.length || /^flagged/i.test(screening)) attentionChanged_();
+  return { visitId: visitId, hostNotified: host, expected: !!expected };
+}
+
+/**
+ * Signs out everyone still signed in from before args.before (an ISO time; at
+ * most now). Kiosks call it at the end-of-day time chosen in setup. Running it
+ * twice, or from two tablets, does no harm.
+ */
+function endOfDay_(a) {
+  var now = new Date(), cutoff = new Date(a.before);
+  if (isNaN(cutoff.getTime()) || cutoff > now) cutoff = now;
+  var rows = readTab_(TABS.visits), done = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r['Visit ID'] || r['Signed out']) continue;
+    var t = new Date(r['Signed in']);
+    if (isNaN(t.getTime()) || t >= cutoff) continue;
+    signOutVisit_({ row: i + 2, values: r }, 'End of day');
+    if (r['Badge']) {
+      // The visitor left without tapping out, so the badge probably left with them.
+      var badge = findRow_(TABS.badges, 'Badge', r['Badge']);
+      if (badge && lower_(badge.values['Status']) === 'available') {
+        setCells_(TABS.badges, badge.row, { 'Status': 'not returned', 'Note': 'Not returned by ' + r['First Name'] + ' ' + r['Last Name'] + ' (' + dateOnly_(t) + ')' });
+      }
+    }
+    done++;
+  }
+  // A kiosk's first run after end of day is turned on skips the summary (it would cover a day before setup).
+  var summary = a.summary === false ? false : dailySummary_(cutoff);
+  return { ok: true, signedOut: done, summary: summary };
+}
+
+/**
+ * Emails the alert addresses a summary of the day the cutoff closes, once per
+ * day, when the kiosk settings turn it on.
+ */
+function dailySummary_(cutoff) {
+  var s = readSettings_() || {};
+  if (!s.dailySummary) return false;
+  var to = alertAddresses_(s);
+  if (!to.length) return false;
+  var day = dayKey_(cutoff);
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('LAST_SUMMARY') === day) return false;
+  props.setProperty('LAST_SUMMARY', day);
+
+  var visits = readTab_(TABS.visits).filter(function (r) { return r['Visit ID'] && dayKey_(r['Signed in']) === day; });
+  var declined = visits.filter(function (r) { return /^declined/i.test(String(r['Screening'] || '')); });
+  var signedIn = visits.filter(function (r) { return !/^declined/i.test(String(r['Screening'] || '')); });
+  var flagged = signedIn.filter(function (r) { return /^flagged/i.test(String(r['Screening'] || '')); });
+  var overridden = signedIn.filter(function (r) { return /^overridden/i.test(String(r['Screening'] || '')); });
+  var lateOut = signedIn.filter(function (r) { return r['Signed out by'] === 'End of day'; });
+  var people = {};
+  signedIn.forEach(function (r) { people[r['Visitor ID'] || (r['First Name'] + ' ' + r['Last Name'])] = true; });
+  var notReturned = readTab_(TABS.badges).filter(function (r) { return lower_(r['Status']) === 'not returned'; });
+  var noShows = expectedRows_().filter(function (e) { return e.day === day && !e.arrived; });
+  var name = function (r) { return r['First Name'] + ' ' + r['Last Name'] + (r['Company'] && r['Company'] !== 'N/A' ? ' (' + r['Company'] + ')' : ''); };
+  var org = (s.org && clean_(s.org.name)) || 'The';
+  var dayLabel = Utilities.formatDate(cutoff, tz_(), 'EEE, MMM d');
+
+  var lines = [org + ' visitors on ' + dayLabel + ':', ''];
+  lines.push('  ' + signedIn.length + ' sign-in' + (signedIn.length === 1 ? '' : 's') + ' (' + Object.keys(people).length + ' ' + (Object.keys(people).length === 1 ? 'person' : 'people') + ')');
+  lines.push('  ' + declined.length + ' declined');
+  lines.push('  ' + flagged.length + ' flagged for a look');
+  if (overridden.length) lines.push('  ' + overridden.length + ' let in by staff override');
+  var section = function (title, rows, fmt) {
+    if (!rows.length) return;
+    lines.push('', title);
+    rows.slice(0, 40).forEach(function (r) { lines.push('  - ' + fmt(r)); });
+    if (rows.length > 40) lines.push('  … and ' + (rows.length - 40) + ' more');
+  };
+  section('Declined:', declined, function (r) { return name(r) + ': ' + String(r['Screening']).replace(/^Declined: /, ''); });
+  section('Flagged:', flagged, function (r) { return name(r) + ': ' + String(r['Screening']).replace(/^Flagged: /, ''); });
+  section('Still signed in at the end of the day (signed out automatically):', lateOut, function (r) { return name(r) + (r['Badge'] ? ', badge ' + r['Badge'] : ''); });
+  section('Badges not returned:', notReturned, function (r) { return r['Badge'] + (r['Note'] ? ': ' + String(r['Note']).replace(/^Not returned by /, '') : ''); });
+  section('Expected but didn\'t arrive:', noShows, function (e) { return e.first + ' ' + e.last + (e.host ? ', for ' + e.host : ''); });
+  lines.push('', 'Visitor log: ' + book_().getUrl());
+  try {
+    MailApp.sendEmail({ to: to.join(','), name: org + ' visitor kiosk', subject: 'Visitor summary for ' + dayLabel + ': ' + signedIn.length + ' sign-in' + (signedIn.length === 1 ? '' : 's') + (declined.length ? ', ' + declined.length + ' declined' : ''), body: lines.join('\n') });
+    return true;
+  } catch (err) {
+    console.warn('Summary email not sent: ' + err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------- keeping records only as long as needed
+
+/**
+ * Deletes visits, visitors (with their photo folders and face data) and
+ * expected-visitor rows older than the retention period chosen in setup.
+ * Kiosks call it once a day; the period always comes from the saved
+ * settings, never from the request. Runs at most once a day.
+ */
+function purgeOld_() {
+  var s = readSettings_() || {};
+  var days = Number(s.retentionDays) || 0;
+  if (days < 30) return { ok: true, removed: null };
+  var today = dayKey_(new Date());
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('LAST_PURGE') === today) return { ok: true, removed: null };
+  var cutoff = new Date(new Date().getTime() - days * 86400000);
+  var old = function (v) { var t = new Date(v); return !isNaN(t.getTime()) && t < cutoff; };
+
+  var visits = keepRows_(TABS.visits, function (r) {
+    if (!r['Visit ID'] || !old(r['Signed in']) || !r['Signed out']) return true;
+    trashDrive_(r['Photo']);
+    return false;
+  });
+  var gone = {};
+  var visitors = keepRows_(TABS.visitors, function (r) {
+    var last = r['Last visit'] || r['Registered'];
+    if (!r['Visitor ID'] || !old(last)) return true;
+    gone[r['Visitor ID']] = true;
+    trashDrive_(r['Photo folder']);
+    return false;
+  });
+  keepRows_(TABS.faces, function (r) { return !gone[r['Visitor ID']]; });
+  var expected = book_().getSheetByName(TABS.expected) ? keepRows_(TABS.expected, function (r) {
+    var day = dayKey_(r['Date']);
+    return !day || day >= dayKey_(cutoff);
+  }) : 0;
+  props.setProperty('LAST_PURGE', today);
+  attentionChanged_();
+  return { ok: true, removed: { visits: visits, visitors: visitors, expected: expected } };
+}
+
+/** Keeps the rows keep(row) says yes to, in order; returns how many were removed. */
+function keepRows_(name, keep) {
+  var sh = book_().getSheetByName(name);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var width = sh.getLastColumn(), count = sh.getLastRow() - 1;
+  var values = sh.getRange(2, 1, count, width).getValues();
+  var rows = readTab_(name);
+  var kept = values.filter(function (v, i) { return keep(rows[i]); });
+  var removed = count - kept.length;
+  if (!removed) return 0;
+  forgetTabs_(name);
+  if (kept.length) {
+    sh.getRange(2, 1, kept.length, width).setValues(kept);
+    sh.deleteRows(2 + kept.length, removed);
+  } else {
+    // Sheets won't delete every row below the frozen header, so one empty row stays.
+    sh.getRange(2, 1, 1, width).clearContent();
+    if (removed > 1) sh.deleteRows(3, removed - 1);
+  }
+  return removed;
+}
+
+function trashDrive_(url) {
+  var id = driveId_(url);
+  if (!id) return;
+  try {
+    if (/\/folders\//.test(String(url))) DriveApp.getFolderById(id).setTrashed(true);
+    else DriveApp.getFileById(id).setTrashed(true);
+  } catch (err) { /* already gone */ }
+}
+
+// ---------------------------------------------------------------- expected visitors
+
+/** "2026-11-04" in the script's time zone, from a Date or a date typed into the sheet. */
+function dayKey_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return v.trim();
+  var d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz_(), 'yyyy-MM-dd');
+}
+
+function expectedRows_() {
+  var sh = book_().getSheetByName(TABS.expected);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return readTab_(TABS.expected).map(function (r, i) {
+    return {
+      row: i + 2, id: String(r['Expected ID'] || ''), day: dayKey_(r['Date']),
+      first: clean_(r['First Name']), last: clean_(r['Last Name']), company: clean_(r['Company']),
+      host: clean_(r['Host']), purpose: clean_(r['Purpose']), note: clean_(r['Note']),
+      arrived: String(r['Arrived'] || ''), addedBy: String(r['Added by'] || '')
+    };
+  }).filter(function (e) { return e.day && (e.first || e.last); });
+}
+
+/** Today's expected visitor with this name (or this id) who hasn't arrived yet. */
+function matchExpected_(first, last, id) {
+  var today = dayKey_(new Date());
+  var f = nameKey_(first), l = nameKey_(last);
+  var list = expectedRows_().filter(function (e) { return e.day === today && !e.arrived; });
+  if (id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  }
+  for (var j = 0; j < list.length; j++) {
+    if (near_(nameKey_(list[j].first), f) && near_(nameKey_(list[j].last), l)) return list[j];
+  }
+  return null;
+}
+
+/** The kiosk asks after the name step, to greet expected visitors and fill in their visit. */
+function findExpected_(a) {
+  if (!nameKey_(a.first) || !nameKey_(a.last)) return { ok: false, error: 'fullname' };
+  var e = matchExpected_(a.first, a.last, '');
+  if (!e) return { ok: true, expected: null };
+  if (!e.id) {
+    // Added by hand in the sheet: give it an id so the sign-in can find it again.
+    e.id = 'E' + randomCode_(8);
+    setCell_(TABS.expected, e.row, 'Expected ID', e.id);
+  }
+  return { ok: true, expected: { id: e.id, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose } };
+}
+
+function adminExpected_(a) {
+  var days = Math.max(1, Math.min(90, Number(a.days) || 14));
+  var from = dayKey_(new Date(new Date().getTime() - 86400000));
+  var to = dayKey_(new Date(new Date().getTime() + days * 86400000));
+  var list = expectedRows_().filter(function (e) { return e.day >= from && e.day <= to; });
+  list.forEach(function (e) {
+    if (e.id) return;
+    e.id = 'E' + randomCode_(8);
+    setCell_(TABS.expected, e.row, 'Expected ID', e.id);
+  });
+  list.sort(function (x, y) { return x.day < y.day ? -1 : x.day > y.day ? 1 : x.row - y.row; });
+  return {
+    ok: true, today: dayKey_(new Date()),
+    expected: list.map(function (e) {
+      return { id: e.id, day: e.day, first: e.first, last: e.last, company: e.company, host: e.host, purpose: e.purpose, note: e.note, arrived: e.arrived, addedBy: e.addedBy };
+    })
+  };
+}
+
+function adminAddExpected_(a) {
+  var e = { first: clean_(a.first), last: clean_(a.last), company: clean_(a.company), host: clean_(a.host), purpose: clean_(a.purpose), note: clean_(a.note) };
+  var day = dayKey_(a.day);
+  if (!e.first || !e.last) return { ok: false, error: 'missing', fields: ['first', 'last'] };
+  if (!day) return { ok: false, error: 'missing', fields: ['day'] };
+  ensureTab_(TABS.expected);
+  var id = 'E' + randomCode_(8);
+  appendRow_(TABS.expected, {
+    'Date': day, 'First Name': e.first, 'Last Name': e.last, 'Company': e.company, 'Host': e.host,
+    'Purpose': e.purpose, 'Note': e.note, 'Added by': adminName_() + ' (' + stamp_(new Date()) + ')', 'Expected ID': id
+  });
+  return { ok: true, id: id };
+}
+
+function adminRemoveExpected_(a) {
+  var hit = a.id ? expectedRows_().filter(function (e) { return e.id === a.id; })[0] : null;
+  if (!hit) return { ok: false, error: 'not_found' };
+  sheet_(TABS.expected).deleteRow(hit.row);
+  forgetTabs_(TABS.expected);
+  return { ok: true };
+}
+
+/** Creates a tab added in a later version, for sheets connected before it existed. */
+function ensureTab_(name) {
+  var ss = book_();
+  if (ss.getSheetByName(name)) return;
+  var sh = ss.insertSheet(name);
+  forgetTabs_(name);
+  sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold');
+  sh.setFrozenRows(1);
 }
 
 /** A badge tapped while the welcome screen shows: sign the holder out. */
@@ -302,15 +793,43 @@ function tapAtWelcome_(a) {
   var badge = badgeByTag_(a.tag);
   if (!badge) return { ok: true, result: 'unknown' };
   var b = badge.values;
+  if (lower_(b['Status']) === 'not returned') {
+    setCells_(TABS.badges, badge.row, { 'Status': 'available', 'Note': '' });
+    return { ok: true, result: 'returned', badge: b['Badge'] };
+  }
   if (lower_(b['Status']) !== 'in use') return { ok: true, result: 'not_out', badge: b['Badge'] };
-  var visit = findRow_(TABS.visits, 'Visit ID', b['Visit ID']);
-  var name = b['Holder'];
+  // Read everything needed before signing out: freeing the badge clears its row.
+  var visitId = b['Visit ID'], name = b['Holder'], badgeNo = b['Badge'];
+  var visit = findRow_(TABS.visits, 'Visit ID', visitId);
   if (visit) signOutVisit_(visit, 'Badge tap at kiosk');
   else releaseBadge_(badge.row);
   return {
-    ok: true, result: 'signed_out', badge: b['Badge'], name: name,
-    first: visit ? visit.values['First Name'] : name, visitId: b['Visit ID']
+    ok: true, result: 'signed_out', badge: badgeNo, name: name,
+    first: visit ? visit.values['First Name'] : name, visitId: visitId
   };
+}
+
+/** Visitors who are signed in, by name (kiosks without badges sign out this way). */
+function findOpenVisits_(a) {
+  var first = nameKey_(a.first), last = nameKey_(a.last);
+  if (!first || !last) return { ok: false, error: 'fullname' };
+  var matches = readTab_(TABS.visits).filter(function (r) {
+    return r['Visit ID'] && !r['Signed out'] &&
+      near_(nameKey_(r['First Name']), first) && near_(nameKey_(r['Last Name']), last);
+  }).slice(0, 5);
+  return {
+    ok: true,
+    matches: matches.map(function (r) {
+      return { visitId: r['Visit ID'], first: r['First Name'], last: r['Last Name'], company: r['Company'], since: iso_(r['Signed in']), badge: String(r['Badge'] || '') };
+    })
+  };
+}
+
+function kioskSignOut_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit || visit.values['Signed out']) return { ok: false, error: 'not_found' };
+  signOutVisit_(visit, 'Signed out at kiosk');
+  return { ok: true, first: visit.values['First Name'], badge: String(visit.values['Badge'] || ''), visitId: a.visitId };
 }
 
 /** Puts a visitor back in after an accidental sign-out (kiosk Undo, within a minute). */
@@ -319,6 +838,10 @@ function undoSignOut_(a) {
   if (!visit) return { ok: false, error: 'not_found' };
   var out = visit.values['Signed out'];
   if (!out || (new Date() - new Date(out)) > 90 * 1000) return { ok: false, error: 'too_late' };
+  if (!visit.values['Badge']) {
+    setCells_(TABS.visits, visit.row, { 'Signed out': '', 'Signed out by': '' });
+    return { ok: true };
+  }
   var badge = findRow_(TABS.badges, 'Badge', visit.values['Badge']);
   if (!badge || lower_(badge.values['Status']) === 'in use') return { ok: false, error: 'badge_in_use' };
   setCells_(TABS.visits, visit.row, { 'Signed out': '', 'Signed out by': '' });
@@ -332,6 +855,7 @@ function undoSignOut_(a) {
 
 function signOutVisit_(visit, by) {
   setCells_(TABS.visits, visit.row, { 'Signed out': new Date(), 'Signed out by': by });
+  if (!visit.values['Badge']) return;
   var badge = findRow_(TABS.badges, 'Badge', visit.values['Badge']);
   if (badge && badge.values['Visit ID'] === visit.values['Visit ID']) releaseBadge_(badge.row);
 }
@@ -362,15 +886,29 @@ function adminLogin_(a) {
   var cache = CacheService.getScriptCache();
   var fails = Number(cache.get('pinfails') || 0);
   if (fails >= 10) return { ok: false, error: 'locked' };
-  var pin = PropertiesService.getScriptProperties().getProperty('ADMIN_PIN');
-  if (!pin || String(a.pin || '') !== pin) {
+  if (!pinMatches_(String(a.pin || ''))) {
     cache.put('pinfails', String(fails + 1), 600);
     Utilities.sleep(700);
-    return { ok: false, error: 'pin' };
+    return { ok: false, error: hasPin_() ? 'pin' : 'no_pin' };
   }
+  return { ok: true, token: newToken_(), ttl: ADMIN_TOKEN_TTL };
+}
+
+/** Sets the admin PIN. The first one can be set with the kiosk key alone; changing it needs an admin token. */
+function adminSetPin_(a) {
+  var pin = String(a.pin || '');
+  if (!/^\d{6,8}$/.test(pin)) return { ok: false, error: 'pin_format' };
+  if (hasPin_() && !checkAdmin_(a.token)) return { ok: false, error: 'admin' };
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('ADMIN_PIN_HASH', pinHash_(pin));
+  props.deleteProperty('ADMIN_PIN');
+  return { ok: true, token: newToken_(), ttl: ADMIN_TOKEN_TTL };
+}
+
+function newToken_() {
   var token = Utilities.getUuid();
-  cache.put('admin:' + token, '1', ADMIN_TOKEN_TTL);
-  return { ok: true, token: token, ttl: ADMIN_TOKEN_TTL };
+  CacheService.getScriptCache().put('admin:' + token, '1', ADMIN_TOKEN_TTL);
+  return token;
 }
 
 function checkAdmin_(token) {
@@ -381,6 +919,29 @@ function checkAdmin_(token) {
   return true;
 }
 
+function hasPin_() {
+  var props = PropertiesService.getScriptProperties();
+  return !!(props.getProperty('ADMIN_PIN_HASH') || props.getProperty('ADMIN_PIN'));
+}
+
+function pinMatches_(pin) {
+  var props = PropertiesService.getScriptProperties();
+  var hash = props.getProperty('ADMIN_PIN_HASH');
+  if (hash) return pinHash_(pin) === hash;
+  var plain = props.getProperty('ADMIN_PIN');
+  return !!plain && pin === plain;
+}
+
+function pinHash_(pin) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'visitor-kiosk-pin:' + pin);
+  return bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+
+function adminName_() {
+  var s = readSettings_();
+  return (s && s.admin && clean_(s.admin.name)) || 'Admin';
+}
+
 function adminInside_() {
   var people = {};
   readTab_(TABS.visitors).forEach(function (r) { people[r['Visitor ID']] = r; });
@@ -388,11 +949,132 @@ function adminInside_() {
     .map(function (r) {
       return {
         visitId: r['Visit ID'], first: r['First Name'], last: r['Last Name'], company: r['Company'],
-        visiting: r['Visiting'], kind: r['Kind'], badge: r['Badge'], since: iso_(r['Signed in']),
+        visiting: r['Visiting'], kind: r['Kind'], badge: String(r['Badge'] || ''), since: iso_(r['Signed in']),
+        screening: String(r['Screening'] || ''),
         photoFolder: (people[r['Visitor ID']] || {})['Photo folder'] || ''
       };
     });
   return { ok: true, inside: inside };
+}
+
+/**
+ * How many visits need attention. Tablets ask every couple of minutes, so the
+ * count is cached for a minute and dropped whenever it can change.
+ */
+function attentionCount_() {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('attention');
+  if (hit !== null && hit !== undefined && hit !== '') return Number(hit) || 0;
+  var n = attentionRows_().length;
+  cache.put('attention', String(n), 60);
+  return n;
+}
+function attentionChanged_() { CacheService.getScriptCache().remove('attention'); }
+
+/** Recent declines and flagged visits that nobody has reviewed yet. */
+function attentionRows_() {
+  var sh = book_().getSheetByName(TABS.visits);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var since = new Date().getTime() - ATTENTION_DAYS * 86400000;
+  return readTab_(TABS.visits).filter(function (r) {
+    if (!r['Visit ID'] || lower_(r['Reviewed'])) return false;
+    if (!/^(declined|flagged)/i.test(String(r['Screening'] || ''))) return false;
+    var t = new Date(r['Signed in']).getTime();
+    return !isNaN(t) && t >= since;
+  });
+}
+
+function adminAttention_() {
+  var items = attentionRows_().map(function (r) {
+    var declined = /^declined/i.test(String(r['Screening']));
+    return {
+      visitId: r['Visit ID'], first: r['First Name'], last: r['Last Name'], company: r['Company'],
+      visiting: r['Visiting'], purpose: r['Purpose'], when: iso_(r['Signed in']),
+      kind: declined ? 'declined' : 'flagged', label: declined ? 'Declined' : String(r['Kind'] || 'Flagged'),
+      screening: String(r['Screening'] || ''), photo: String(r['Photo'] || ''),
+      inside: !r['Signed out'], allowed: / allowed by /i.test(String(r['Screening']))
+    };
+  }).reverse().slice(0, 50);
+  return { ok: true, items: items };
+}
+
+/** Visits from the last args.days days (default 30), newest first, optionally filtered by args.q. */
+function adminHistory_(a) {
+  var days = Math.max(1, Math.min(3650, Number(a.days) || 30));
+  var since = new Date().getTime() - days * 86400000;
+  var q = nameKey_(a.q);
+  var out = [];
+  var rows = readTab_(TABS.visits);
+  for (var i = rows.length - 1; i >= 0 && out.length < 2000; i--) {
+    var r = rows[i];
+    if (!r['Visit ID']) continue;
+    var t = new Date(r['Signed in']).getTime();
+    if (isNaN(t) || t < since) continue;
+    if (q && nameKey_([r['First Name'], r['Last Name'], r['Company'], r['Visiting']].join(' ')).indexOf(q) < 0) continue;
+    out.push({
+      visitId: r['Visit ID'], signedIn: iso_(r['Signed in']), signedOut: iso_(r['Signed out']),
+      first: r['First Name'], last: r['Last Name'], company: r['Company'], visiting: r['Visiting'],
+      purpose: r['Purpose'], kind: r['Kind'], badge: String(r['Badge'] || ''),
+      method: r['How they signed in'], signedOutBy: r['Signed out by'], screening: String(r['Screening'] || ''),
+      hostNotified: String(r['Host notified'] || '')
+    });
+  }
+  return { ok: true, visits: out, sheetUrl: book_().getUrl() };
+}
+
+/** One visit's photo as a data URL: the declined visitor's photo, or the visitor's latest photo. */
+function adminPhoto_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit) return { ok: false, error: 'not_found' };
+  var file = null;
+  try {
+    var id = driveId_(visit.values['Photo']);
+    if (id) file = DriveApp.getFileById(id);
+    if (!file) {
+      var person = findRow_(TABS.visitors, 'Visitor ID', visit.values['Visitor ID']);
+      var folderId = person && driveId_(person.values['Photo folder']);
+      if (folderId) {
+        var it = DriveApp.getFolderById(folderId).getFiles(), newest = 0;
+        while (it.hasNext()) {
+          var f = it.next(), when = f.getDateCreated ? f.getDateCreated().getTime() : 0;
+          if (!file || when >= newest) { file = f; newest = when; }
+        }
+      }
+    }
+  } catch (err) {
+    file = null;
+  }
+  if (!file) return { ok: true, photo: '' };
+  var blob = file.getBlob();
+  return { ok: true, photo: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()) };
+}
+
+/** The file or folder id in a Drive link. */
+function driveId_(url) {
+  var m = /\/(?:d|folders)\/([\w-]{10,})/.exec(String(url || '')) || /[?&]id=([\w-]{10,})/.exec(String(url || ''));
+  return m ? m[1] : '';
+}
+
+function adminReview_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit) return { ok: false, error: 'not_found' };
+  setCell_(TABS.visits, visit.row, 'Reviewed', 'Reviewed by ' + adminName_() + ' (' + stamp_(new Date()) + ')');
+  attentionChanged_();
+  return { ok: true };
+}
+
+/** Lets a declined visitor in: they can sign in normally for the next 2 hours. */
+function adminAllow_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit || !/^declined/i.test(String(visit.values['Screening']))) return { ok: false, error: 'not_found' };
+  var by = adminName_(), reason = clean_(a.reason);
+  setPass_(visit.values['First Name'], visit.values['Last Name'], { by: by, reason: reason });
+  setCells_(TABS.visits, visit.row, {
+    'Screening': String(visit.values['Screening']) + '. Allowed by ' + by + (reason ? ': ' + reason : ''),
+    'Reviewed': 'Reviewed by ' + by + ' (' + stamp_(new Date()) + ')'
+  });
+  attentionChanged_();
+  return { ok: true, by: by };
 }
 
 function adminBadges_() {
@@ -401,7 +1083,7 @@ function adminBadges_() {
     badges: readTab_(TABS.badges).filter(function (r) { return r['Badge']; }).map(function (r) {
       return {
         badge: String(r['Badge']), tag: String(r['NFC tag'] || ''), status: r['Status'] || 'available',
-        holder: r['Holder'] || '', since: iso_(r['Since'])
+        holder: r['Holder'] || '', since: iso_(r['Since']), note: String(r['Note'] || '')
       };
     })
   };
@@ -449,7 +1131,7 @@ function adminRetireBadge_(a, retire) {
   var badge = findRow_(TABS.badges, 'Badge', a.badge);
   if (!badge) return { ok: false, error: 'not_found' };
   if (retire && lower_(badge.values['Status']) === 'in use') return { ok: false, error: 'badge_in_use' };
-  setCell_(TABS.badges, badge.row, 'Status', retire ? 'retired' : 'available');
+  setCells_(TABS.badges, badge.row, retire ? { 'Status': 'retired' } : { 'Status': 'available', 'Note': '' });
   return { ok: true };
 }
 
@@ -459,6 +1141,175 @@ function unlinkTag_(tag) {
   if (!existing) return '';
   setCell_(TABS.badges, existing.row, 'NFC tag', '');
   return String(existing.values['Badge']);
+}
+
+// ---------------------------------------------------------------- screening helpers
+
+function cleanAnswers_(list) {
+  if (!Array.isArray(list)) return [];
+  var reserved = {};
+  HEADERS.Visitors.forEach(function (h) { reserved[h.toLowerCase()] = true; });
+  return list.slice(0, 30).map(function (x) {
+    var label = clean_(x && x.label).slice(0, 60);
+    if (reserved[label.toLowerCase()]) label = 'Answer: ' + label;
+    return { label: label, value: clean_(x && x.value) };
+  }).filter(function (x) { return x.label; });
+}
+
+function cleanFlags_(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 20).map(function (x) {
+    return { label: clean_(x && x.label).slice(0, 60), answer: clean_(x && x.answer), flagLabel: clean_(x && x.flagLabel).slice(0, 40) };
+  }).filter(function (x) { return x.label; });
+}
+
+function reasonList_(flags) {
+  return flags.map(function (f) { return f.label + ' = ' + f.answer; }).join('; ') || 'screening answer';
+}
+
+/** The Screening column: Clear, Flagged: <labels>, or Overridden by <admin>: <reason>. */
+function screeningText_(flags, override) {
+  if (override) {
+    var by = clean_(override.by) || adminName_();
+    var reason = clean_(override.reason);
+    return 'Overridden by ' + by + (reason ? ': ' + reason : '');
+  }
+  if (flags.length) {
+    var labels = [];
+    flags.forEach(function (f) { var l = f.flagLabel || f.label; if (labels.indexOf(l) < 0) labels.push(l); });
+    return 'Flagged: ' + labels.join(', ');
+  }
+  return 'Clear';
+}
+
+/**
+ * The screening a returning visitor carries from their earlier answers. Flags
+ * from questions asked once (citizenship, say) apply to every visit. A staff
+ * override is not repeated: the visit notes that staff approved them before.
+ * Visitors registered before screening questions existed (the original Shock
+ * Tech sheet) have a Citizenship status column instead.
+ */
+function carriedScreening_(p) {
+  var s = String(p['Screening'] || '');
+  if (/^overridden/i.test(s)) return 'Approved earlier: ' + s;
+  if (s) return s;
+  if (/^not a u\.?s\.? citizen/i.test(String(p['Citizenship status'] || ''))) return 'Flagged: Foreign national';
+  return 'Clear';
+}
+
+/** Visit "Kind": Visitor, the first flag label (e.g. Foreign national), or Visitor (override). */
+function kindOf_(screening) {
+  var s = String(screening || '');
+  var m = /^Flagged: ([^,]+)/.exec(s);
+  if (m) return m[1];
+  if (/^Overridden/.test(s)) return 'Visitor (override)';
+  if (/^Approved earlier/.test(s)) return 'Visitor (approved earlier)';
+  return 'Visitor';
+}
+
+function passKey_(first, last) { return 'pass:' + nameKey_(first) + '|' + nameKey_(last); }
+
+function setPass_(first, last, pass) {
+  CacheService.getScriptCache().put(passKey_(first, last), JSON.stringify(pass), PASS_TTL);
+}
+
+function takePass_(first, last) {
+  var cache = CacheService.getScriptCache(), key = passKey_(first, last);
+  var raw = cache.get(key);
+  if (!raw) return null;
+  cache.remove(key);
+  try { return JSON.parse(raw); } catch (err) { return null; }
+}
+
+/** Emails the alert addresses from the kiosk settings (with the photo attached). */
+function alert_(kind, v, flags, photo) {
+  var s = readSettings_() || {};
+  var to = alertAddresses_(s);
+  if (!to.length) return false;
+  var org = (s.org && clean_(s.org.name)) || 'The';
+  var declined = kind === 'declined';
+  var name = v.first + ' ' + v.last;
+  var lines = [
+    declined ? name + ' was politely declined at the ' + org + ' visitor kiosk because of their screening answers.'
+      : name + ' signed in at the ' + org + ' visitor kiosk with an answer that needs your attention.',
+    '',
+    'Company: ' + (v.company || 'N/A')
+  ];
+  if (v.visiting) lines.push('Visiting: ' + v.visiting);
+  lines.push('Time: ' + stamp_(new Date()));
+  lines.push('');
+  lines.push(declined ? 'Why they were declined:' : 'Answers to check:');
+  flags.forEach(function (f) { lines.push('  - ' + f.label + ': ' + f.answer); });
+  if (declined) {
+    lines.push('');
+    lines.push('To let them in: tap "Staff override" on the kiosk, or open the admin screen and choose "Let in".');
+  }
+  lines.push('');
+  lines.push('Visitor log: ' + book_().getUrl());
+  var options = {
+    to: to.join(','), name: org + ' visitor kiosk',
+    subject: (declined ? 'Visitor declined: ' : 'Visitor alert: ') + name,
+    body: lines.join('\n')
+  };
+  var m = /^data:(image\/(jpeg|png|webp));base64,(.+)$/.exec(String(photo || ''));
+  if (m) options.attachments = [Utilities.newBlob(Utilities.base64Decode(m[3]), m[1], 'visitor-photo.' + (m[2] === 'jpeg' ? 'jpg' : m[2]))];
+  try {
+    MailApp.sendEmail(options);
+    return true;
+  } catch (err) {
+    console.warn('Alert email not sent: ' + err);
+    return false;
+  }
+}
+
+function alertAddresses_(s) {
+  return String((s.screening && s.screening.alertEmails) || '').split(/[\s,;]+/).filter(function (e) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+  }).slice(0, 10);
+}
+
+/**
+ * Emails the person a visitor came to see, when the kiosk settings list them
+ * with an email address and host emails are turned on. Returns the host's name, or ''.
+ */
+function notifyHost_(visiting, v, badgeNo, when) {
+  var s = readSettings_() || {};
+  if (!s.notifyHosts || !Array.isArray(s.hosts)) return '';
+  var host = matchHost_(s.hosts, visiting);
+  if (!host) return '';
+  var org = (s.org && clean_(s.org.name)) || 'the';
+  var name = v.first + ' ' + v.last;
+  var lines = [
+    'Hi ' + host.name.split(' ')[0] + ',',
+    '',
+    name + (v.company && v.company !== 'N/A' ? ' from ' + v.company : '') + ' just signed in at the ' + org + ' front desk to see you.',
+    ''
+  ];
+  if (v.purpose) lines.push('Purpose: ' + v.purpose);
+  if (badgeNo) lines.push('Visitor badge: ' + badgeNo);
+  lines.push('Time: ' + stamp_(when));
+  lines.push('');
+  lines.push('Please come and meet them at the front desk.');
+  try {
+    MailApp.sendEmail({ to: host.email, name: org + ' visitor kiosk', subject: 'Your visitor has arrived: ' + name, body: lines.join('\n') });
+    return host.name;
+  } catch (err) {
+    console.warn('Host email not sent: ' + err);
+    return '';
+  }
+}
+
+/** The host whose name matches what the visitor typed (same name rules as visitor search). */
+function matchHost_(hosts, visiting) {
+  var want = nameKey_(visiting);
+  if (!want) return null;
+  var best = null;
+  hosts.forEach(function (h) {
+    if (best || !h || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(h.email || ''))) return;
+    var key = nameKey_(h.name);
+    if (key && (key === want || near_(key, want))) best = { name: clean_(h.name), email: String(h.email).trim() };
+  });
+  return best;
 }
 
 // ---------------------------------------------------------------- matching helpers (same rules as the kiosk)
@@ -506,10 +1357,6 @@ function normalizeTag_(s) {
   return t;
 }
 
-function isUsPerson_(c) {
-  return CITIZENSHIP_OPTIONS.slice(0, 3).indexOf(String(c)) >= 0;
-}
-
 function isDescriptor_(d) {
   return Array.isArray(d) && d.length === 128 && d.every(function (x) { return typeof x === 'number' && isFinite(x); });
 }
@@ -519,19 +1366,30 @@ function isPhoto_(s) {
     /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(s);
 }
 
-function publicVisitor_(id, v) {
-  return { id: id, first: v.first, last: v.last, company: v.company, quickEntry: v.quickEntry };
+function publicVisitor_(id, v, screening) {
+  return { id: id, first: v.first, last: v.last, company: v.company, quickEntry: v.quickEntry, kind: kindOf_(screening) };
 }
 
 // ---------------------------------------------------------------- Drive
 
 function photoRoot_() {
-  var id = PropertiesService.getScriptProperties().getProperty('PHOTO_FOLDER_ID');
-  if (id) return DriveApp.getFolderById(id);
-  var it = DriveApp.getFoldersByName('Shock Tech visitor photos');
-  var folder = it.hasNext() ? it.next() : DriveApp.createFolder('Shock Tech visitor photos');
-  PropertiesService.getScriptProperties().setProperty('PHOTO_FOLDER_ID', folder.getId());
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('PHOTO_FOLDER_ID');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* folder deleted: make a new one */ }
+  }
+  var s = readSettings_();
+  var name = (s && s.org && clean_(s.org.name) ? clean_(s.org.name) + ' visitor photos' : 'Visitor photos');
+  var it = DriveApp.getFoldersByName(name);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(name);
+  props.setProperty('PHOTO_FOLDER_ID', folder.getId());
   return folder;
+}
+
+function declinedFolder_() {
+  var root = photoRoot_();
+  var it = root.getFoldersByName('Declined visitors');
+  return it.hasNext() ? it.next() : root.createFolder('Declined visitors');
 }
 
 function savePhoto_(folder, dataUrl, label) {
@@ -549,43 +1407,89 @@ function folderFromUrl_(url) {
 
 // ---------------------------------------------------------------- Sheets
 
+// Reading a whole tab is the slow part of a request, so each tab is read once
+// per request and kept here. Cell writes update the kept copy; adding rows or
+// columns, or deleting rows, drops it so the next read is fresh.
+var bookMemo_ = null, tabMemo_ = {}, headMemo_ = {};
+function forgetTabs_(name) {
+  if (name) { delete tabMemo_[name]; delete headMemo_[name]; return; }
+  bookMemo_ = null; tabMemo_ = {}; headMemo_ = {};
+}
+
 function book_() {
+  if (bookMemo_) return bookMemo_;
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  bookMemo_ = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  return bookMemo_;
 }
 
 function sheet_(name) {
   var sh = book_().getSheetByName(name);
-  if (!sh) throw new Error('The "' + name + '" tab is missing. Run setup() in the Apps Script editor.');
+  if (!sh) throw new Error('The "' + name + '" tab is missing. Connect the kiosk again, or run setup() in the Apps Script editor.');
   return sh;
 }
 
 function headerMap_(sh) {
+  var name = sh.getName();
+  if (headMemo_[name]) return headMemo_[name];
   var head = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
   var map = {};
   head.forEach(function (h, i) { if (h) map[String(h).trim().toLowerCase()] = i + 1; });
+  headMemo_[name] = map;
   return map;
+}
+
+/** Column number for a header, by name (case-insensitive), or one of its older spellings. */
+function findCol_(map, header) {
+  var key = String(header).toLowerCase();
+  if (map[key]) return map[key];
+  var pattern = HEADER_PATTERNS[key];
+  if (!pattern) return 0;
+  var hit = Object.keys(map).filter(function (k) { return pattern.test(k); })[0];
+  return hit ? map[hit] : 0;
+}
+
+/** Adds a header if the tab doesn't have it yet, before `beforeHeader` when given. */
+function ensureColumn_(name, header, beforeHeader) {
+  var sh = sheet_(name), map = headerMap_(sh);
+  if (findCol_(map, header)) return;
+  forgetTabs_(name);
+  var before = beforeHeader ? findCol_(map, beforeHeader) : 0;
+  if (before) {
+    sh.insertColumnBefore(before);
+    sh.getRange(1, before).setValue(header).setFontWeight('bold');
+  } else {
+    sh.getRange(1, sh.getLastColumn() + 1).setValue(header).setFontWeight('bold');
+  }
 }
 
 /** All data rows as objects keyed by header text. Columns are found by name, never position. */
 function readTab_(name) {
+  if (tabMemo_[name]) return tabMemo_[name].rows;
   var sh = sheet_(name);
   var last = sh.getLastRow();
-  if (last < 2) return [];
+  if (last < 2) { tabMemo_[name] = { rows: [], head: [] }; return []; }
   var width = sh.getLastColumn();
-  var head = sh.getRange(1, 1, 1, width).getValues()[0];
-  return sh.getRange(2, 1, last - 1, width).getValues().map(function (row) {
+  // One read for the header and the data together.
+  var all = sh.getRange(1, 1, last, width).getValues();
+  var head = all[0];
+  var map = {};
+  head.forEach(function (h, i) { if (h) map[String(h).trim().toLowerCase()] = i + 1; });
+  headMemo_[name] = map;
+  var rows = all.slice(1).map(function (row) {
     var o = {};
     head.forEach(function (h, i) { if (h) o[String(h).trim()] = row[i]; });
-    // Also expose the canonical header spelling so lookups survive case changes.
+    // Also expose the canonical header spelling so lookups survive case changes and older names.
     (HEADERS[name] || []).forEach(function (h) {
       if (!(h in o)) {
-        var k = Object.keys(o).filter(function (x) { return x.toLowerCase() === h.toLowerCase(); })[0];
-        if (k) o[h] = o[k];
+        var col = findCol_(map, h);
+        if (col) o[h] = row[col - 1];
       }
     });
     return o;
   });
+  tabMemo_[name] = { rows: rows, head: head };
+  return rows;
 }
 
 function findRow_(name, column, value, normalize) {
@@ -604,10 +1508,11 @@ function appendRow_(name, obj) {
   var width = sh.getLastColumn(), row = new Array(width);
   for (var c = 0; c < width; c++) row[c] = '';
   Object.keys(obj).forEach(function (k) {
-    var col = map[k.toLowerCase()];
+    var col = findCol_(map, k);
     if (col) row[col - 1] = cellValue_(obj[k]);
   });
   sh.appendRow(row);
+  forgetTabs_(name);
 }
 
 function setCell_(name, row, column, value) {
@@ -618,9 +1523,17 @@ function setCell_(name, row, column, value) {
 
 function setCells_(name, row, obj) {
   var sh = sheet_(name), map = headerMap_(sh);
+  var kept = tabMemo_[name] && tabMemo_[name].rows[row - 2];
   Object.keys(obj).forEach(function (k) {
-    var col = map[k.toLowerCase()];
-    if (col) sh.getRange(row, col).setValue(cellValue_(obj[k]));
+    var col = findCol_(map, k);
+    if (!col) return;
+    var v = cellValue_(obj[k]);
+    sh.getRange(row, col).setValue(v);
+    if (kept) {
+      kept[k] = v;
+      var h = tabMemo_[name].head[col - 1];
+      if (h) kept[String(h).trim()] = v;
+    }
   });
 }
 
@@ -635,15 +1548,16 @@ function addFaceRow_(visitorId, descriptor, source, fileId) {
 function removeFaceRows_(visitorId) {
   var sh = sheet_(TABS.faces), rows = readTab_(TABS.faces);
   for (var i = rows.length - 1; i >= 0; i--) {
-    if (rows[i]['Visitor ID'] === visitorId) sh.deleteRow(i + 2);
+    if (rows[i]['Visitor ID'] === visitorId) { sh.deleteRow(i + 2); forgetTabs_(TABS.faces); }
   }
 }
 
 // ---------------------------------------------------------------- small utilities
 
-/** Visitor text: trimmed, collapsed, length-capped. */
+/** Visitor text: trimmed, collapsed, length-capped, and never starting like a formula. */
 function clean_(s) {
-  return String(s === undefined || s === null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
+  return String(s === undefined || s === null ? '' : s).replace(/\s+/g, ' ').trim()
+    .replace(/^[=+\-@\s]+/, '').slice(0, MAX_TEXT);
 }
 
 /** Strings that start with = + - @ would run as formulas in the sheet. */
@@ -661,7 +1575,11 @@ function randomCode_(n) {
   return out;
 }
 
-function tz_() { return Session.getScriptTimeZone() || 'America/New_York'; }
+/** The spreadsheet's time zone: Sheets reads typed dates in it, so the script does too. */
+function tz_() {
+  try { return book_().getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'America/New_York'; }
+  catch (err) { return Session.getScriptTimeZone() || 'America/New_York'; }
+}
 function stamp_(d) { return Utilities.formatDate(d, tz_(), 'M/d/yyyy h:mm a'); }
 function iso_(d) { return d instanceof Date ? d.toISOString() : (d ? String(d) : ''); }
 function dateOnly_(d) { return d instanceof Date ? Utilities.formatDate(d, tz_(), 'MMM d, yyyy') : ''; }

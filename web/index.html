@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>Shock Tech Visitor Sign-In</title>
-  <meta name="description" content="Visitor sign-in kiosk for Shock Tech, Inc.">
-  <meta name="theme-color" content="#062f5c">
+  <title>Visitor Sign-In</title>
+  <meta name="description" content="A visitor sign-in kiosk you set up for your business: screening questions, NFC/RFID badges, visitor photos and Google Sheets.">
+  <meta name="theme-color" content="#063a6e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Shock Tech Visitors">
+  <meta name="apple-mobile-web-app-title" content="Visitor Sign-In">
   <link rel="apple-touch-icon" href="assets/icon-512.png">
   <link rel="icon" href="assets/icon-512.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -25,30 +25,330 @@
     })();
   </script>
   <script src="kiosk-connection.js"></script>
-  <script defer src="vendor/face-api/face-api.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
 <div id="app">
 
+  <!-- 0. Setup wizard (first start), also used to edit settings from the admin screen -->
+  <section class="screen screen-setup" data-screen="setup" aria-label="Set up the kiosk">
+    <aside class="setup-rail">
+      <div class="rail-brand">
+        <span class="rail-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg></span>
+        <div><strong>Visitor Sign-In</strong><small data-setup-mode>Setup</small></div>
+      </div>
+      <ol class="rail-steps" data-setup-rail></ol>
+      <div class="rail-tip" data-setup-tip></div>
+      <p class="rail-foot"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Your records stay on this tablet or in your own Google account. Nothing is sent anywhere else.</p>
+    </aside>
+    <div class="setup-main">
+      <header class="bar setup-bar">
+        <p class="eyebrow" data-setup-count></p>
+        <span class="bar-spacer"></span>
+        <button type="button" class="btn-ghost" data-setup-cancel hidden>Cancel</button>
+      </header>
+      <div class="form-body setup-body" data-setup-body>
+
+        <div class="step" data-sstep="device">
+          <h2>Let's check this tablet</h2>
+          <p class="hint">A minute now saves surprises later. Each check says how to fix anything that needs a look, and you can carry on either way. Nothing here is saved.</p>
+          <div class="device-grid">
+            <div class="cam-test">
+              <video data-video="check" playsinline muted autoplay></video>
+              <span class="cam-test-label" data-cam-test-label>Starting the camera…</span>
+            </div>
+            <ul class="device-checks" data-checks></ul>
+          </div>
+          <p class="checks-summary" data-checks-summary></p>
+          <div class="row-actions"><button type="button" class="btn-secondary" data-checks-again>Check again</button></div>
+        </div>
+
+        <div class="step" data-sstep="company">
+          <h2>What's your company called?</h2>
+          <p class="hint">It appears on the welcome screen, the visitor badges and the sign-in questions.</p>
+          <label class="field"><span>Company name</span>
+            <input readonly inputmode="none" name="s-org" data-cap="words" maxlength="60" autocomplete="off" placeholder="e.g. Acme Corporation"></label>
+          <label class="field"><span>Tagline <em>(optional)</em></span>
+            <input readonly inputmode="none" name="s-tagline" data-cap="sentence" maxlength="80" autocomplete="off" placeholder="e.g. Precision parts since 1982">
+            <small>A short line under the welcome message.</small></label>
+          <div class="field"><span>Brand color</span>
+            <div class="swatches" data-swatches></div>
+            <small>Used for buttons, highlights and the welcome screen. Pick the color closest to your logo.</small></div>
+          <div class="preview" aria-hidden="true">
+            <span class="preview-label">Preview</span>
+            <div class="preview-screen">
+              <div class="preview-logo"><img data-preview-logo alt=""></div>
+              <strong>Welcome to <span data-preview-name>your company</span></strong>
+              <small data-preview-tagline></small>
+              <span class="preview-cta"><i></i>Tap anywhere to get started</span>
+            </div>
+          </div>
+          <p class="setup-import">Setting up another tablet, or restoring a backup?
+            <label class="link">Import a settings file<input type="file" accept=".json,application/json" data-setup-import hidden></label></p>
+        </div>
+
+        <div class="step" data-sstep="admin">
+          <h2>Create your admin login</h2>
+          <p class="hint">Admins see who is inside, review declined visitors, manage badges and change these settings. To open the admin screen, press and hold the logo on the welcome screen for 2.5 seconds.</p>
+          <label class="field"><span>Admin name</span>
+            <input readonly inputmode="none" name="s-admin" data-cap="words" maxlength="60" autocomplete="off" placeholder="e.g. Jordan Lee, Office Manager">
+            <small>Recorded whenever an admin lets a declined visitor in.</small></label>
+          <div class="pin-fields">
+            <label class="field"><span>Admin PIN</span>
+              <input readonly inputmode="none" type="password" name="s-pin" data-kb="digits" maxlength="8" autocomplete="off" placeholder="6 to 8 digits"></label>
+            <label class="field"><span>Enter the PIN again</span>
+              <input readonly inputmode="none" type="password" name="s-pin2" data-kb="digits" maxlength="8" autocomplete="off" placeholder="Same PIN"></label>
+          </div>
+          <ul class="checks" data-pin-checks>
+            <li data-check="len">6 to 8 digits</li>
+            <li data-check="easy">Not an easy pattern like 123456 or 111111</li>
+            <li data-check="match">Both match</li>
+          </ul>
+          <p class="hint small" data-pin-keep hidden>Leave both PIN fields empty to keep the current PIN.</p>
+        </div>
+
+        <div class="step" data-sstep="logo">
+          <h2>Upload your logo</h2>
+          <p class="hint">Use a <strong>PNG with a transparent background</strong> (no white box around it), so it sits cleanly on the welcome screen and the badges. You can skip this: the kiosk then shows your company name in your brand color.</p>
+          <label class="dropzone" data-logo-drop>
+            <input type="file" accept="image/png" data-logo-input hidden>
+            <span class="dz-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></span>
+            <strong>Choose a PNG file</strong>
+            <small>Transparent background · at least 400 pixels wide</small>
+          </label>
+          <div class="logo-check" data-logo-result hidden>
+            <figure><div class="lp lp-card"><img data-logo-a alt=""></div><figcaption>On the welcome card</figcaption></figure>
+            <figure><div class="lp lp-dark"><img data-logo-b alt=""></div><figcaption>On a dark background</figcaption></figure>
+            <figure><div class="lp lp-checker"><img data-logo-c alt=""></div><figcaption>Transparency</figcaption></figure>
+          </div>
+          <p class="note" data-logo-note hidden></p>
+          <div class="row-actions" data-logo-actions hidden>
+            <button type="button" class="btn-secondary" data-logo-replace>Choose a different file</button>
+            <button type="button" class="btn-ghost" data-logo-remove>Remove logo</button>
+          </div>
+        </div>
+
+        <div class="step" data-sstep="badges">
+          <h2>Do visitors get an NFC or RFID badge?</h2>
+          <p class="hint">With badges, visitors finish signing in by tapping a visitor badge on the reader, and sign out by tapping it again on their way out.</p>
+          <div class="options cards2" role="radiogroup" data-badges-choice>
+            <button type="button" class="option option-card" role="radio" data-value="yes">
+              <strong>Yes, we hand out visitor badges</strong>
+              <small>Needs a USB or Bluetooth NFC/RFID reader that types the card number, like most generic readers.</small>
+            </button>
+            <button type="button" class="option option-card" role="radio" data-value="no">
+              <strong>No badges</strong>
+              <small>Visitors sign in and out on the screen. No reader needed.</small>
+            </button>
+          </div>
+          <div class="tap-panel" data-badge-panel hidden>
+            <div class="tap-panel-head">
+              <div class="mini-reader dark" aria-hidden="true"><div class="mini-badge"></div><div class="mini-pad"></div></div>
+              <div><strong data-badge-panel-title>Tap each visitor badge on the reader</strong>
+                <small data-badge-panel-text>They're numbered V1, V2, … in the order you tap them. You can add more later in the admin screen.</small></div>
+            </div>
+            <div class="badge-chips" data-badge-chips></div>
+          </div>
+        </div>
+
+        <div class="step" data-sstep="storage">
+          <h2>Where should visitor records be kept?</h2>
+          <p class="hint">Pick what suits your business. Both are free, and visitors see the same kiosk either way.</p>
+          <div class="options cards2" role="radiogroup" data-storage-choice>
+            <button type="button" class="option option-card" role="radio" data-value="local">
+              <span class="tag">Simplest</span>
+              <strong>On this tablet</strong>
+              <small>Records and photos are saved privately on this tablet. Nothing else to set up.</small>
+              <ul class="pros"><li class="pro">Ready right away, no accounts</li><li class="pro">Works without internet</li><li class="con">Only this tablet has the records</li><li class="con">Staff alerts show in the admin screen only</li></ul>
+            </button>
+            <button type="button" class="option option-card" role="radio" data-value="cloud">
+              <span class="tag tag-accent">Best for teams</span>
+              <strong>Google Sheets</strong>
+              <small>Every sign-in goes to a Google Sheet you own, with photos in your Google Drive.</small>
+              <ul class="pros"><li class="pro">See visitors from any computer or phone</li><li class="pro">Several tablets share one log</li><li class="pro">Email alerts when someone is declined</li><li class="con">Needs a Google account and about 5 minutes</li></ul>
+            </button>
+          </div>
+          <p class="note info" data-storage-builtin hidden>This app was built already connected to your Google Sheet, so records go there.</p>
+        </div>
+
+        <div class="step" data-sstep="connect">
+          <h2>Connect your Google Sheet</h2>
+          <p class="hint">You add a small script to a Google Sheet that you own. It takes about 5 minutes, once. Tip: this step is easier on a computer. Open the kiosk there, and tablets connected to the same sheet pick up these settings automatically.</p>
+          <ol class="guide">
+            <li><span class="gnum">1</span><div><strong>Create a Google Sheet</strong> in your Google account and name it, for example "Visitor log". It's private to you.</div></li>
+            <li><span class="gnum">2</span><div><strong>Add the script.</strong> In the sheet, choose <kbd>Extensions</kbd> → <kbd>Apps Script</kbd>, delete the code that's there, paste the kiosk script and click <kbd>Save</kbd>.
+              <div class="row-actions"><button type="button" class="btn-primary" data-copy-script>Copy the script</button><button type="button" class="btn-secondary" data-download-script>Download Code.gs</button></div></div></li>
+            <li><span class="gnum">3</span><div><strong>Deploy it.</strong> Click <kbd>Deploy</kbd> → <kbd>New deployment</kbd>, click the gear and choose <kbd>Web app</kbd>. Set <em>Execute as</em> to <kbd>Me</kbd> and <em>Who has access</em> to <kbd>Anyone</kbd>, then click <kbd>Deploy</kbd>.</div></li>
+            <li><span class="gnum">4</span><div><strong>Allow access.</strong> Choose your account, then <kbd>Advanced</kbd> → <kbd>Go to … (unsafe)</kbd> → <kbd>Allow</kbd>. Google shows this warning for every script you add yourself. The script can only reach this sheet, a photo folder in your Drive, and send the alert emails you choose.</div></li>
+            <li><span class="gnum">5</span><div><strong>Paste the Web app URL</strong> (it ends in <code>/exec</code>) below and tap <em>Connect</em>.</div></li>
+          </ol>
+          <label class="field"><span>Web app URL</span>
+            <input readonly inputmode="none" name="s-url" data-kb="url" maxlength="200" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
+          <div class="row-actions">
+            <button type="button" class="btn-secondary" data-paste-url>Paste</button>
+            <button type="button" class="btn-primary" data-connect>Connect</button>
+          </div>
+          <div class="status" data-connect-status hidden></div>
+          <label class="field" data-key-field hidden><span>Kiosk key from the first tablet</span>
+            <input readonly inputmode="none" name="s-key" data-kb="url" maxlength="64" autocomplete="off">
+            <small>On the first tablet, open the admin screen → Settings → Connect another tablet.</small></label>
+        </div>
+
+        <div class="step" data-sstep="screening">
+          <h2>Do you want to ask visitors extra questions?</h2>
+          <p class="hint">Screening questions come after the visitor's name and visit details, one per screen. Depending on the answer, the kiosk can politely decline a visitor, or let them in and alert your staff.</p>
+          <div class="options cards2" role="radiogroup" data-screening-choice>
+            <button type="button" class="option option-card" role="radio" data-value="no">
+              <strong>No extra questions</strong>
+              <small>Visitors give their name and visit details, then sign in.</small>
+            </button>
+            <button type="button" class="option option-card" role="radio" data-value="yes">
+              <strong>Yes, add screening questions</strong>
+              <small>For example citizenship for export-control rules, illness symptoms or prohibited items.</small>
+            </button>
+          </div>
+          <div class="builder" data-builder hidden>
+            <p class="builder-label">Add a ready-made question</p>
+            <div class="chips" data-templates></div>
+            <ol class="qlist" data-qlist></ol>
+            <button type="button" class="btn-secondary" data-add-question>+ Write your own question</button>
+
+            <h3 class="sub">When someone is declined</h3>
+            <p class="hint small">They see this message, and their photo, answers and the time are kept for your staff. An admin can still let them in, either on the kiosk ("Staff override") or later from the admin screen.</p>
+            <div class="message-box" data-decline-message></div>
+            <div class="chips" data-decline-presets></div>
+            <label class="field" data-alert-field><span>Email alerts to <em>(optional)</em></span>
+              <input readonly inputmode="none" name="s-alerts" data-kb="email" maxlength="300" autocomplete="off" placeholder="security@example.com, frontdesk@example.com">
+              <small>Each decline and each alert is emailed here, with the visitor's photo attached. Separate addresses with commas.</small></label>
+            <p class="note" data-alert-local hidden>Records kept on this tablet can't send emails. Declines and alerts show in the admin screen (Needs attention), and a small red dot appears next to the clock until someone reviews them. Choose Google Sheets storage to also get emails.</p>
+            <p class="note warn">Only ask what your business is required or entitled to ask. Questions about citizenship or health, for example, are usually only appropriate where a law or contract requires them, such as U.S. export-control rules (ITAR / EAR) for defense work.</p>
+          </div>
+        </div>
+
+        <div class="step" data-sstep="hosts">
+          <h2>Who do visitors come to see?</h2>
+          <p class="hint">Add the people visitors usually ask for. Their names come up as visitors type, so nobody has to guess the spelling. With Google Sheets, each host also gets an email the moment their visitor signs in.</p>
+          <div class="inline-add host-add">
+            <label class="field"><span>Name</span><input readonly inputmode="none" name="s-host-name" data-cap="words" maxlength="60" autocomplete="off" placeholder="e.g. Pat Kim"></label>
+            <label class="field"><span>Email <em>(optional)</em></span><input readonly inputmode="none" name="s-host-email" data-kb="email" maxlength="120" autocomplete="off" placeholder="pat@example.com"></label>
+            <button type="button" class="btn-secondary" data-add-host>Add</button>
+          </div>
+          <ul class="host-list" data-host-list></ul>
+          <button type="button" class="agree toggle" data-notify-toggle role="switch" aria-checked="true">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Email hosts when their visitor arrives</strong><br><span class="small">"Your visitor has arrived: Ana Lopez from Globex", with the time and badge number. Only for hosts with an email address.</span></span>
+          </button>
+          <p class="note" data-notify-local hidden>Records kept on this tablet can't send emails, so hosts aren't notified. Their names are still suggested to visitors. Choose Google Sheets storage to email hosts.</p>
+        </div>
+
+        <div class="step" data-sstep="touches">
+          <h2>Finishing touches</h2>
+          <p class="hint">These have good defaults, so you can skip this step and change them later.</p>
+          <h3 class="sub">Visitor photos</h3>
+          <div class="seg" role="radiogroup" data-photos-choice>
+            <button type="button" role="radio" data-value="all">Every new visitor</button>
+            <button type="button" role="radio" data-value="declined">Only declined visitors</button>
+            <button type="button" role="radio" data-value="off">No photos</button>
+          </div>
+          <p class="hint small" data-photos-hint></p>
+          <button type="button" class="agree toggle" data-quick-toggle role="switch" aria-checked="true">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Quick entry for returning visitors</strong><br><span class="small">Visitors who opt in are recognized by the camera next time, with no typing. Face data stays on your tablet or in your sheet, and each visitor chooses.</span></span>
+          </button>
+          <h3 class="sub">Reasons for visiting</h3>
+          <p class="hint small">Shown as buttons on the visit details screen. Tap one to remove it.</p>
+          <div class="chips editable" data-purpose-chips></div>
+          <div class="inline-add"><label class="field"><span>Add a reason</span><input readonly inputmode="none" name="s-purpose" data-cap="sentence" maxlength="40" autocomplete="off"></label><button type="button" class="btn-secondary" data-add-purpose>Add</button></div>
+          <h3 class="sub">Visitor rules</h3>
+          <p class="hint small">Visitors agree to these before they sign in. Checking the box is their electronic signature.</p>
+          <ol class="rules editable" data-rules-edit></ol>
+          <div class="inline-add"><label class="field"><span>Add a rule</span><input readonly inputmode="none" name="s-rule" data-cap="sentence" maxlength="300" autocomplete="off"></label><button type="button" class="btn-secondary" data-add-rule>Add</button></div>
+          <button type="button" class="btn-ghost" data-reset-rules>Use the standard rules</button>
+          <h3 class="sub">Sign everyone out at the end of the day</h3>
+          <p class="hint small">Visitors who forget to sign out are signed out at this time, and their badges are freed. The visit records say "End of day".</p>
+          <div class="seg seg-wrap" role="radiogroup" data-eod-choice>
+            <button type="button" role="radio" data-value="">Never</button>
+            <button type="button" role="radio" data-value="17:00">5:00 PM</button>
+            <button type="button" role="radio" data-value="18:00">6:00 PM</button>
+            <button type="button" role="radio" data-value="19:00">7:00 PM</button>
+            <button type="button" role="radio" data-value="20:00">8:00 PM</button>
+            <button type="button" role="radio" data-value="23:59">Midnight</button>
+          </div>
+          <h3 class="sub">Keep visitor records for</h3>
+          <p class="hint small">Older visits, visitors who haven't come back, their photos and face data are deleted automatically once a day. Badges and settings are kept. Choose what your policies require.</p>
+          <div class="seg seg-wrap" role="radiogroup" data-retention-choice>
+            <button type="button" role="radio" data-value="0">Keep everything</button>
+            <button type="button" role="radio" data-value="730">2 years</button>
+            <button type="button" role="radio" data-value="365">1 year</button>
+            <button type="button" role="radio" data-value="180">6 months</button>
+            <button type="button" role="radio" data-value="90">90 days</button>
+            <button type="button" role="radio" data-value="30">30 days</button>
+          </div>
+          <div data-summary-box hidden>
+            <button type="button" class="agree toggle" data-summary-toggle role="switch" aria-checked="false">
+              <span class="agree-box" aria-hidden="true">✓</span>
+              <span><strong>Email a daily summary at that time</strong><br><span class="small">Sign-ins, declines and flags, who was still inside, badges not returned, and expected visitors who didn't arrive.</span></span>
+            </button>
+            <label class="field" data-summary-to hidden><span>Send the summary to</span>
+              <input readonly inputmode="none" name="s-summary-to" data-kb="email" maxlength="300" autocomplete="off" placeholder="office@example.com">
+              <small>The same addresses as the screening alerts. Separate addresses with commas.</small></label>
+          </div>
+          <h3 class="sub">Languages</h3>
+          <p class="hint small">Visitors can switch the visitor screens to another language on the welcome screen. Setup and the admin screen stay in English, and answers are always saved in English.</p>
+          <button type="button" class="agree toggle" data-lang-toggle="es" role="switch" aria-checked="false">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Offer Español (Spanish)</strong><br><span class="small">The kiosk's own screens, and the built-in questions, rules and visit reasons, are already translated.</span></span>
+          </button>
+          <div class="translations" data-translations hidden>
+            <p class="builder-label" data-translations-title></p>
+            <p class="hint small">Your own text, in Spanish. Anything left blank is shown in English. Long texts are easier to type on a computer: export the settings, edit the file, and import it.</p>
+            <ol class="tr-list" data-tr-list></ol>
+          </div>
+        </div>
+
+        <div class="step" data-sstep="ready">
+          <div class="ready-hero">
+            <div class="done-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
+            <h2>You're all set!</h2>
+            <p class="hint">Here's your kiosk at a glance, and what to do next.</p>
+          </div>
+          <ul class="summary" data-summary></ul>
+          <h3 class="sub">Next steps</h3>
+          <ol class="next-steps" data-next-steps></ol>
+        </div>
+
+      </div>
+      <footer class="form-foot">
+        <p class="form-error" data-setup-error role="alert"></p>
+        <button type="button" class="btn-secondary btn-lg" data-setup-back>Back</button>
+        <button type="button" class="btn-ghost" data-setup-skip hidden>Skip for now</button>
+        <button type="button" class="btn-primary btn-lg" data-setup-next>Continue</button>
+      </footer>
+    </div>
+  </section>
+
   <!-- 1. Welcome / attract screen. Tap anywhere to start; tap a badge to sign out. -->
-  <section class="screen screen-welcome active" data-screen="welcome" aria-label="Welcome">
+  <section class="screen screen-welcome" data-screen="welcome" aria-label="Welcome">
     <div class="aurora" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="rings" aria-hidden="true"><span></span><span></span><span></span></div>
     <header class="welcome-top">
-      <div class="clock" data-clock></div>
+      <div class="clock" data-no-i18n><span class="attn-dot" data-attn-dot hidden></span><span data-clock></span></div>
     </header>
     <div class="welcome-center">
       <div class="logo-card" data-admin-hold>
-        <img src="assets/shocktech-logo.png" alt="Shock Tech, Safer World Group">
+        <img data-org-logo alt="">
       </div>
-      <h1 class="welcome-title">Welcome to <span>Shock&nbsp;Tech</span></h1>
-      <p class="welcome-sub">Noise, Vibration &amp; Shock Experts</p>
+      <h1 class="welcome-title">Welcome to <span data-org-name data-no-i18n></span></h1>
+      <p class="welcome-sub" data-org-tagline data-no-i18n></p>
       <div class="tap-cta"><span class="tap-dot" aria-hidden="true"></span>Tap anywhere to get started</div>
+      <div class="lang-pick" data-lang-pick hidden></div>
     </div>
     <footer class="welcome-foot">
-      <div class="mini-reader" aria-hidden="true"><div class="mini-badge"></div><div class="mini-pad"></div></div>
-      <p><strong>Leaving?</strong> Tap your visitor badge on the reader to sign out.</p>
+      <div class="foot-badge" data-foot-badge>
+        <div class="mini-reader" aria-hidden="true"><div class="mini-badge"></div><div class="mini-pad"></div></div>
+        <p><strong>Leaving?</strong> Tap your visitor badge on the reader to sign out.</p>
+      </div>
+      <button type="button" class="leave-btn" data-leave-open hidden><strong>Leaving?</strong> Tap here to sign out</button>
     </footer>
   </section>
 
@@ -56,11 +356,11 @@
   <section class="screen screen-choice" data-screen="choice" aria-label="Choose">
     <header class="bar">
       <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
-      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
-      <span class="bar-spacer"></span>
+      <img class="bar-logo" data-org-logo alt="">
+      <span class="bar-spacer bar-end"><button type="button" class="btn-ghost lang-switch" data-lang-switch data-no-i18n hidden></button></span>
     </header>
     <div class="choice-wrap">
-      <h2>Have you visited Shock Tech before?</h2>
+      <h2>Have you visited <span data-org-name></span> before?</h2>
       <div class="choice-grid">
         <button type="button" class="choice-card choice-new" data-action="new">
           <span class="choice-icon" aria-hidden="true">
@@ -77,33 +377,29 @@
           <span class="choice-text">Been here before? We'll find you in seconds.</span>
         </button>
       </div>
+      <button type="button" class="btn-ghost choice-leave" data-leave-open hidden>Leaving? Sign out here ›</button>
     </div>
   </section>
 
-  <!-- 3. New visitor form, one step at a time -->
-  <section class="screen screen-form" data-screen="form" aria-label="New visitor sign-in">
+  <!-- 3. Visitor questions, one step at a time (new visitors, and returning visitors' every-visit questions) -->
+  <section class="screen screen-form" data-screen="form" aria-label="Visitor sign-in">
     <header class="bar">
       <button type="button" class="btn-ghost" data-form-back>‹ Back</button>
       <div class="progress" aria-hidden="true"><div class="progress-fill" data-progress></div></div>
       <button type="button" class="btn-ghost" data-go="welcome">Cancel</button>
     </header>
 
-    <div class="form-body">
+    <div class="form-body" data-form-body>
       <!-- step: intro -->
       <div class="step" data-step="intro">
         <p class="eyebrow">New visitor</p>
-        <h2>Welcome to Shock Tech, Inc.</h2>
-        <div class="intro-text">
-          <p>Please sign in before your visit. It takes about two minutes.</p>
-          <p>Some of the products and technical data we work with are controlled under U.S. export laws (ITAR and EAR). To follow these laws, we need to know each visitor's citizenship status before they go past the front desk.</p>
-          <p>We use this information only to manage your visit and meet U.S. security and export requirements. Please don't enter ID numbers or other sensitive details.</p>
-          <p>Need help? Ask at the front desk.</p>
-        </div>
+        <h2>Welcome to <span data-org-name></span></h2>
+        <div class="intro-text" data-intro></div>
       </div>
 
       <!-- step: name -->
       <div class="step" data-step="name">
-        <p class="eyebrow">Step 1 of 6</p>
+        <p class="eyebrow" data-step-count></p>
         <h2>What's your name?</h2>
         <p class="hint">As shown on your photo ID.</p>
         <label class="field"><span>First name</span>
@@ -114,45 +410,26 @@
 
       <!-- step: visit -->
       <div class="step" data-step="visit">
-        <p class="eyebrow">Step 2 of 6</p>
+        <p class="eyebrow" data-step-count></p>
         <h2>About your visit</h2>
+        <p class="expected-note" data-expected-note hidden></p>
         <label class="field"><span>Company</span>
           <input readonly inputmode="none" name="company" data-cap="words" maxlength="80" autocomplete="off">
           <small>Write “N/A” if you're visiting on your own.</small></label>
-        <label class="field"><span>Who are you visiting at Shock Tech?</span>
+        <label class="field" data-host-field><span data-host-label>Who are you visiting?</span>
           <input readonly inputmode="none" name="visiting" data-cap="words" maxlength="80" autocomplete="off">
-          <small>The Shock Tech employee you're meeting.</small></label>
-        <label class="field"><span>Purpose of your visit</span>
+          <small data-host-hint></small></label>
+        <div class="chips host-suggest" data-host-suggest></div>
+        <label class="field" data-purpose-field><span>Purpose of your visit</span>
           <input readonly inputmode="none" name="purpose" data-cap="sentence" maxlength="120" autocomplete="off"></label>
-        <div class="chips" data-chips="purpose">
-          <button type="button" class="chip">Meeting</button>
-          <button type="button" class="chip">Quality audit</button>
-          <button type="button" class="chip">Supplier visit</button>
-          <button type="button" class="chip">First article review</button>
-          <button type="button" class="chip">Equipment service</button>
-          <button type="button" class="chip">Interview</button>
-          <button type="button" class="chip">Delivery</button>
-        </div>
+        <div class="chips" data-chips="purpose"></div>
       </div>
 
-      <!-- step: citizenship -->
-      <div class="step" data-step="citizenship">
-        <p class="eyebrow">Step 3 of 6</p>
-        <h2>Citizenship status</h2>
-        <p class="hint">Required by U.S. export law. The front desk may confirm it against your photo ID.</p>
-        <div class="options" data-options="citizenship" role="radiogroup">
-          <button type="button" class="option" role="radio" data-value="U.S. citizen">U.S. citizen</button>
-          <button type="button" class="option" role="radio" data-value="Lawful permanent resident (green card holder)">Lawful permanent resident <small>(green card holder)</small></button>
-          <button type="button" class="option" role="radio" data-value="Protected individual (asylee or refugee)">Protected individual <small>(asylee or refugee)</small></button>
-          <button type="button" class="option" role="radio" data-value="Not a U.S. citizen or permanent resident">Not a U.S. citizen or permanent resident</button>
-        </div>
-        <label class="field" data-country hidden><span>Country of citizenship</span>
-          <input readonly inputmode="none" name="country" data-cap="words" maxlength="60" autocomplete="off"></label>
-      </div>
+      <!-- screening question steps are added here from the settings -->
 
       <!-- step: photo -->
       <div class="step" data-step="photo">
-        <p class="eyebrow">Step 4 of 6</p>
+        <p class="eyebrow" data-step-count></p>
         <h2>Take your picture</h2>
         <p class="hint">Look at the camera. We use it on your visit record so our team knows who you are.</p>
         <div class="camera-frame">
@@ -170,16 +447,9 @@
 
       <!-- step: rules -->
       <div class="step" data-step="rules">
-        <p class="eyebrow">Step 5 of 6</p>
+        <p class="eyebrow" data-step-count></p>
         <h2>Visitor rules</h2>
-        <ol class="rules">
-          <li>I will stay with my Shock Tech escort at all times while I am past the front desk.</li>
-          <li>I will not take photos, video or audio recordings, and I will keep my phone put away in production and controlled areas.</li>
-          <li>Drawings, parts and processes I see may be controlled under the International Traffic in Arms Regulations (ITAR) and the Export Administration Regulations (EAR), and are confidential to Shock Tech and its customers. I will not copy, remove or disclose them.</li>
-          <li>The citizenship status I gave Shock Tech is true. I will tell my escort if it changes.</li>
-          <li>I will follow all safety instructions and wear any protective equipment I am given.</li>
-          <li>I will return my visitor badge before I leave.</li>
-        </ol>
+        <ol class="rules" data-rules></ol>
         <button type="button" class="agree" data-agree role="checkbox" aria-checked="false">
           <span class="agree-box" aria-hidden="true">✓</span>
           <span>I agree to the visitor rules. Checking this box is my electronic signature on these rules.</span>
@@ -188,7 +458,7 @@
 
       <!-- step: quick entry opt-in -->
       <div class="step" data-step="quick">
-        <p class="eyebrow">Step 6 of 6</p>
+        <p class="eyebrow" data-step-count></p>
         <h2>Want quick entry next time?</h2>
         <div class="quick-card">
           <div class="quick-art" aria-hidden="true">
@@ -196,7 +466,7 @@
           </div>
           <div>
             <p>Next time, tap <strong>Returning visitor</strong> and the kiosk recognizes you from the camera. No typing.</p>
-            <p class="small">If you say yes, Shock Tech keeps your photos and a numeric face signature made from them, only to recognize you at this kiosk. Each visit adds a fresh photo so it keeps working as you change. Ask the front desk any time to turn it off and delete it.</p>
+            <p class="small">If you say yes, <span data-org-name></span> keeps your photos and a numeric face signature made from them, only to recognize you at this kiosk. Each visit adds a fresh photo so it keeps working as you change. Ask the front desk any time to turn it off and delete it.</p>
           </div>
         </div>
         <div class="quick-actions">
@@ -216,7 +486,7 @@
   <section class="screen screen-find" data-screen="find" aria-label="Returning visitor">
     <header class="bar">
       <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
-      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
+      <img class="bar-logo" data-org-logo alt="">
       <span class="bar-spacer"></span>
       <div class="cam-bubble" data-cam-bubble aria-live="polite">
         <div class="cam-ring"><video class="cam-video" data-video="return" playsinline muted></video></div>
@@ -234,7 +504,7 @@
         <button type="button" class="btn-primary btn-lg" data-face-yes>That's me</button>
       </div>
       <h2>Welcome back!</h2>
-      <p class="hint">Start typing your name. If you turned on quick entry, the camera may recognize you first.</p>
+      <p class="hint" data-find-hint>Start typing your name. If you turned on quick entry, the camera may recognize you first.</p>
       <div class="find-fields">
         <label class="field"><span>First name</span>
           <input readonly inputmode="none" name="ffirst" data-cap="words" maxlength="60" autocomplete="off"></label>
@@ -252,12 +522,36 @@
     </footer>
   </section>
 
+  <!-- 5. Signing out without a badge -->
+  <section class="screen screen-leave" data-screen="leave" aria-label="Sign out">
+    <header class="bar">
+      <button type="button" class="btn-ghost" data-go="welcome">‹ Back</button>
+      <img class="bar-logo" data-org-logo alt="">
+      <span class="bar-spacer"></span>
+    </header>
+    <div class="form-body find-body">
+      <h2>Signing out?</h2>
+      <p class="hint">Type your name, then tap it when it appears.</p>
+      <div class="find-fields">
+        <label class="field"><span>First name</span>
+          <input readonly inputmode="none" name="lfirst" data-cap="words" maxlength="60" autocomplete="off"></label>
+        <label class="field"><span>Last name</span>
+          <input readonly inputmode="none" name="llast" data-cap="words" maxlength="60" autocomplete="off"></label>
+      </div>
+      <div class="matches" data-leave-matches></div>
+    </div>
+    <footer class="form-foot">
+      <p class="form-error" data-leave-error role="alert"></p>
+      <button type="button" class="btn-primary btn-lg" data-leave-go>Find me</button>
+    </footer>
+  </section>
+
   <!-- 6. Opt in later (returning visitor found by name, quick entry off) -->
   <section class="screen screen-optin" data-screen="optin" aria-label="Quick entry">
     <div class="center-card">
       <h2 data-optin-title>Hi!</h2>
       <p>Want the kiosk to recognize you next time, so you skip the typing?</p>
-      <p class="small">Shock Tech keeps your photos and a numeric face signature, only for this kiosk. Ask the front desk any time to delete it.</p>
+      <p class="small"><span data-org-name></span> keeps your photos and a numeric face signature, only for this kiosk. Ask the front desk any time to delete it.</p>
       <div class="quick-actions">
         <button type="button" class="btn-primary btn-lg" data-optin="yes">Yes, turn on quick entry</button>
         <button type="button" class="btn-secondary btn-lg" data-optin="no">No thanks</button>
@@ -297,7 +591,7 @@
               <div class="lanyard"></div>
               <div class="badge-card">
                 <div class="badge-band"><div class="badge-slot"></div></div>
-                <img class="badge-logo" src="assets/shocktech-logo.png" alt="">
+                <img class="badge-logo" data-org-logo alt="">
                 <div class="badge-photo"><svg viewBox="0 0 40 40"><circle cx="20" cy="15" r="7"/><path d="M6 38c1-9 7-13 14-13s13 4 14 13z"/></svg></div>
                 <div class="badge-word">VISITOR</div>
                 <div class="badge-number" data-badge-no></div>
@@ -319,19 +613,36 @@
       <div class="done-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
       <h2 data-done-title>You're all set!</h2>
       <p class="done-badge" data-done-badge></p>
-      <p class="done-text">Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
-      <p class="done-text small">When you leave, tap your badge on the reader to sign out.</p>
+      <p class="done-text" data-done-text>Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
+      <p class="done-host" data-done-host hidden></p>
+      <p class="done-text small" data-done-leave>When you leave, tap your badge on the reader to sign out.</p>
       <button type="button" class="btn-secondary btn-lg" data-go="welcome">Done</button>
+    </div>
+  </section>
+
+  <!-- 9. Declined by a screening question: polite, and staff are told -->
+  <section class="screen screen-declined" data-screen="declined" aria-label="Thank you">
+    <div class="done-wrap">
+      <div class="declined-icon" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M26 23v13M26 16v.5"/></svg></div>
+      <h2 data-declined-title>Thank you</h2>
+      <p class="done-text" data-declined-text></p>
+      <p class="done-text small">A member of our team has been notified and will be with you shortly.</p>
+      <button type="button" class="btn-secondary btn-lg" data-go="welcome">Done</button>
+      <button type="button" class="btn-ghost staff-link" data-staff-override>Staff override</button>
     </div>
   </section>
 
   <!-- Admin -->
   <section class="screen screen-admin" data-screen="admin" aria-label="Admin">
     <header class="bar admin-bar">
-      <img class="bar-logo" src="assets/shocktech-logo.png" alt="Shock Tech">
+      <img class="bar-logo" data-org-logo alt="">
       <nav class="tabs" role="tablist">
         <button type="button" class="tab active" data-admin-tab="inside">Inside now</button>
+        <button type="button" class="tab" data-admin-tab="expected">Expected <span class="tab-count soft" data-expected-count hidden></span></button>
+        <button type="button" class="tab" data-admin-tab="attention">Needs attention <span class="tab-count" data-attn-count hidden></span></button>
+        <button type="button" class="tab" data-admin-tab="history">History</button>
         <button type="button" class="tab" data-admin-tab="badges">Badges</button>
+        <button type="button" class="tab" data-admin-tab="settings">Settings</button>
       </nav>
       <button type="button" class="btn-ghost" data-kiosk-unlock hidden>Unlock tablet</button>
       <button type="button" class="btn-secondary" data-admin-exit>Exit admin</button>
@@ -339,14 +650,103 @@
     <div class="admin-body">
       <div class="admin-pane" data-admin-pane="inside">
         <div class="admin-head"><h2>Inside now <span class="count" data-inside-count></span></h2>
-          <button type="button" class="btn-ghost" data-admin-refresh>Refresh</button></div>
+          <div class="head-actions">
+            <button type="button" class="btn-ghost" data-admin-refresh>Refresh</button>
+            <button type="button" class="btn-primary roll-btn" data-rollcall-open>Roll call</button>
+          </div></div>
         <div class="admin-list" data-inside-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="expected" hidden>
+        <div class="admin-head"><h2>Expected visitors</h2>
+          <button type="button" class="btn-primary" data-expected-new>+ Add a visitor</button></div>
+        <p class="hint small admin-hint" data-expected-hint></p>
+        <div class="exp-form" data-expected-form hidden>
+          <div class="exp-grid">
+            <label class="field"><span>First name</span><input readonly inputmode="none" name="e-first" data-cap="words" maxlength="60" autocomplete="off"></label>
+            <label class="field"><span>Last name</span><input readonly inputmode="none" name="e-last" data-cap="words" maxlength="60" autocomplete="off"></label>
+            <label class="field"><span>Company <em>(optional)</em></span><input readonly inputmode="none" name="e-company" data-cap="words" maxlength="80" autocomplete="off"></label>
+            <label class="field"><span>Visiting <em>(optional)</em></span><input readonly inputmode="none" name="e-host" data-cap="words" maxlength="80" autocomplete="off"></label>
+            <label class="field"><span>Purpose <em>(optional)</em></span><input readonly inputmode="none" name="e-purpose" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+            <label class="field"><span>Note for the front desk <em>(optional)</em></span><input readonly inputmode="none" name="e-note" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+          </div>
+          <div class="chips" data-expected-hosts></div>
+          <p class="builder-label">Arriving</p>
+          <div class="seg seg-wrap" role="radiogroup" data-expected-day></div>
+          <p class="form-error" data-expected-error role="alert"></p>
+          <div class="row-actions">
+            <button type="button" class="btn-secondary" data-expected-cancel>Cancel</button>
+            <button type="button" class="btn-primary" data-expected-save>Save</button>
+          </div>
+        </div>
+        <div class="admin-list" data-expected-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="attention" hidden>
+        <div class="admin-head"><h2>Needs attention</h2>
+          <button type="button" class="btn-ghost" data-attn-refresh>Refresh</button></div>
+        <p class="hint small admin-hint">Visitors who were declined, or let in with an answer that needs a look, in the last two weeks. "Let in" lets a declined visitor sign in normally for the next two hours.</p>
+        <div class="admin-list" data-attn-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="history" hidden>
+        <div class="admin-head"><h2>History</h2>
+          <div class="head-actions">
+            <button type="button" class="btn-secondary" data-export-visits>Export visits (CSV)</button>
+            <button type="button" class="btn-secondary" data-export-visitors hidden>Export visitors (CSV)</button>
+          </div></div>
+        <div class="history-tools">
+          <label class="field"><span>Search</span><input readonly inputmode="none" name="h-search" data-cap="words" maxlength="60" autocomplete="off" placeholder="Name, company or host"></label>
+          <div class="seg" role="radiogroup" data-history-range>
+            <button type="button" role="radio" data-value="1">Today</button>
+            <button type="button" role="radio" data-value="7" class="on">7 days</button>
+            <button type="button" role="radio" data-value="30">30 days</button>
+            <button type="button" role="radio" data-value="365">A year</button>
+          </div>
+        </div>
+        <p class="hint small admin-hint" data-history-note></p>
+        <div class="admin-list" data-history-list></div>
       </div>
       <div class="admin-pane" data-admin-pane="badges" hidden>
         <div class="admin-head"><h2>Badges</h2>
           <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button></div>
         <p class="admin-banner" data-admin-banner hidden></p>
         <div class="admin-list" data-badge-list></div>
+      </div>
+      <div class="admin-pane" data-admin-pane="settings" hidden>
+        <div class="admin-head"><h2>Settings</h2></div>
+        <div class="settings-grid">
+          <div class="set-card">
+            <h3>Your kiosk</h3>
+            <div class="set-rows" data-settings-rows></div>
+          </div>
+          <div class="set-card">
+            <h3>Records</h3>
+            <p class="set-text" data-storage-info></p>
+            <div class="row-actions" data-storage-actions></div>
+            <div class="set-secret" data-connect-link hidden></div>
+            <div class="set-qr" data-connect-qr hidden></div>
+          </div>
+          <div class="set-card">
+            <h3>Diagnostics</h3>
+            <dl class="diag" data-diagnostics></dl>
+            <div class="update-box" data-update-box hidden></div>
+            <div class="row-actions">
+              <button type="button" class="btn-secondary" data-diag-refresh>Refresh</button>
+              <button type="button" class="btn-secondary" data-run-checks>Check this tablet</button>
+            </div>
+          </div>
+          <div class="set-card" data-plan-card hidden>
+            <h3>Plan</h3>
+            <p class="set-text" data-plan-text></p>
+            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>Plans and license</button></div>
+          </div>
+          <div class="set-card">
+            <h3>Backup and reset</h3>
+            <p class="set-text">Export the settings to set up another tablet or keep a backup. The admin PIN isn't included.</p>
+            <div class="row-actions">
+              <button type="button" class="btn-secondary" data-export-settings>Export settings</button>
+              <button type="button" class="btn-secondary" data-start-over>Start over on this tablet</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -363,8 +763,8 @@
 
   <div class="overlay" data-overlay="pin" hidden>
     <div class="pin-card">
-      <h2>Admin</h2>
-      <p class="hint">Enter the admin PIN</p>
+      <h2 data-pin-title>Admin</h2>
+      <p class="hint" data-pin-hint>Enter the admin PIN</p>
       <div class="pin-dots" data-pin-dots></div>
       <p class="form-error" data-pin-error></p>
       <div class="pin-pad" data-pin-pad>
@@ -372,6 +772,64 @@
         <button type="button">4</button><button type="button">5</button><button type="button">6</button>
         <button type="button">7</button><button type="button">8</button><button type="button">9</button>
         <button type="button" data-pin="cancel">Cancel</button><button type="button">0</button><button type="button" data-pin="back">⌫</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay with-kb" data-overlay="reason" hidden>
+    <div class="center-card reason-card">
+      <h2 data-reason-title>Let them in?</h2>
+      <p data-reason-text></p>
+      <label class="field"><span>Reason <em>(optional, saved with the record)</em></span>
+        <input readonly inputmode="none" name="reason" data-cap="sentence" maxlength="120" autocomplete="off"></label>
+      <div class="chips" data-reason-chips>
+        <button type="button" class="chip">Escorted by staff</button>
+        <button type="button" class="chip">ID checked at the front desk</button>
+        <button type="button" class="chip">Approved by security</button>
+      </div>
+      <div class="quick-actions">
+        <button type="button" class="btn-secondary btn-lg" data-reason-cancel>Cancel</button>
+        <button type="button" class="btn-primary btn-lg" data-reason-ok>Let them in</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Emergency roll call: everyone on site, tapped off as they're accounted for -->
+  <div class="overlay rollcall" data-overlay="rollcall" hidden>
+    <div class="rollcall-card">
+      <header class="rollcall-head">
+        <div><p class="eyebrow">Roll call · <span data-rollcall-time></span></p>
+          <h2><span data-rollcall-done>0</span> of <span data-rollcall-total>0</span> accounted for</h2></div>
+        <button type="button" class="btn-secondary btn-lg" data-rollcall-close>Close</button>
+      </header>
+      <div class="rollcall-bar"><i data-rollcall-progress></i></div>
+      <p class="hint small">Tap each visitor once you've seen them. Visitors still missing stay at the top.</p>
+      <div class="rollcall-grid" data-rollcall-list></div>
+    </div>
+  </div>
+
+  <!-- Plans: shown only when the paywall is switched on (js/plans.js) -->
+  <div class="overlay with-kb" data-overlay="upgrade" hidden>
+    <div class="center-card upgrade-card">
+      <p class="eyebrow">Visitor Sign-In Pro</p>
+      <h2 data-upgrade-title>Unlock everything</h2>
+      <p class="upgrade-text" data-upgrade-text></p>
+      <ul class="upgrade-list" data-upgrade-list></ul>
+      <div class="upgrade-buy" data-upgrade-buy hidden>
+        <div data-upgrade-qr></div>
+        <p>Scan with your phone to buy Pro, or go to<br><code data-upgrade-url></code><br><span class="small">Your license key arrives by email.</span></p>
+      </div>
+      <label class="field"><span>Have a license key?</span>
+        <input readonly inputmode="none" name="license" data-kb="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="VSI1.…"></label>
+      <div class="row-actions upgrade-key-actions">
+        <button type="button" class="btn-ghost" data-license-paste>Paste</button>
+        <button type="button" class="btn-ghost" data-license-scan hidden>Scan the key's QR code</button>
+      </div>
+      <video class="license-scan" data-video="license" playsinline muted autoplay hidden></video>
+      <p class="form-error" data-upgrade-error role="alert"></p>
+      <div class="quick-actions">
+        <button type="button" class="btn-secondary btn-lg" data-upgrade-close>Not now</button>
+        <button type="button" class="btn-primary btn-lg" data-upgrade-apply>Use this key</button>
       </div>
     </div>
   </div>
@@ -394,7 +852,7 @@
   <div class="keyboard" data-keyboard hidden></div>
 
   <div class="demo-panel" data-demo hidden>
-    <strong>Demo mode</strong> · no backend connected · admin PIN 123456
+    <strong>Demo mode</strong> · sample data on this tablet only · admin PIN 123456
     <div class="demo-taps" data-demo-taps></div>
   </div>
 </div>

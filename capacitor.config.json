@@ -1,6 +1,6 @@
 {
-  "appId": "com.shocktech.visitorkiosk",
-  "appName": "Shock Tech Visitors",
+  "appId": "com.visitorsignin.kiosk",
+  "appName": "Visitor Sign-In",
   "webDir": "web",
   "android": {
     "backgroundColor": "#031d38",

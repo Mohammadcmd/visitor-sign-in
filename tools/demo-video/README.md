@@ -11,6 +11,16 @@ spreadsheet view.
 - **The people and companies are made up:** Jordan Rivera, Northwind
   Aerospace, Priya Nair, Marcus Webb, Lisa Chen and Tom Alvarez.
 
+## Which version it records
+
+The video shows the kiosk as it was built for Shock Tech, before the setup
+wizard and screening questions. The script drives that version's exact screens
+and demo data, so record it from that commit:
+
+```bash
+git worktree add ../kiosk-video 211c88d && cd ../kiosk-video
+```
+
 ## Run it
 
 Needs Node with Playwright and Chromium, Python 3, and ffmpeg.

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Visitor Sign-In</title>
+  <meta name="description" content="A visitor sign-in kiosk for your lobby tablet: install it, check the tablet, and set it up in minutes.">
+  <meta name="theme-color" content="#063a6e">
+  <link rel="icon" href="web/assets/icon-512.png">
+  <script>
+    // Setup, demo and license links go straight to the kiosk.
+    (function () {
+      var q = new URLSearchParams(location.search);
+      if (['api', 'key', 'demo', 'disconnect', 'license', 'kiosk'].some(function (k) { return q.has(k); })) {
+        location.replace('web/' + location.search + location.hash);
+      }
+    })();
+  </script>
+  <style>
+    :root { --blue: #0a5ea8; --deep: #063a6e; --navy: #031d38; --ink: #0d1b2a; --soft: #4a5a6b; --line: #d9e2ec; --ok: #1f8a4c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: #f5f8fb; }
+    header { color: #fff; background: radial-gradient(120% 140% at 50% 0%, #0e4f8c 0%, var(--deep) 45%, var(--navy) 100%); padding: 48px 24px 120px; text-align: center; }
+    header img { width: 84px; height: 84px; border-radius: 22px; box-shadow: 0 12px 30px rgba(0,0,0,.25); }
+    h1 { margin: 16px 0 6px; font-size: clamp(30px, 5vw, 44px); letter-spacing: -.01em; }
+    header p { margin: 0 auto; max-width: 620px; color: #cfe2f6; font-size: 19px; }
+    main { max-width: 980px; margin: -86px auto 0; padding: 0 20px 48px; }
+    .card { background: #fff; border-radius: 26px; box-shadow: 0 18px 50px rgba(3,29,56,.14); padding: 32px; }
+    .card h2 { margin: 0 0 6px; font-size: 26px; }
+    .lead { color: var(--soft); margin: 0 0 20px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0 8px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 58px; padding: 14px 26px; border-radius: 16px; font-weight: 800; font-size: 18px; text-decoration: none; border: 0; cursor: pointer; }
+    .btn-primary { color: #fff; background: linear-gradient(180deg, #1a7fd0, var(--blue)); box-shadow: 0 10px 24px rgba(10,94,168,.3); }
+    .btn-secondary { color: var(--deep); background: #eef3f8; }
+    .small { font-size: 15px; color: var(--soft); }
+    ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; }
+    ol.steps li { counter-increment: s; position: relative; padding: 14px 16px 14px 60px; border: 1px solid var(--line); border-radius: 16px; }
+    ol.steps li::before { content: counter(s); position: absolute; left: 16px; top: 14px; width: 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 800; display: grid; place-items: center; }
+    ol.steps strong { display: block; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 18px; }
+    .tile { border: 1px solid var(--line); border-radius: 20px; padding: 20px; }
+    .tile h3 { margin: 0 0 4px; font-size: 19px; }
+    .qr-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+    .qr-wrap svg { border-radius: 14px; border: 1px solid var(--line); }
+    .what { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 24px; margin: 26px 0 0; padding: 0; list-style: none; }
+    .what li::before { content: '✓'; color: var(--ok); font-weight: 900; margin-right: 8px; }
+    footer { text-align: center; padding: 8px 20px 40px; color: var(--soft); font-size: 15px; }
+    footer a { color: var(--blue); }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) { .grid, .what { grid-template-columns: 1fr; } .card { padding: 24px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="web/assets/icon-512.png" alt="">
+    <h1>Visitor Sign-In</h1>
+    <p>A friendly sign-in kiosk for your lobby tablet. Install it, let it check the tablet, answer a few questions, and you're ready for visitors.</p>
+  </header>
+
+  <main>
+    <!-- Android tablet -->
+    <section class="card" data-for="android" hidden>
+      <h2>Install on this Android tablet</h2>
+      <p class="lead">The app runs full screen, keeps the tablet locked to the kiosk, and starts by itself after a restart.</p>
+      <div class="actions">
+        <a class="btn btn-primary" data-apk href="#">Download the app</a>
+        <a class="btn btn-secondary" href="web/">Use it in the browser instead</a>
+      </div>
+      <p class="small" data-apk-note>Finding the latest version…</p>
+      <ol class="steps">
+        <li><strong>Download, then open the file</strong>Tap the download when it finishes. If Android asks, allow installs from this browser, then tap Install.</li>
+        <li><strong>Open Visitor Sign-In and allow the camera</strong>The app checks the camera, the badge reader and the internet, and says how to fix anything that needs it.</li>
+        <li><strong>Answer the setup questions</strong>Your company, an admin PIN, your logo, badges and where records go. About five minutes.</li>
+      </ol>
+    </section>
+
+    <!-- iPad / iPhone -->
+    <section class="card" data-for="ios" hidden>
+      <h2>Set up this iPad</h2>
+      <p class="lead">The kiosk runs in Safari, full screen from your Home Screen, and opens even without Wi-Fi once it's added.</p>
+      <div class="actions"><a class="btn btn-primary" href="web/">Open the kiosk</a></div>
+      <ol class="steps">
+        <li><strong>Add it to the Home Screen</strong>Open the kiosk, tap the Share button, then <em>Add to Home Screen</em>. Open it from there.</li>
+        <li><strong>Allow the camera</strong>The kiosk checks the camera, the badge reader and the internet first, and says how to fix anything.</li>
+        <li><strong>Answer the setup questions</strong>About five minutes.</li>
+        <li><strong>Lock the iPad to the kiosk</strong>Settings → Display &amp; Brightness → Auto-Lock → Never. Settings → Accessibility → Guided Access → On, then triple-click the side button in the kiosk.</li>
+      </ol>
+    </section>
+
+    <!-- Computer -->
+    <section class="card" data-for="desktop" hidden>
+      <h2>Set up a tablet</h2>
+      <p class="lead">Open this page on the tablet that will stand at your entrance: scan the code with its camera, or type the address.</p>
+      <div class="qr-wrap">
+        <div data-page-qr></div>
+        <div>
+          <p><strong data-page-url></strong></p>
+          <div class="actions">
+            <a class="btn btn-primary" href="web/?demo">Try the demo here</a>
+            <a class="btn btn-secondary" data-apk href="#">Download for Android</a>
+          </div>
+          <p class="small">The demo uses sample data and keeps nothing. Admin PIN 123456.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <div class="tile"><h3>1. Install</h3><p class="small">The Android app, or the browser kiosk on an iPad or any tablet.</p></div>
+      <div class="tile"><h3>2. Check the tablet</h3><p class="small">Camera, badge reader, internet, clock and storage are tested first, with fixes in plain words.</p></div>
+      <div class="tile"><h3>3. Set up</h3><p class="small">Company, admin PIN, logo, badges, records on the tablet or in Google Sheets, and optional questions.</p></div>
+    </div>
+
+    <ul class="what">
+      <li>Sign-in in about two minutes, sign-out with a badge tap</li>
+      <li>Records on the tablet, or in your own Google Sheet</li>
+      <li>Screening questions that can politely decline</li>
+      <li>Hosts told when their visitor arrives</li>
+      <li>Expected visitors, emergency roll call, history</li>
+      <li>English and Spanish</li>
+    </ul>
+  </main>
+
+  <footer>
+    <a data-link="launch" href="#">Launch checklist</a> · <a data-link="releases" href="#">All downloads</a> · <a data-link="privacy" href="#">Privacy notice template</a>
+  </footer>
+
+  <script type="module">
+    import { qrSvg } from './web/js/qr.js';
+
+    // The GitHub repository this page is published from (owner.github.io/repository/), or the original project.
+    const m = /^([\w-]+)\.github\.io$/i.exec(location.hostname);
+    const seg = location.pathname.split('/').filter(Boolean)[0];
+    const repo = m && seg ? `${m[1]}/${seg}` : 'Mohammadcmd/visitor-sign-in';
+    const gh = `https://github.com/${repo}`;
+    document.querySelector('[data-link="launch"]').href = `${gh}/blob/main/docs/LAUNCH.md`;
+    document.querySelector('[data-link="releases"]').href = `${gh}/releases`;
+    document.querySelector('[data-link="privacy"]').href = `${gh}/blob/main/docs/privacy-notice.md`;
+
+    const ua = navigator.userAgent;
+    const kind = /Android/i.test(ua) ? 'android'
+      : /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'ios' : 'desktop';
+    document.querySelector(`[data-for="${kind}"]`).hidden = false;
+    document.body.dataset.device = kind;
+
+    const page = location.href.split(/[?#]/)[0];
+    document.querySelector('[data-page-qr]').innerHTML = qrSvg(page, { size: 190, label: 'This page' });
+    document.querySelector('[data-page-url]').textContent = page;
+
+    // The newest Android app from the latest release.
+    const apkLinks = [...document.querySelectorAll('[data-apk]')];
+    const note = document.querySelector('[data-apk-note]');
+    apkLinks.forEach((a) => { a.href = `${gh}/releases/latest`; });
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      const rel = await res.json();
+      const apk = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
+      if (apk) {
+        apkLinks.forEach((a) => { a.href = apk.browser_download_url; });
+        note.textContent = `Version ${String(rel.tag_name || '').replace(/^v/, '')}, ${Math.round(apk.size / 1e6)} MB.`;
+      } else {
+        note.textContent = 'Opens the downloads page: pick the file ending in .apk.';
+      }
+    } catch {
+      note.textContent = 'Opens the downloads page: pick the file ending in .apk.';
+    }
+  </script>
+</body>
+</html>

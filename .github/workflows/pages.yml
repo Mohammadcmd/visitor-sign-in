@@ -1,0 +1,53 @@
+name: Publish the kiosk (GitHub Pages)
+
+# Hosts the browser kiosk at https://<owner>.github.io/<repository>/ over HTTPS,
+# which the camera needs. Nothing private is published: the kiosk only learns
+# about your Google Sheet when it's connected on a tablet.
+#
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions,
+# then Actions > "Publish the kiosk (GitHub Pages)" > Run workflow.
+# To publish again automatically on every change to main, add the repository
+# variable KIOSK_PAGES with the value on (Settings > Secrets and variables > Actions > Variables).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'index.html'
+      - 'sw.js'
+      - '.github/workflows/pages.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || vars.KIOSK_PAGES == 'on'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r web _site/web
+          cp index.html sw.js _site/
+          touch _site/.nojekyll
+          # Stamp this build into the offline cache, so every kiosk picks up this deploy.
+          sed -i "s/^const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::8}';/" _site/web/sw.js
+          grep -q "const BUILD = '${GITHUB_SHA::8}';" _site/web/sw.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
