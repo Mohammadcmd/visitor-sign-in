@@ -21,7 +21,7 @@
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
 
-var BACKEND_VERSION = 4;
+var BACKEND_VERSION = 5;
 
 var TABS = {
   visitors: 'Visitors',
@@ -36,12 +36,12 @@ var HEADERS = {
   Visitors: [
     'First Name', 'Last Name', 'Company', 'Who are you visiting?', 'Purpose of your visit',
     'Visitor acknowledgment', 'Quick entry', 'Screening', 'Registered', 'Last visit', 'Visit count',
-    'Visitor ID', 'Photo folder'
+    'Visitor ID', 'Photo folder', 'Email', 'Signature', 'Signed copy'
   ],
   Visits: [
     'Signed in', 'First Name', 'Last Name', 'Company', 'Visiting', 'Purpose',
     'Kind', 'Badge', 'How they signed in', 'Signed out', 'Signed out by',
-    'Screening', 'Reviewed', 'Photo', 'Host notified', 'Visitor ID', 'Visit ID'
+    'Screening', 'Reviewed', 'Photo', 'Host notified', 'Visitor ID', 'Visit ID', 'Signature', 'Signed copy'
   ],
   Badges: ['Badge', 'NFC tag', 'Status', 'Holder', 'Visitor ID', 'Visit ID', 'Since', 'Note'],
   'Face data': ['Visitor ID', 'Descriptor', 'Captured', 'Source', 'Photo file ID'],
@@ -194,6 +194,7 @@ function dispatch_(req) {
     case 'adminAddExpected': return withLock_(function () { return adminAddExpected_(a); });
     case 'adminRemoveExpected': return withLock_(function () { return adminRemoveExpected_(a); });
     case 'adminPhoto': return adminPhoto_(a);
+    case 'adminSignature': return adminSignature_(a);
     case 'adminSignOut': return withLock_(function () { return adminSignOut_(a); });
     case 'adminAddBadge': return withLock_(function () { return adminAddBadge_(a); });
     case 'adminLinkTag': return withLock_(function () { return adminLinkTag_(a); });
@@ -331,13 +332,16 @@ function register_(a) {
   var screening = screeningText_(flags, a.override || pass);
 
   var id = 'P' + randomCode_(8);
-  var folderUrl = '', fileId = '';
-  if (a.photo) {
-    var folder = photoRoot_().createFolder(v.last + ', ' + v.first + ' (' + v.company + ') ' + id);
-    fileId = savePhoto_(folder, a.photo, 'signup').getId();
+  var folderUrl = '', fileId = '', folder = null;
+  var signature = isSignature_(a.signature) ? a.signature : '';
+  if (a.photo || signature) {
+    folder = photoRoot_().createFolder(v.last + ', ' + v.first + ' (' + v.company + ') ' + id);
     folderUrl = folder.getUrl();
   }
+  if (a.photo) fileId = savePhoto_(folder, a.photo, 'signup').getId();
   var now = new Date();
+  var email = validEmail_(a.email);
+  var signed = signature ? saveSigned_(folder, signature, { first: v.first, last: v.last, company: v.company, visiting: v.visiting }, a.agreement, language, now, email) : null;
   var row = {
     'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
     'Who are you visiting?': v.visiting, 'Purpose of your visit': v.purpose,
@@ -346,6 +350,13 @@ function register_(a) {
     'Registered': now, 'Last visit': now, 'Visit count': 0,
     'Visitor ID': id, 'Photo folder': folderUrl
   };
+  if (email) { ensureColumn_(TABS.visitors, 'Email'); row['Email'] = email; }
+  if (signed) {
+    ensureColumn_(TABS.visitors, 'Signature');
+    ensureColumn_(TABS.visitors, 'Signed copy');
+    row['Signature'] = signed.signature;
+    row['Signed copy'] = signed.copy;
+  }
   answers.forEach(function (ans) {
     ensureColumn_(TABS.visitors, ans.label, ANSWERS_BEFORE);
     row[ans.label] = ans.value;
@@ -513,6 +524,22 @@ function startVisit_(person, a, badgeNo, replacedBy) {
   if (expected) setCell_(TABS.expected, expected.row, 'Arrived', 'Signed in ' + stamp_(now));
   var host = notifyHost_(visiting, { first: p['First Name'], last: p['Last Name'], company: p['Company'], purpose: purpose }, badgeNo, now);
   if (host) ensureColumn_(TABS.visits, 'Host notified', 'Visitor ID');
+  // The signed rules: signed for this visit, or (on a first visit) the copy signed at registration.
+  var signed = null;
+  if (isSignature_(a.signature)) {
+    var folderId = driveId_(p['Photo folder']);
+    var folder = null;
+    try { if (folderId) folder = DriveApp.getFolderById(folderId); } catch (err) { folder = null; }
+    if (!folder) {
+      folder = photoRoot_().createFolder(p['Last Name'] + ', ' + p['First Name'] + ' (' + p['Company'] + ') ' + a.visitorId);
+      setCells_(TABS.visitors, person.row, { 'Photo folder': folder.getUrl() });
+    }
+    var language = /^[A-Za-zÀ-ÿ ]{2,20}$/.test(String(a.language || '')) && a.language !== 'English' ? a.language : '';
+    signed = saveSigned_(folder, a.signature, { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, a.agreement, language, now, validEmail_(a.email) || validEmail_(p['Email']));
+  } else if (!(Number(p['Visit count']) > 0) && p['Signed copy']) {
+    signed = { signature: p['Signature'] || '', copy: p['Signed copy'] };
+  }
+  if (signed) { ensureColumn_(TABS.visits, 'Signature'); ensureColumn_(TABS.visits, 'Signed copy'); }
   appendRow_(TABS.visits, {
     'Signed in': now, 'First Name': p['First Name'], 'Last Name': p['Last Name'],
     'Company': p['Company'],
@@ -522,7 +549,8 @@ function startVisit_(person, a, badgeNo, replacedBy) {
     'How they signed in': (clean_(a.method) || 'kiosk') + (a.override ? ' (staff override)' : ''),
     'Screening': screening,
     'Host notified': host ? host + ' (' + stamp_(now) + ')' : '',
-    'Visitor ID': a.visitorId, 'Visit ID': visitId
+    'Visitor ID': a.visitorId, 'Visit ID': visitId,
+    'Signature': signed ? signed.signature : '', 'Signed copy': signed ? signed.copy : ''
   });
   setCells_(TABS.visitors, person.row, {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
@@ -633,9 +661,18 @@ function purgeOld_() {
   var cutoff = new Date(new Date().getTime() - days * 86400000);
   var old = function (v) { var t = new Date(v); return !isNaN(t.getTime()) && t < cutoff; };
 
+  // A first visit shares the signed copy made at registration: that one goes with the visitor.
+  var registrationCopies = {};
+  readTab_(TABS.visitors).forEach(function (r) {
+    if (r['Signature']) registrationCopies[r['Signature']] = true;
+    if (r['Signed copy']) registrationCopies[r['Signed copy']] = true;
+  });
   var visits = keepRows_(TABS.visits, function (r) {
     if (!r['Visit ID'] || !old(r['Signed in']) || !r['Signed out']) return true;
     trashDrive_(r['Photo']);
+    ['Signature', 'Signed copy'].forEach(function (col) {
+      if (r[col] && !registrationCopies[r[col]]) trashDrive_(r[col]);
+    });
     return false;
   });
   var gone = {};
@@ -1016,7 +1053,8 @@ function adminHistory_(a) {
       first: r['First Name'], last: r['Last Name'], company: r['Company'], visiting: r['Visiting'],
       purpose: r['Purpose'], kind: r['Kind'], badge: String(r['Badge'] || ''),
       method: r['How they signed in'], signedOutBy: r['Signed out by'], screening: String(r['Screening'] || ''),
-      hostNotified: String(r['Host notified'] || '')
+      hostNotified: String(r['Host notified'] || ''),
+      signedCopy: String(r['Signed copy'] || '')
     });
   }
   return { ok: true, visits: out, sheetUrl: book_().getUrl() };
@@ -1047,6 +1085,25 @@ function adminPhoto_(a) {
   if (!file) return { ok: true, photo: '' };
   var blob = file.getBlob();
   return { ok: true, photo: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()) };
+}
+
+/** A visit's signature, for the admin screen: the image, and a link to the full signed copy. */
+function adminSignature_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', a.visitId);
+  if (!visit) return { ok: false, error: 'not_found' };
+  var v = visit.values, image = '';
+  try {
+    var id = driveId_(v['Signature']);
+    if (id) {
+      var blob = DriveApp.getFileById(id).getBlob();
+      image = 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+    }
+  } catch (err) { image = ''; }
+  if (!image && !v['Signed copy']) return { ok: false, error: 'not_found' };
+  return {
+    ok: true, signature: image, signedCopy: String(v['Signed copy'] || ''),
+    first: v['First Name'], last: v['Last Name'], company: v['Company'], when: iso_(v['Signed in'])
+  };
 }
 
 /** The file or folder id in a Drive link. */
@@ -1359,6 +1416,72 @@ function normalizeTag_(s) {
 
 function isDescriptor_(d) {
   return Array.isArray(d) && d.length === 128 && d.every(function (x) { return typeof x === 'number' && isFinite(x); });
+}
+
+function isSignature_(s) {
+  return typeof s === 'string' && s.length < 400000 && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(s);
+}
+
+function validEmail_(s) {
+  var e = String(s || '').trim().toLowerCase();
+  return /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/.test(e) && e.length <= 120 ? e : '';
+}
+
+function escHtml_(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+/**
+ * Saves a signature (PNG) and the signed copy of the visitor rules in the
+ * visitor's folder: a PDF with the company, the visitor, the exact rules they
+ * saw, the language, the signature and the time (an HTML page if the PDF
+ * can't be made). Emails the copy to the visitor when they asked for one and
+ * the kiosk is set up to send it. Returns { signature, copy } links.
+ */
+function saveSigned_(folder, signature, v, agreement, language, when, email) {
+  var s = readSettings_() || {};
+  var org = (s.org && clean_(s.org.name)) || '';
+  var ag = agreement && typeof agreement === 'object' ? agreement : {};
+  var rules = (Array.isArray(ag.rules) ? ag.rules : []).slice(0, 20).map(function (x) { return String(x || '').slice(0, 800); }).filter(Boolean);
+  var title = String(ag.title || 'Visitor rules').slice(0, 120);
+  var stamp = Utilities.formatDate(when, tz_(), 'yyyy-MM-dd HHmmss');
+  var b64 = signature.split(',')[1];
+  var png = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b64), 'image/png', stamp + ' signature.png'));
+  var name = v.first + ' ' + v.last;
+  var html = '<!doctype html><html><head><meta charset="utf-8"><title>' + escHtml_(title) + '</title></head>'
+    + '<body style="font-family:Arial,Helvetica,sans-serif;color:#0d1b2a;font-size:12pt;line-height:1.45;margin:32px">'
+    + '<h1 style="font-size:20pt;margin:0 0 4px">' + escHtml_(org ? org + ': ' + title : title) + '</h1>'
+    + '<p style="color:#4a5a6b;margin:0 0 18px">Signed on the visitor kiosk</p>'
+    + '<table style="border-collapse:collapse;margin-bottom:16px">'
+    + [['Visitor', name], ['Company', v.company], ['Visiting', v.visiting], ['Signed', stamp_(when)], ['Language', language || 'English']]
+      .filter(function (r) { return r[1]; })
+      .map(function (r) { return '<tr><td style="padding:2px 14px 2px 0;color:#4a5a6b">' + r[0] + '</td><td style="padding:2px 0"><b>' + escHtml_(r[1]) + '</b></td></tr>'; }).join('')
+    + '</table>'
+    + '<ol>' + rules.map(function (r) { return '<li style="margin:0 0 8px">' + escHtml_(r) + '</li>'; }).join('') + '</ol>'
+    + '<p style="margin-top:18px">' + escHtml_(String(ag.statement || 'By signing below, I agree to the visitor rules.').slice(0, 300)) + '</p>'
+    + '<p><img src="data:image/png;base64,' + b64 + '" style="height:90px;border-bottom:1px solid #9aa8b6"></p>'
+    + '<p style="color:#4a5a6b;font-size:10pt">' + escHtml_(name) + ', ' + escHtml_(stamp_(when)) + '</p>'
+    + '</body></html>';
+  var fileName = stamp + ' signed visitor rules - ' + name;
+  var copy;
+  try {
+    copy = folder.createFile(Utilities.newBlob(html, 'text/html', fileName + '.html').getAs('application/pdf').setName(fileName + '.pdf'));
+  } catch (err) {
+    copy = folder.createFile(Utilities.newBlob(html, 'text/html', fileName + '.html'));
+  }
+  if (email && s.signature && s.signature.emailCopy) {
+    try {
+      MailApp.sendEmail({
+        to: email, name: (org || 'Visitor') + ' visitor kiosk',
+        subject: 'Your signed visitor rules' + (org ? ' for ' + org : ''),
+        body: 'Hi ' + v.first + ',\n\nThank you for visiting' + (org ? ' ' + org : '') + '. Attached is a copy of the visitor rules you signed on ' + stamp_(when) + '.\n',
+        attachments: [copy.getBlob()]
+      });
+    } catch (err) { console.warn('Signed copy not emailed: ' + err); }
+  }
+  return { signature: png.getUrl(), copy: copy.getUrl() };
 }
 
 function isPhoto_(s) {

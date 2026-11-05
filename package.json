@@ -1,6 +1,6 @@
 {
   "name": "visitor-sign-in",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Visitor sign-in kiosk for any business: setup wizard, NFC/RFID badges, screening questions, records on the tablet or in Google Sheets, and an Android app",
   "scripts": {

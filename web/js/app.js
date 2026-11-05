@@ -13,6 +13,7 @@ import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
 import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense } from './plans.js';
+import { SignaturePad } from './signature.js';
 // QR codes are only drawn in the admin screen, so their code loads when first needed.
 let qrModule = null;
 const qrSvg = async (text, opts) => (await (qrModule ||= import('./qr.js'))).qrSvg(text, opts);
@@ -64,6 +65,39 @@ const kb = new Keyboard($('[data-keyboard]'));
 
 /** Quick entry is on in the settings, and the plan includes it. */
 const quickOn = (s = settings()) => quickEntryOn(s) && can('quickEntry');
+
+/**
+ * Who signs the rules with a finger: 'off', 'new' visitors, or 'every' visit (rules and plan permitting).
+ * An Apps Script older than version 5 can't keep a signature, so until it's updated visitors tick the box.
+ */
+const signMode = (s = settings()) => (s.form.rules.length && can('signatures') && !state.oldBackend ? s.signature.mode : 'off');
+const EMAIL_OK = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/;
+
+const pad = new SignaturePad($('[data-sign-pad]'), {
+  onChange(signed) {
+    $('.sign-area').classList.toggle('signed', signed);
+    state.answers.agreed = signed;
+    if (signed) $('[data-form-error]').textContent = '';
+  },
+});
+$('[data-sign-clear]').addEventListener('click', () => pad.clear());
+
+/** What the visitor signed, as they saw it (their language, the company's name filled in). */
+function agreementShown() {
+  const s = settings();
+  return { title: t('Visitor rules'), rules: s.form.rules.map((r) => fill(tc(r, s), s)), statement: t('By signing below, I agree to the visitor rules.') };
+}
+
+/** The signature, the rules it signs and an optional email, for the sign-in that's being saved. */
+function signedFields() {
+  if (signMode() === 'off' || !pad.isSigned()) return {};
+  const email = (state.answers.email || '').trim();
+  return {
+    signature: pad.toDataURL(), agreement: agreementShown(),
+    email: email && EMAIL_OK.test(email) ? email : undefined,
+    language: lang() === 'en' ? undefined : LANGS[lang()],
+  };
+}
 
 // ------------------------------------------------------------------ helpers
 
@@ -398,7 +432,7 @@ function questionSteps() {
 function stepsAfterQuestions() {
   const s = settings();
   if (state.result?.declined) return s.photos === 'off' ? [] : ['photo'];
-  if (state.flow === 'returning') return [];
+  if (state.flow === 'returning') return signMode(s) === 'every' ? ['rules'] : [];
   const out = [];
   if (s.photos === 'all') out.push('photo');
   if (s.form.rules.length) out.push('rules');
@@ -431,6 +465,7 @@ function resetForm() {
   state.expected = null;
   $('[data-expected-note]').hidden = true;
   $('[data-agree]').setAttribute('aria-checked', 'false');
+  pad.clear();
   clearPhoto();
   renderStep({ instant: true });
 }
@@ -460,6 +495,14 @@ function renderStep({ instant = false, back = false } = {}) {
   $('[data-screen="form"] .form-body').scrollTop = 0;
   kb.close();
   if (name === 'photo') startPhotoCamera();
+  if (name === 'rules') {
+    const signing = signMode() !== 'off';
+    $('[data-agree]').hidden = signing;
+    $('[data-sign-box]').hidden = !signing;
+    $('[data-sign-email]').hidden = !(signing && MODE === 'cloud' && settings().signature.emailCopy);
+    $('[data-screen="form"] .step[data-step="rules"]').classList.toggle('signing', signing);
+    if (signing) setTimeout(() => pad.resize(), 450); // after the step transition
+  }
   else if (state.screen === 'form') face.stopCamera();
 }
 
@@ -506,6 +549,11 @@ function validateStep() {
       if (!state.photo && state.result?.declined && $('[data-camera-error]').hidden) { formError('Please take your picture.'); return false; }
       return true;
     case 'rules':
+      if (signMode() !== 'off') {
+        if (!pad.isSigned()) { formError('Please sign in the box to agree to the visitor rules.'); return false; }
+        if ((a.email || '').trim() && !EMAIL_OK.test(a.email.trim())) { formError('Please check the email address, or leave it empty.', [field('email')]); return false; }
+        return true;
+      }
       if (!a.agreed) { formError('Please check the box to agree to the visitor rules.'); return false; }
       return true;
     default:
@@ -697,7 +745,8 @@ $('[data-capture]').addEventListener('click', async () => {
     const d = await face.describe(shot.canvas);
     if (state.photo !== shot) return;
     state.photoDescriptor = d;
-    if (!d) formError("We couldn't see your face clearly. You can retake the picture, or continue.");
+    // The check can finish after the visitor has moved on: only say so on the photo step.
+    if (!d && currentStep() === 'photo') formError("We couldn't see your face clearly. You can retake the picture, or continue.");
   } catch { /* face models unavailable: the photo is still fine */ }
 });
 $('[data-retake]').addEventListener('click', () => { clearPhoto(); startPhotoCamera(); });
@@ -722,6 +771,7 @@ async function submitNewVisitor(quickEntry, origin) {
     first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: canonicalPurpose(a.purpose),
     language: lang() === 'en' ? undefined : LANGS[lang()],
     agreed: !!a.agreed, quickEntry, photo: state.photo?.dataUrl || '', descriptor: quickEntry ? descriptor : null,
+    ...signedFields(),
     answers: answersForRecord(), flags: state.result?.flags || [], override: state.override || undefined,
   });
   busy(false);
@@ -741,6 +791,7 @@ async function afterIdentified(origin) {
   const res = await api('checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
     visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
+    ...(state.flow === 'returning' ? signedFields() : {}),
   });
   busy(false);
   if (!res.ok) { toast(errorText(res)); return; }
@@ -942,7 +993,7 @@ $('[data-face-yes]').addEventListener('click', (e) => {
 
 /** Returning visitors answer the every-visit questions (if any), then finish. */
 function continueReturning(origin) {
-  if (!everyVisitQuestions().length) { afterIdentified(origin); return; }
+  if (!everyVisitQuestions().length && signMode() !== 'every') { afterIdentified(origin); return; }
   state.flow = 'returning';
   state.resume = false;
   show('form');
@@ -1125,6 +1176,7 @@ async function badgeTap(tag) {
       visitorId: state.visitor.id, tag, method: state.method,
       flags: state.result?.flags || [], override: state.override || undefined,
       visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
+      ...(state.flow === 'returning' ? signedFields() : {}),
     }),
     sleep(700), // long enough to see the reader at work
   ]);
@@ -1271,6 +1323,7 @@ function exitAdmin() {
   state.adminToken = null;
   state.adminMode = null;
   $('[data-overlay="rollcall"]').hidden = true;
+  $('[data-overlay="signed"]').hidden = true;
   $('[data-expected-form]').hidden = true;
   show('welcome');
 }
@@ -1522,10 +1575,32 @@ async function loadHistory() {
       ${special ? `<span class="pill ${declined ? 'declined' : /override/i.test(v.kind) ? 'override' : 'foreign'}">${esc(v.kind)}</span>` : ''}
       ${v.badge ? `<span class="badge-no small">${esc(v.badge)}</span>` : ''}
       ${!v.signedOut ? '<span class="pill in-use">inside</span>' : ''}
+      ${v.signedCopy ? `<div class="actions"><button type="button" data-signed="${esc(v.visitId)}">Signed copy</button></div>` : ''}
     </div>`;
   }).join('');
   fx.cascade(list, { step: 15 });
+  $$('[data-signed]', list).forEach((b) => b.addEventListener('click', () => showSigned(b.dataset.signed)));
 }
+
+/** Shows what a visitor signed: the rules as they saw them and their signature (with Google Sheets, a QR code to the PDF). */
+async function showSigned(visitId) {
+  busy(true, 'One moment…');
+  const res = await adminApi('adminSignature', { visitId });
+  busy(false);
+  if (!res.ok) { toast(res.error === 'not_found' ? 'No signed copy was found for that visit.' : errorText(res)); return; }
+  $('[data-signed-title]').textContent = `${res.first} ${res.last}`;
+  $('[data-signed-meta]').textContent = [res.company, res.when ? `signed ${new Date(res.when).toLocaleString()}` : '', res.language].filter(Boolean).join(' · ');
+  const ag = res.agreement || null;
+  $('[data-signed-rules]').innerHTML = ag ? ag.rules.map((r) => `<li>${esc(r)}</li>`).join('') : '';
+  $('[data-signed-rules]').hidden = !ag;
+  $('[data-signed-statement]').textContent = ag ? ag.statement : '';
+  $('[data-signed-image]').src = res.signature || '';
+  const link = $('[data-signed-link]');
+  link.hidden = !res.signedCopy;
+  if (res.signedCopy) link.innerHTML = `${await qrSvg(res.signedCopy, { size: 120, label: 'Link to the signed copy' })}<span>The full signed copy, with the rules as the visitor saw them, is a PDF in your Google Drive. Scan to open it on your phone:<br><code>${esc(res.signedCopy)}</code></span>`;
+  $('[data-overlay="signed"]').hidden = false;
+}
+$('[data-signed-close]').addEventListener('click', () => { $('[data-overlay="signed"]').hidden = true; });
 
 function dayOf(iso) {
   const d = new Date(iso);
@@ -1568,9 +1643,10 @@ $('[data-export-visits]').addEventListener('click', () => {
   const rows = hist.visits.map((v) => [
     v.signedIn ? new Date(v.signedIn).toLocaleString() : '', v.signedOut ? new Date(v.signedOut).toLocaleString() : '',
     v.first, v.last, v.company, v.visiting, v.purpose, v.kind, v.badge, v.method, v.signedOutBy, v.screening, v.hostNotified,
+    /^https?:/.test(v.signedCopy || '') ? v.signedCopy : v.signedCopy ? 'Yes' : '',
   ]);
   if (!rows.length) { toast('No visits to export. Pick a longer period.'); return; }
-  exportFile(`visits-${dateStamp()}.csv`, toCsv(['Signed in', 'Signed out', 'First name', 'Last name', 'Company', 'Visiting', 'Purpose', 'Kind', 'Badge', 'How they signed in', 'Signed out by', 'Screening', 'Host notified'], rows));
+  exportFile(`visits-${dateStamp()}.csv`, toCsv(['Signed in', 'Signed out', 'First name', 'Last name', 'Company', 'Visiting', 'Purpose', 'Kind', 'Badge', 'How they signed in', 'Signed out by', 'Screening', 'Host notified', 'Signed copy'], rows));
 });
 
 $('[data-export-visitors]').addEventListener('click', async () => {

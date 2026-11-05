@@ -153,6 +153,17 @@ The ask: *make the setup process super easy as far as downloading and making sur
 - **The Google script** keeps each tab for the rest of the request and reads header and data in one call: a badge sign-in went from 12 sheet reads to 4, a badge sign-out from 8 to 2. A test holds it there.
 - Google connections open early (preconnect) when the kiosk uses Google Sheets.
 
+## Signatures on the visitor rules (1.1.0)
+
+Asked for next after launch: visitors sign the rules with a finger instead of ticking a box.
+
+- **The pad** (`web/js/signature.js`): smooth strokes from pointer events (with coalesced samples, so quick signatures stay smooth), sized to the screen's pixel density, and a check that there's enough ink to be a signature rather than a tap. The saved image is trimmed to the ink, on a transparent background, at most 600 px wide.
+- **Setup:** tick box only, new visitors sign, or sign every visit; with Google Sheets, an option to email visitors their copy. Pro when the paywall is on.
+- **What's kept** is the rules as the visitor saw them (their language, the company name filled in), the statement, the signature and the time. On the tablet it's stored with the visit; with Google Sheets, the script (version 5) saves a PDF and the signature image in the visitor's Drive folder, links them in the Visitors and Visits tabs, and can email the PDF. A first visit shares the copy signed at registration.
+- **Admin → History** shows the signed copy, with a QR code to the PDF; the visits CSV says who signed. Retention deletes signed copies with their visits and visitors.
+- **Safe with an old script:** a sheet still on version 4 can't keep a signature, so visitors tick the box until the script is updated (Diagnostics says so).
+- A late photo check no longer shows its "couldn't see your face" note on the rules step.
+
 ## Where things are
 
 | Thing | Location |
@@ -174,3 +185,6 @@ Not built yet, in rough order of value:
 1. More languages (French, Portuguese, Chinese…): a dictionary each in `web/js/i18n.js`.
 2. Text-message host notifications, and notifying hosts in on-tablet mode.
 3. Calendar integration for expected visitors (Google Calendar invites with visitors).
+4. QR invitations: expected visitors get a QR code by email and scan it at the kiosk to skip typing.
+5. Printed name badges (a small label printer by the kiosk).
+6. Automatic license sales: a checkout (for example Stripe or Lemon Squeezy) that issues and emails a license key when someone pays. Decisions to make first: pricing, which payment service, and where the key-signing step runs.

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 — signatures
+
+**Visitors**
+- Visitors can sign the visitor rules with a finger instead of ticking a box: new visitors once, or every visit. A tap isn't accepted as a signature, and **Clear** starts over. Set up in Finishing touches → Signature (Pro when the paywall is on).
+- With Google Sheets, visitors can have the signed copy emailed to them as a PDF.
+
+**Staff**
+- Admin → History: **Signed copy** shows the rules as the visitor saw them, in their language, with their signature and the time. With Google Sheets, a QR code opens the PDF in Drive. The visits CSV has a Signed copy column.
+- Google Sheets backend (`apps-script/Code.gs`, version 5): a PDF of each signed copy and the signature image in the visitor's Drive folder, and new Email, Signature and Signed copy columns. Copy the new script and deploy a new version (Admin → Settings → Diagnostics says so). Version 4 scripts keep working, without signatures.
+- Retention deletes signed copies along with the visits and visitors they belong to.
+
+**Fixes**
+- The "we couldn't see your face clearly" note no longer appears on a later step when the photo check finishes after the visitor has moved on.
+
 ## 1.0.0 — first release for any business
 
 The kiosk that began as Shock Tech's own visitor sign-in, made configurable for any business.

@@ -67,7 +67,7 @@ function fakeGoogle(initialProps = {}) {
       blob, folderName, trashed: false,
       getId: () => id,
       getUrl: () => `https://drive.google.com/file/d/${id}/view`,
-      getBlob: () => ({ getContentType: () => blob.type, getBytes: () => blob.bytes }),
+      getBlob: () => ({ getContentType: () => blob.type, getBytes: () => blob.bytes, getName: () => blob.name, type: blob.type, name: blob.name, bytes: blob.bytes }),
       getDateCreated: () => created,
       setTrashed(t) { file.trashed = t; return file; },
     };
@@ -132,7 +132,12 @@ function fakeGoogle(initialProps = {}) {
       formatDate: (d, tz, fmt) => formatDate(new Date(d), tz, fmt),
       base64Decode: (s) => Buffer.from(s, 'base64'),
       base64Encode: (b) => Buffer.from(b).toString('base64'),
-      newBlob: (bytes, type, name) => ({ bytes, type, name }),
+      newBlob: (bytes, type, name) => {
+        const blob = { bytes, type, name };
+        blob.getAs = (to) => ({ bytes, type: to, name: String(name).replace(/\.\w+$/, '.pdf'), converted: true, setName(n) { this.name = n; return this; } });
+        blob.setName = (n) => { blob.name = n; return blob; };
+        return blob;
+      },
     },
     Session: { getScriptTimeZone: () => 'America/New_York' },
     ContentService: { createTextOutput: (s) => ({ setMimeType: () => s }), MimeType: { JSON: 'json' } },

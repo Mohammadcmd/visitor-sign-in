@@ -264,6 +264,17 @@
           <ol class="rules editable" data-rules-edit></ol>
           <div class="inline-add"><label class="field"><span>Add a rule</span><input readonly inputmode="none" name="s-rule" data-cap="sentence" maxlength="300" autocomplete="off"></label><button type="button" class="btn-secondary" data-add-rule>Add</button></div>
           <button type="button" class="btn-ghost" data-reset-rules>Use the standard rules</button>
+          <h3 class="sub">Signature</h3>
+          <p class="hint small">Visitors can sign the rules with a finger instead of ticking a box. The signed copy, with the exact rules they saw, is kept with their record.</p>
+          <div class="seg seg-wrap" role="radiogroup" data-sign-choice>
+            <button type="button" role="radio" data-value="off">Tick box only</button>
+            <button type="button" role="radio" data-value="new">New visitors sign</button>
+            <button type="button" role="radio" data-value="every">Sign every visit</button>
+          </div>
+          <button type="button" class="agree toggle" data-sign-email-toggle role="switch" aria-checked="false" hidden>
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>Offer visitors a copy by email</strong><br><span class="small">Visitors may give an email address under their signature. The signed copy (a PDF) is emailed to them from your Google account.</span></span>
+          </button>
           <h3 class="sub">Sign everyone out at the end of the day</h3>
           <p class="hint small">Visitors who forget to sign out are signed out at this time, and their badges are freed. The visit records say "End of day".</p>
           <div class="seg seg-wrap" role="radiogroup" data-eod-choice>
@@ -454,6 +465,18 @@
           <span class="agree-box" aria-hidden="true">✓</span>
           <span>I agree to the visitor rules. Checking this box is my electronic signature on these rules.</span>
         </button>
+        <div class="sign-box" data-sign-box hidden>
+          <p class="sign-statement">By signing below, I agree to the visitor rules.</p>
+          <div class="sign-area">
+            <canvas data-sign-pad aria-label="Signature"></canvas>
+            <span class="sign-hint" data-sign-hint>Sign here with your finger</span>
+            <span class="sign-line" aria-hidden="true"></span>
+            <button type="button" class="btn-ghost sign-clear" data-sign-clear>Clear</button>
+          </div>
+          <label class="field" data-sign-email hidden><span>Email me a copy <em>(optional)</em></span>
+            <input readonly inputmode="none" name="email" data-kb="email" maxlength="120" autocomplete="off" placeholder="you@example.com">
+            <small>We'll email you a copy of what you signed.</small></label>
+        </div>
       </div>
 
       <!-- step: quick entry opt-in -->
@@ -805,6 +828,20 @@
       <div class="rollcall-bar"><i data-rollcall-progress></i></div>
       <p class="hint small">Tap each visitor once you've seen them. Visitors still missing stay at the top.</p>
       <div class="rollcall-grid" data-rollcall-list></div>
+    </div>
+  </div>
+
+  <!-- A signed copy, from Admin → History -->
+  <div class="overlay" data-overlay="signed" hidden>
+    <div class="center-card signed-card">
+      <p class="eyebrow">Signed copy</p>
+      <h2 data-signed-title></h2>
+      <p class="hint" data-signed-meta></p>
+      <ol class="rules" data-signed-rules></ol>
+      <p class="signed-statement" data-signed-statement></p>
+      <img class="signed-image" data-signed-image alt="Signature">
+      <div class="signed-link" data-signed-link hidden></div>
+      <div class="quick-actions"><button type="button" class="btn-secondary btn-lg" data-signed-close>Close</button></div>
     </div>
   </div>
 

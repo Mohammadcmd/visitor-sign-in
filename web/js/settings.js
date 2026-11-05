@@ -100,6 +100,7 @@ export const DEFAULTS = Object.freeze({
   retentionDays: 0,            // delete visits, visitors and photos older than this (0 = keep everything)
   languages: ['en'],           // languages visitors can choose; English is always first
   translations: {},            // { es: { "English text": "texto" } } for the business's own text
+  signature: { mode: 'off', emailCopy: false }, // visitors sign the rules: 'off' (tick box), 'new' visitors, 'every' visit
   license: '',                 // a license key from the vendor (see js/plans.js)
   trialStarted: '',            // when setup was first finished: the Pro trial runs from here
 });
@@ -215,6 +216,10 @@ export function normalize(input) {
     retentionDays: [30, 90, 180, 365, 730].includes(Number(s.retentionDays)) ? Number(s.retentionDays) : 0,
     languages: ['en', ...(Array.isArray(s.languages) ? VISITOR_LANGS.slice(1).filter((c) => s.languages.includes(c)) : [])],
     translations: translationMap(s.translations),
+    signature: {
+      mode: ['off', 'new', 'every'].includes((s.signature || {}).mode) ? s.signature.mode : 'off',
+      emailCopy: (s.signature || {}).emailCopy === true,
+    },
     license: typeof s.license === 'string' ? s.license.trim().slice(0, 2000) : '',
     trialStarted: typeof s.trialStarted === 'string' && !Number.isNaN(new Date(s.trialStarted).getTime()) ? s.trialStarted : '',
   };
