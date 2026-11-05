@@ -42,6 +42,9 @@ jobs:
           cp -r web _site/web
           cp index.html sw.js _site/
           touch _site/.nojekyll
+          # Stamp this build into the offline cache, so every kiosk picks up this deploy.
+          sed -i "s/^const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::8}';/" _site/web/sw.js
+          grep -q "const BUILD = '${GITHUB_SHA::8}';" _site/web/sw.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

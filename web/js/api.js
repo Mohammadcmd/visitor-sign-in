@@ -182,16 +182,27 @@ const DEMO_PIN = '123456';
 const ATTENTION_DAYS = 14;
 const PASS_MS = 2 * 60 * 60 * 1000;
 
+// The records are read from storage once and kept in memory; only actions that
+// change something write them back. (A year of visits is a few MB: reading and
+// writing all of it on every tap made a busy kiosk feel slow.)
+let memo = null;
+
 function load() {
+  if (memo) return memo;
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
-    if (s && s.badges) return { passes: [], expected: [], ...s };
+    if (s && s.badges) { memo = { passes: [], expected: [], ...s }; return memo; }
   } catch { /* fall through to a fresh store */ }
-  return {
+  memo = {
     visitors: [], visits: [], faces: [], passes: [], expected: [],
     badges: DEMO ? [1, 2, 3, 4, 5].map((n) => ({ badge: `V${n}`, tag: `DEMO000${n}`, status: 'available' })) : [],
   };
+  return memo;
 }
+
+/** Actions that only read: nothing to write back afterwards. */
+const READS = new Set(['ping', 'getSettings', 'faceIndex', 'findVisitor', 'findOpenVisits', 'findExpected', 'adminLogin',
+  'adminInside', 'adminBadges', 'adminAttention', 'adminHistory', 'adminVisitors', 'adminPhoto', 'adminExpected']);
 
 function save(s) {
   try { localStorage.setItem(STORE, JSON.stringify(s)); } catch {
@@ -203,6 +214,7 @@ function save(s) {
 
 /** Forgets every visitor, visit and badge on this tablet (Admin → Settings → Start over). */
 export async function eraseTablet() {
+  memo = null;
   try { localStorage.removeItem(STORE); } catch { /* nothing stored */ }
   await photos.clear();
 }
@@ -211,10 +223,17 @@ let tail = Promise.resolve();
 async function local(action, a) {
   // One action at a time, like the backend's script lock.
   const run = tail.then(async () => {
-    await sleep(DEMO ? 250 : 40);
+    // Demo mode pauses a moment, as a real sheet would; on the tablet there's no waiting.
+    if (DEMO) await sleep(120);
     const s = load();
-    const out = await localAction(s, action, a || {});
-    save(s);
+    let out;
+    try {
+      out = await localAction(s, action, a || {});
+    } catch (err) {
+      memo = null; // read the saved copy again rather than keep a half-done change
+      throw err;
+    }
+    if (!READS.has(action)) save(s);
     return out;
   });
   tail = run.catch(() => {});

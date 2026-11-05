@@ -12,6 +12,8 @@ function fakeGoogle(initialProps = {}) {
   const props = { ...initialProps };
   const cache = {};
   const mail = [];
+  /** How much the backend reads from the sheet: getValues calls and cells (to keep requests quick). */
+  const stats = { reads: 0, cells: 0 };
   const files = {};
   let fileSeq = 0;
   let folderSeq = 0;
@@ -25,10 +27,10 @@ function fakeGoogle(initialProps = {}) {
       getLastColumn: () => rows.reduce((m, r) => Math.max(m, r.length), 0),
       getRange(r, c, nr = 1, nc = 1) {
         return {
-          getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => {
+          getValues: () => (stats.reads++, stats.cells += nr * nc, Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => {
             const v = (rows[r - 1 + i] || [])[c - 1 + j];
             return v === undefined ? '' : v;
-          })),
+          }))),
           setValues(vals) { vals.forEach((row, i) => row.forEach((v, j) => { (rows[r - 1 + i] ||= [])[c - 1 + j] = v; })); return this; },
           setValue(v) { (rows[r - 1] ||= [])[c - 1] = v; return this; },
           clearContent() { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) if (rows[r - 1 + i]) rows[r - 1 + i][c - 1 + j] = ''; return this; },
@@ -136,7 +138,7 @@ function fakeGoogle(initialProps = {}) {
     ContentService: { createTextOutput: (s) => ({ setMimeType: () => s }), MimeType: { JSON: 'json' } },
     Logger: { log() {} },
   };
-  return { globals, sheets, order, props, cache, mail, files, rootFolders };
+  return { globals, sheets, order, props, cache, mail, files, rootFolders, stats };
 }
 
 /** Loads apps-script/Code.gs into a fresh fake Google. */

@@ -15,6 +15,10 @@ ok(new RegExp(`APP_VERSION = '${version}'`).test(read('web/config.js')), `web/co
 ok(new RegExp(`VERSION = '${version}'`).test(read('web/sw.js')), `web/sw.js VERSION should be ${version}`);
 ok(/^## \[?\d+\.\d+\.\d+/m.test(read('CHANGELOG.md')) && read('CHANGELOG.md').includes(version), `CHANGELOG.md mentions ${version}`);
 
+// Published builds stamp BUILD in sw.js (see the Pages and Release workflows); the line must stay as they expect.
+ok(/^const BUILD = 'dev';$/m.test(read('web/sw.js')), "web/sw.js keeps the line const BUILD = 'dev'; for the workflows to stamp");
+for (const wf of ['.github/workflows/pages.yml', '.github/workflows/release.yml']) ok(read(wf).includes("s/^const BUILD = 'dev';/"), `${wf} stamps the build into sw.js`);
+
 // Every file the offline cache lists exists, and every script the app loads is listed.
 const sw = read('web/sw.js');
 const files = JSON.parse(sw.slice(sw.indexOf('const FILES = [') + 'const FILES = '.length, sw.indexOf('];', sw.indexOf('const FILES = [')) + 1).replace(/'/g, '"').replace(/,\s*\]/, ']'));

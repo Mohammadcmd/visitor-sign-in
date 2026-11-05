@@ -49,7 +49,10 @@ jobs:
       - name: Package the release files
         run: |
           mv dist/visitor-sign-in.apk "dist/visitor-sign-in-$VERSION.apk"
-          (cd web && zip -qr "../dist/visitor-sign-in-web-$VERSION.zip" .)
+          cp -r web dist/web
+          sed -i "s/^const BUILD = 'dev';/const BUILD = '$VERSION-${GITHUB_SHA::8}';/" dist/web/sw.js
+          grep -q "const BUILD = '$VERSION-" dist/web/sw.js
+          (cd dist/web && zip -qr "../visitor-sign-in-web-$VERSION.zip" .)
           cp apps-script/Code.gs dist/Code.gs
           node -e "const s=require('fs').readFileSync('CHANGELOG.md','utf8');const i=s.indexOf('## '+process.env.VERSION);const j=s.indexOf('\n## ',i+1);process.stdout.write(i<0?'See CHANGELOG.md':s.slice(s.indexOf('\n',i)+1,j<0?undefined:j).trim())" > dist/notes.md
           if [ -z "$KIOSK_KEYSTORE_BASE64" ]; then printf '\n\n> This APK is debug-signed. To install later versions as updates, add the release signing secrets (android/README.md).\n' >> dist/notes.md; fi

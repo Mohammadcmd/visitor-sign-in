@@ -75,6 +75,7 @@ function setup() {
 }
 
 function setupTabs_() {
+  forgetTabs_();
   var ss = book_();
   Object.keys(HEADERS).forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
@@ -124,6 +125,7 @@ var REPLAY_TTL = 30 * 60;  // seconds
 /** Dispatches one API call. Separate from doPost so tests can call it directly. */
 function handle_(req) {
   settingsMemo_ = undefined;
+  forgetTabs_();
   if (req && req.action === 'claim') return withLock_(function () { return claim_(req.key); });
   var props = PropertiesService.getScriptProperties();
   var key = props.getProperty('KIOSK_KEY');
@@ -664,6 +666,7 @@ function keepRows_(name, keep) {
   var kept = values.filter(function (v, i) { return keep(rows[i]); });
   var removed = count - kept.length;
   if (!removed) return 0;
+  forgetTabs_(name);
   if (kept.length) {
     sh.getRange(2, 1, kept.length, width).setValues(kept);
     sh.deleteRows(2 + kept.length, removed);
@@ -771,6 +774,7 @@ function adminRemoveExpected_(a) {
   var hit = a.id ? expectedRows_().filter(function (e) { return e.id === a.id; })[0] : null;
   if (!hit) return { ok: false, error: 'not_found' };
   sheet_(TABS.expected).deleteRow(hit.row);
+  forgetTabs_(TABS.expected);
   return { ok: true };
 }
 
@@ -779,6 +783,7 @@ function ensureTab_(name) {
   var ss = book_();
   if (ss.getSheetByName(name)) return;
   var sh = ss.insertSheet(name);
+  forgetTabs_(name);
   sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold');
   sh.setFrozenRows(1);
 }
@@ -793,13 +798,14 @@ function tapAtWelcome_(a) {
     return { ok: true, result: 'returned', badge: b['Badge'] };
   }
   if (lower_(b['Status']) !== 'in use') return { ok: true, result: 'not_out', badge: b['Badge'] };
-  var visit = findRow_(TABS.visits, 'Visit ID', b['Visit ID']);
-  var name = b['Holder'];
+  // Read everything needed before signing out: freeing the badge clears its row.
+  var visitId = b['Visit ID'], name = b['Holder'], badgeNo = b['Badge'];
+  var visit = findRow_(TABS.visits, 'Visit ID', visitId);
   if (visit) signOutVisit_(visit, 'Badge tap at kiosk');
   else releaseBadge_(badge.row);
   return {
-    ok: true, result: 'signed_out', badge: b['Badge'], name: name,
-    first: visit ? visit.values['First Name'] : name, visitId: b['Visit ID']
+    ok: true, result: 'signed_out', badge: badgeNo, name: name,
+    first: visit ? visit.values['First Name'] : name, visitId: visitId
   };
 }
 
@@ -1401,9 +1407,20 @@ function folderFromUrl_(url) {
 
 // ---------------------------------------------------------------- Sheets
 
+// Reading a whole tab is the slow part of a request, so each tab is read once
+// per request and kept here. Cell writes update the kept copy; adding rows or
+// columns, or deleting rows, drops it so the next read is fresh.
+var bookMemo_ = null, tabMemo_ = {}, headMemo_ = {};
+function forgetTabs_(name) {
+  if (name) { delete tabMemo_[name]; delete headMemo_[name]; return; }
+  bookMemo_ = null; tabMemo_ = {}; headMemo_ = {};
+}
+
 function book_() {
+  if (bookMemo_) return bookMemo_;
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  bookMemo_ = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  return bookMemo_;
 }
 
 function sheet_(name) {
@@ -1413,9 +1430,12 @@ function sheet_(name) {
 }
 
 function headerMap_(sh) {
+  var name = sh.getName();
+  if (headMemo_[name]) return headMemo_[name];
   var head = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
   var map = {};
   head.forEach(function (h, i) { if (h) map[String(h).trim().toLowerCase()] = i + 1; });
+  headMemo_[name] = map;
   return map;
 }
 
@@ -1433,6 +1453,7 @@ function findCol_(map, header) {
 function ensureColumn_(name, header, beforeHeader) {
   var sh = sheet_(name), map = headerMap_(sh);
   if (findCol_(map, header)) return;
+  forgetTabs_(name);
   var before = beforeHeader ? findCol_(map, beforeHeader) : 0;
   if (before) {
     sh.insertColumnBefore(before);
@@ -1444,14 +1465,18 @@ function ensureColumn_(name, header, beforeHeader) {
 
 /** All data rows as objects keyed by header text. Columns are found by name, never position. */
 function readTab_(name) {
+  if (tabMemo_[name]) return tabMemo_[name].rows;
   var sh = sheet_(name);
   var last = sh.getLastRow();
-  if (last < 2) return [];
+  if (last < 2) { tabMemo_[name] = { rows: [], head: [] }; return []; }
   var width = sh.getLastColumn();
-  var head = sh.getRange(1, 1, 1, width).getValues()[0];
+  // One read for the header and the data together.
+  var all = sh.getRange(1, 1, last, width).getValues();
+  var head = all[0];
   var map = {};
   head.forEach(function (h, i) { if (h) map[String(h).trim().toLowerCase()] = i + 1; });
-  return sh.getRange(2, 1, last - 1, width).getValues().map(function (row) {
+  headMemo_[name] = map;
+  var rows = all.slice(1).map(function (row) {
     var o = {};
     head.forEach(function (h, i) { if (h) o[String(h).trim()] = row[i]; });
     // Also expose the canonical header spelling so lookups survive case changes and older names.
@@ -1463,6 +1488,8 @@ function readTab_(name) {
     });
     return o;
   });
+  tabMemo_[name] = { rows: rows, head: head };
+  return rows;
 }
 
 function findRow_(name, column, value, normalize) {
@@ -1485,6 +1512,7 @@ function appendRow_(name, obj) {
     if (col) row[col - 1] = cellValue_(obj[k]);
   });
   sh.appendRow(row);
+  forgetTabs_(name);
 }
 
 function setCell_(name, row, column, value) {
@@ -1495,9 +1523,17 @@ function setCell_(name, row, column, value) {
 
 function setCells_(name, row, obj) {
   var sh = sheet_(name), map = headerMap_(sh);
+  var kept = tabMemo_[name] && tabMemo_[name].rows[row - 2];
   Object.keys(obj).forEach(function (k) {
     var col = findCol_(map, k);
-    if (col) sh.getRange(row, col).setValue(cellValue_(obj[k]));
+    if (!col) return;
+    var v = cellValue_(obj[k]);
+    sh.getRange(row, col).setValue(v);
+    if (kept) {
+      kept[k] = v;
+      var h = tabMemo_[name].head[col - 1];
+      if (h) kept[String(h).trim()] = v;
+    }
   });
 }
 
@@ -1512,7 +1548,7 @@ function addFaceRow_(visitorId, descriptor, source, fileId) {
 function removeFaceRows_(visitorId) {
   var sh = sheet_(TABS.faces), rows = readTab_(TABS.faces);
   for (var i = rows.length - 1; i >= 0; i--) {
-    if (rows[i]['Visitor ID'] === visitorId) sh.deleteRow(i + 2);
+    if (rows[i]['Visitor ID'] === visitorId) { sh.deleteRow(i + 2); forgetTabs_(TABS.faces); }
   }
 }
 

@@ -30,4 +30,5 @@ The kiosk that began as Shock Tech's own visitor sign-in, made configurable for 
 
 **Running it**
 - Android app (kiosk mode, starts on boot), or any browser over HTTPS, with offline start-up.
+- Fast on modest tablets: the kiosk is ready in about a second (400 KB to start; face recognition loads only when it's used, once the tablet is idle), published builds start from the saved copy, and taps respond within a frame or two. Records on the tablet are kept in memory, and the Google script reads each tab once per request (a badge sign-in went from 12 sheet reads to 4).
 - GitHub Actions: tests on every push, an APK on every change, a GitHub Release with the APK for every `v*` tag, and GitHub Pages hosting for the browser kiosk.

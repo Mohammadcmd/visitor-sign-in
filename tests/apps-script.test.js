@@ -502,6 +502,25 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   eq([john.Kind, john.Screening], ['Visitor', 'Clear']);
 }
 
+// ------------------------------------------------------------------ speed: each request reads the sheet as little as it can
+{
+  const q = loadBackend();
+  q.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => q.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'X' }, photos: 'off', form: { rules: [] }, notifyHosts: true, hosts: [{ name: 'Pat Kim', email: 'p@x.example' }] } });
+  for (let i = 0; i < 20; i++) call('adminAddBadge', { token: tok, tag: `T${i}` });
+  const ids = [];
+  for (let i = 0; i < 50; i++) ids.push(call('register', { first: `F${i}`, last: `L${i}`, visiting: 'Pat Kim', purpose: 'M' }).visitor.id);
+  for (let i = 0; i < 200; i++) call('checkIn', { visitorId: ids[i % 50] });
+  const reads = (fn) => { q.stats.reads = 0; fn(); return q.stats.reads; };
+  ok(reads(() => call('assignBadge', { visitorId: ids[3], tag: 'T3' })) <= 5, 'a badge sign-in reads each tab once');
+  ok(reads(() => call('tapAtWelcome', { tag: 'T3' })) <= 3, 'a badge sign-out reads each tab once');
+  ok(reads(() => call('ping')) <= 3, 'a status check reads little');
+  eq(reads(() => call('ping')), 1, 'and a second one within a minute uses the cached count');
+  eq(call('undoSignOut', { visitId: q.sheets.Visits.objects().at(-1)['Visit ID'] }).ok, true, 'undo still works with the kept copy');
+}
+
 // ------------------------------------------------------------------ retries
 // A retried write (same request id) replays the first answer instead of writing twice.
 const before = b.sheets.Visitors.rows.length;

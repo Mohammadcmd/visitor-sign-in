@@ -143,6 +143,16 @@ The ask: *make the setup process super easy as far as downloading and making sur
 - **QR codes** (an MIT library vendored in `web/vendor/qrcode/`) for connecting another tablet, updates and buying.
 - **The paywall** is built but off: plans in one file, a trial from the end of setup, ECDSA-signed license keys checked offline, gates at the places features are switched on, a few visitor-facing extras that pause at runtime, and tools to make keys. The rule throughout: nothing that protects the business or its visitors (sign-in, screening, records, roll call) ever stops for a plan.
 
+## Making it fast
+
+*Make sure it runs fast.* Measured on a CPU slowed 4× with a modest connection, then fixed what the numbers showed:
+
+- **Start-up: 2.5 s → 1 s, 8.6 MB → 0.4 MB.** face-api.js (1.3 MB) was a blocking script on every start; it now loads only when face recognition is used, and the 6.8 MB of models load after the kiosk is showing and the tablet is idle (with Google Sheets, a timing slip had meant they never preloaded at all). The QR library loads with the admin screens that use it.
+- **Published builds start from the saved copy.** The workflows stamp each deploy into `sw.js`, so a new deploy installs as a whole and the kiosk switches over on its own at a quiet moment on the welcome screen; unstamped development copies still fetch fresh files first.
+- **Records on the tablet** are read once and kept in memory, written back only by actions that change something; a year of visits had made every tap re-read and re-write several MB. Demo mode's artificial pause went from 250 to 120 ms.
+- **The Google script** keeps each tab for the rest of the request and reads header and data in one call: a badge sign-in went from 12 sheet reads to 4, a badge sign-out from 8 to 2. A test holds it there.
+- Google connections open early (preconnect) when the kiosk uses Google Sheets.
+
 ## Where things are
 
 | Thing | Location |

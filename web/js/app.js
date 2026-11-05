@@ -13,7 +13,9 @@ import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
 import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense } from './plans.js';
-import { qrSvg } from './qr.js';
+// QR codes are only drawn in the admin screen, so their code loads when first needed.
+let qrModule = null;
+const qrSvg = async (text, opts) => (await (qrModule ||= import('./qr.js'))).qrSvg(text, opts);
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -1769,15 +1771,15 @@ function loadSettingsPane() {
       + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
     actions.innerHTML = `${CONFIG.BUILT_IN ? '' : '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>'}
       <button type="button" class="btn-secondary" data-copy-latest>Copy the latest Apps Script code</button>`;
-    $('[data-connect-another]', actions)?.addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to show the private link', () => {
+    $('[data-connect-another]', actions)?.addEventListener('click', (e) => { const btn = e.currentTarget; confirmTap(btn, 'Tap again to show the private link', async () => {
       const link = `${location.origin}${location.pathname}?api=${encodeURIComponent(CONFIG.API_URL)}&key=${encodeURIComponent(CONFIG.KIOSK_KEY)}`;
       secret.hidden = false;
       secret.innerHTML = `Scan this code with the other tablet's camera, or open the link on it once. It connects to the same sheet and settings. Keep it private: it works like a password.<br><code>${esc(link)}</code>`;
       const qr = $('[data-connect-qr]');
       qr.hidden = false;
-      qr.innerHTML = `${qrSvg(link, { size: 200, label: 'Link to connect another tablet' })}<span class="small">Android: open the camera app and point it at the code, then open the link in the kiosk's browser. With the Android app, build it with the connection instead (android/README.md).</span>`;
-      e.currentTarget.disabled = false;
-    }));
+      qr.innerHTML = `${await qrSvg(link, { size: 200, label: 'Link to connect another tablet' })}<span class="small">Android: open the camera app and point it at the code, then open the link in the kiosk's browser. With the Android app, build it with the connection instead (android/README.md).</span>`;
+      btn.disabled = false;
+    }); });
     $('[data-copy-latest]', actions).addEventListener('click', async () => {
       const { BACKEND_CODE } = await import('./backend-code.js');
       try { await navigator.clipboard.writeText(BACKEND_CODE); toast('Copied. Paste it over the code in Apps Script, then deploy a new version.'); } catch { toast("Copying isn't allowed here. Use apps-script/Code.gs from the project instead."); }
@@ -1860,7 +1862,7 @@ async function checkForUpdate() {
   const apk = (latest.assets || []).find((a) => /\.apk$/i.test(a.name));
   const url = Kiosk && apk ? apk.browser_download_url : latest.html_url;
   box.hidden = false;
-  box.innerHTML = `${qrSvg(url, { size: 120, label: 'Link to the new version' })}<div><strong>Version ${esc(version)} is available.</strong><br>${Kiosk
+  box.innerHTML = `${await qrSvg(url, { size: 120, label: 'Link to the new version' })}<div><strong>Version ${esc(version)} is available.</strong><br>${Kiosk
     ? 'Scan the code (or open the link) on this tablet to download the new app, then install it over this one. Your settings stay.'
     : 'This kiosk picks it up by itself the next time it loads (it reloads every night).'}<br><code>${esc(url)}</code>${Kiosk ? '' : '<br><button type="button" class="btn-secondary" data-reload-now>Load it now</button>'}</div>`;
   $('[data-reload-now]', box)?.addEventListener('click', () => location.reload());
@@ -1902,7 +1904,7 @@ function upsell(feature) {
 document.addEventListener('kiosk-upgrade', (e) => openUpgrade(e.detail));
 
 let scanStop = null;
-function openUpgrade(feature) {
+async function openUpgrade(feature) {
   const ov = $('[data-overlay="upgrade"]');
   const e = entitlement();
   $('[data-upgrade-title]').textContent = feature && FEATURES[feature] ? `${FEATURES[feature]} is part of Pro` : 'Visitor Sign-In Pro';
@@ -1913,7 +1915,7 @@ function openUpgrade(feature) {
   const buy = $('[data-upgrade-buy]');
   buy.hidden = !PAYWALL.buyUrl;
   if (PAYWALL.buyUrl) {
-    $('[data-upgrade-qr]').innerHTML = qrSvg(PAYWALL.buyUrl, { size: 150, label: 'Link to buy Pro' });
+    $('[data-upgrade-qr]').innerHTML = await qrSvg(PAYWALL.buyUrl, { size: 150, label: 'Link to buy Pro' });
     $('[data-upgrade-url]').textContent = PAYWALL.buyUrl;
   }
   $('input[name="license"]').value = '';
@@ -2042,7 +2044,9 @@ const loadedAt = Date.now();
 setInterval(() => {
   tickClock();
   const h = new Date().getHours();
-  if (h === CONFIG.NIGHTLY_RELOAD_HOUR && state.screen === 'welcome' && Date.now() - loadedAt > 2 * 3600 * 1000) location.reload();
+  const quiet = state.screen === 'welcome' && Date.now() - state.lastTouch > 60 * 1000 && $('[data-overlay="signout"]').hidden;
+  if (h === CONFIG.NIGHTLY_RELOAD_HOUR && quiet && Date.now() - loadedAt > 2 * 3600 * 1000) location.reload();
+  if (state.updateReady && quiet) location.reload();
 }, 15 * 1000);
 setInterval(() => { if (state.screen === 'welcome') { refreshFaceIndex(); refreshCloudSettings(); } }, 5 * 60 * 1000);
 setInterval(() => { if (state.screen === 'welcome') refreshAttention(); }, 2 * 60 * 1000);
@@ -2196,10 +2200,26 @@ initSetup({
     history.replaceState(null, '', location.pathname);
     openPin({ title: 'Add a license', hint: 'Enter the admin PIN to add the license to this kiosk.', onSuccess(token) { applyLicense(linkKey, token); } });
   }
-  window.addEventListener('load', () => { if (quickOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err)); });
+  // Face recognition loads once the kiosk is showing and the tablet is idle, so it never slows the start.
+  const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 10000 }) : setTimeout(fn, 3000));
+  const preloadFaces = () => setTimeout(() => whenIdle(() => {
+    if (quickOn()) face.loadModels().catch((err) => console.warn('Face models not loaded yet:', err));
+  }), 2500);
+  if (document.readyState === 'complete') preloadFaces(); else window.addEventListener('load', preloadFaces, { once: true });
+  // With Google Sheets, open the connection to Google early.
+  if (MODE === 'cloud') {
+    for (const href of ['https://script.google.com', 'https://script.googleusercontent.com']) {
+      const l = document.createElement('link');
+      Object.assign(l, { rel: 'preconnect', href, crossOrigin: 'anonymous' });
+      document.head.appendChild(l);
+    }
+  }
   // Offline start-up for browser kiosks (the Android app has its files built in).
   if (!Kiosk && 'serviceWorker' in navigator && window.isSecureContext && !new URLSearchParams(location.search).has('nosw')) {
+    const hadOne = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline start-up not available:', err));
+    // A new version was published and is saved: switch to it at the next quiet moment.
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadOne) state.updateReady = true; });
   }
   // Records kept on the tablet: ask the browser never to clear them to save space.
   if (MODE !== 'cloud' && !DEMO) navigator.storage?.persist?.().catch(() => {});

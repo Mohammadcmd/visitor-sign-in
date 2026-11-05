@@ -122,7 +122,7 @@ The first kiosk to connect becomes the sheet's owner: its random kiosk key is sa
 ## The tablet
 
 - **Android (recommended):** see [android/README.md](android/README.md). Full screen, locked to the app, starts after a reboot, and can have the Google Sheets connection built in.
-- **Browser (iPad or any tablet):** the kiosk must be served over **HTTPS** for the camera. GitHub Pages works with no extra accounts (see below), as does any static host. Once opened, it starts even without Wi-Fi. On an iPad, set **Auto-Lock → Never** and turn on **Guided Access** (Settings → Accessibility). Apps Script's own pages block the camera, which is why the kiosk is hosted separately and calls Apps Script as an API.
+- **Browser (iPad or any tablet):** the kiosk must be served over **HTTPS** for the camera. GitHub Pages works with no extra accounts (see below), as does any static host. Once opened, it starts instantly from its saved copy, even without Wi-Fi, and switches to a newly published version by itself at a quiet moment. On an iPad, set **Auto-Lock → Never** and turn on **Guided Access** (Settings → Accessibility). Apps Script's own pages block the camera, which is why the kiosk is hosted separately and calls Apps Script as an API.
 - **NFC/RFID reader:** any USB or Bluetooth reader that acts as a keyboard (types the card number, then Enter). The kiosk tells a tap from typing by speed. While such a reader is connected, tablets hide their own keyboard, so the kiosk brings its own.
 - A setup link connects a browser kiosk to a sheet in one step: `https://<kiosk address>/?api=<web app URL>&key=<kiosk key>`; open `?disconnect` to forget it.
 
@@ -140,6 +140,10 @@ The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests 
 ## Selling it
 
 The kiosk includes a plan and license system, **switched off** until you turn it on: Free and Pro plans, a free Pro trial, license keys you sign with your own key and the kiosk checks offline, PRO tags and an upgrade screen with your checkout link as a QR code, and tools to make keys (`npm run license:keygen`, `npm run license:issue`). Visitors are never stopped at the door, screening is always asked, and records keep being saved. See [docs/PAYWALL.md](docs/PAYWALL.md).
+
+## Speed
+
+Built for modest tablets. On a CPU slowed to a quarter of a laptop's, the kiosk is ready in about a second (it downloads 400 KB to start), and taps respond within a frame or two. Face recognition (8 MB) loads only when it's used, after the kiosk is showing and the tablet is idle. With records on the tablet, they're kept in memory and saved only when something changes; with Google Sheets, each request reads every tab at most once (`tests/apps-script.test.js` checks this).
 
 ## Privacy
 
