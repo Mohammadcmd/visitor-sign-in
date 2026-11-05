@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The kiosk's actions are now one shared engine (`web/js/engine.js`), used by the on-tablet kiosk and by the new cloud service. No change in behavior.
+- The start of the cloud service (`cloud/`): Cloudflare Workers with one Durable Object per company, photos in R2, the same actions as the Google Sheets script. Tested in Cloudflare's local runtime. Not used by the kiosk yet.
+- The plan for becoming a real app, built the most cost-effective way: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## 1.1.0 — signatures
 
 **Visitors**

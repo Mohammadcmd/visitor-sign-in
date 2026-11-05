@@ -1,0 +1,17 @@
+// Cloudflare settings for the cloud service. Deploy with `npx wrangler deploy`
+// from this folder (see cloud/README.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "visitor-sign-in",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  // One Durable Object per company, with its records in its own SQLite database
+  // (SQLite-backed objects are included in the Workers Free plan).
+  "durable_objects": {
+    "bindings": [{ "name": "COMPANY", "class_name": "Company" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Company"] }],
+  // Photos, signatures and logos. Create it once: npx wrangler r2 bucket create visitor-sign-in-files
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "visitor-sign-in-files" }],
+  "observability": { "enabled": true }
+}

@@ -164,6 +164,13 @@ Asked for next after launch: visitors sign the rules with a finger instead of ti
 - **Safe with an old script:** a sheet still on version 4 can't keep a signature, so visitors tick the box until the script is updated (Diagnostics says so).
 - A late photo check no longer shows its "couldn't see your face" note on the rules step.
 
+## Becoming a real app: the cloud service begins
+
+Asked for next: a true app, sold per kiosk tablet (non-transferable), the most cost-effective way. The plan is in [ROADMAP.md](ROADMAP.md): Cloudflare (free to build, about $5 a month with customers), Stripe, Android first.
+
+- **One engine:** every action moved out of the on-tablet backend into `web/js/engine.js`, which takes its storage, settings and calendar from the caller. The tablet runs it in the browser; the cloud runs it in a Durable Object. The 139-check kiosk test passed unchanged, and `tests/engine.test.mjs` runs it in Node.
+- **The cloud service** (`cloud/`): a Worker sends each company to its own Durable Object, whose SQLite database holds one row per record (only changed rows are written), with photos and signatures in R2. Same API and kiosk-key model as the Google script, retries answered once, one request at a time, each company on its own calendar, and the admin PIN's hash never sent to tablets. `cloud/test/` runs it in Cloudflare's local runtime.
+
 ## Where things are
 
 | Thing | Location |
@@ -171,6 +178,9 @@ Asked for next after launch: visitors sign the rules with a finger instead of ti
 | Kiosk | `web/` (setup wizard: `web/js/setup.js`, settings: `web/js/settings.js`) |
 | Android app | `android/` (guide: `android/README.md`), built with `scripts/build-android.mjs` |
 | Backend | `apps-script/Code.gs`, bundled into the wizard by `scripts/sync-backend.mjs`; tests in `tests/` |
+| Shared engine (every action) | `web/js/engine.js`, run by the tablet (`web/js/api.js`) and the cloud |
+| Cloud service | `cloud/` (guide: `cloud/README.md`) |
+| Roadmap | `docs/ROADMAP.md` |
 | Shock Tech preset | `docs/presets/` |
 | Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |

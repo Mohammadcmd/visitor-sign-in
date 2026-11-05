@@ -1,7 +1,8 @@
 name: Tests
 
-# The backend tests, the kiosk file checks, and the end-to-end test that runs
-# the kiosk in Chromium (both setups, every visitor path, the admin screen).
+# The backend tests, the kiosk file checks, the cloud service (cloud/) in
+# Cloudflare's local runtime, and the end-to-end test that runs the kiosk in
+# Chromium (both setups, every visitor path, the admin screen).
 # Screenshots from the end-to-end run are attached to each run.
 on:
   push:
@@ -22,6 +23,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Cloud service tests (in Cloudflare's local runtime)
+        working-directory: cloud
+        run: |
+          npm ci
+          npm test
       - name: Install Chromium for the end-to-end test
         run: |
           npm install --no-save playwright@1.63.0

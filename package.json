@@ -5,7 +5,7 @@
   "description": "Visitor sign-in kiosk for any business: setup wizard, NFC/RFID badges, screening questions, records on the tablet or in Google Sheets, and an Android app",
   "scripts": {
     "start": "python3 -m http.server 8080",
-    "test": "node tests/apps-script.test.js && node tests/web.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/license.test.mjs && node scripts/sync-backend.mjs --check",
+    "test": "node tests/apps-script.test.js && node tests/web.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/license.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/engine.test.mjs && node scripts/sync-backend.mjs --check",
     "test:e2e": "node tests/kiosk.e2e.js",
     "sync-backend": "node scripts/sync-backend.mjs",
     "icons": "node tools/icons/render.js",

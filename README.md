@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
+**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: becoming a real app](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
 
 | | | |
 |---|---|---|
