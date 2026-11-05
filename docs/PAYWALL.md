@@ -20,6 +20,7 @@ Default Pro features (change the list in `FEATURES` and `FREE_LIMITS`):
 | Google Sheets, several tablets, email alerts | | ✓ |
 | Host emails · daily summary email | | ✓ |
 | Expected visitors · Spanish · quick entry by face · CSV export | | ✓ |
+| Signatures on the visitor rules, with an emailed copy (Google Sheets) | | ✓ |
 
 When something is locked, the kiosk shows a **PRO** tag on it, and tapping it opens the upgrade screen: what Pro adds, a QR code and link to your checkout page, and a box for the license key (type it, paste it, or scan its QR code).
 

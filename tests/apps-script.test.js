@@ -19,13 +19,14 @@ const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
   eq(b.handle({ action: 'claim', key: 'short' }).error, 'bad_key');
   const claim = b.handle({ action: 'claim', key: KEY });
   ok(claim.ok && claim.claimed, 'first kiosk claims the sheet');
-  eq(claim.version, 4);
+  eq(claim.version, 5);
   eq(claim.setupComplete, false);
   eq(claim.hasPin, false);
   eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings', 'Expected']);
   ok(b.sheets['Face data'].hidden && b.sheets.Settings.hidden, 'helper tabs are hidden');
   const head = b.sheets.Visitors.rows[0];
-  eq([head[0], head[1], head[head.length - 1]], ['First Name', 'Last Name', 'Photo folder']);
+  eq([head[0], head[1], head[head.length - 1]], ['First Name', 'Last Name', 'Signed copy']);
+  ok(head.indexOf('Photo folder') === head.length - 4, 'new columns go after the existing ones');
   eq(b.handle({ action: 'claim', key: KEY }).claimed, false, 'the same kiosk can reconnect');
   eq(b.handle({ action: 'claim', key: 'another-kiosk-key-000000000' }).error, 'claimed', 'a different key is refused');
   eq(b.handle({ key: 'nope', action: 'ping' }).error, 'kiosk_key');
@@ -519,6 +520,68 @@ eq(b.sheets.Visitors.objects().at(-1)['Photo folder'], '');
   ok(reads(() => call('ping')) <= 3, 'a status check reads little');
   eq(reads(() => call('ping')), 1, 'and a second one within a minute uses the cached count');
   eq(call('undoSignOut', { visitId: q.sheets.Visits.objects().at(-1)['Visit ID'] }).ok, true, 'undo still works with the kept copy');
+}
+
+// ------------------------------------------------------------------ signatures on the visitor rules
+{
+  const g = loadBackend();
+  g.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => g.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, photos: 'off', badges: false, signature: { mode: 'every', emailCopy: true } } });
+  const sig = 'data:image/png;base64,' + Buffer.from('fake signature png').toString('base64');
+  const agreement = { title: 'Visitor rules', rules: ['Stay with your host.', 'No photos <script>alert(1)</script>'], statement: 'By signing below, I agree to the visitor rules.' };
+  const mails = g.mail.length;
+  const reg = call('register', { first: 'Peter', last: 'Gibbons', company: 'Initech', visiting: 'Bill', purpose: 'TPS', agreed: true, signature: sig, agreement, email: 'Peter@Example.com', language: 'Español' });
+  ok(reg.ok, JSON.stringify(reg));
+  const person = g.sheets.Visitors.objects()[0];
+  eq(person.Email, 'peter@example.com', 'the email is kept');
+  ok(/drive\.google\.com\/file\//.test(person.Signature) && /drive\.google\.com\/file\//.test(person['Signed copy']), 'signature and signed copy are linked');
+  const folder = g.globals.DriveApp.getFolderById(g.ctx.driveId_(person['Photo folder']));
+  const names = folder.files.map((f) => f.blob.name);
+  ok(names.some((n) => /signature\.png$/.test(n)) && names.some((n) => /signed visitor rules - Peter Gibbons\.pdf$/.test(n)), names.join(' | '));
+  const pdf = folder.files.find((f) => /\.pdf$/.test(f.blob.name)).blob;
+  ok(pdf.converted && pdf.type === 'application/pdf', 'made into a PDF');
+  const html = String(pdf.bytes);
+  ok(/Initech: Visitor rules/.test(html) && /Stay with your host\./.test(html) && /Español/.test(html) && /data:image\/png;base64,/.test(html), 'the copy has the company, the rules, the language and the signature');
+  ok(/&lt;script&gt;/.test(html) && !/<script>alert/.test(html), 'rule text is escaped');
+  eq(g.mail.length, mails + 1);
+  ok(g.mail.at(-1).to === 'peter@example.com' && /Your signed visitor rules for Initech/.test(g.mail.at(-1).subject) && g.mail.at(-1).attachments.length === 1, 'the visitor is emailed a copy');
+
+  // The first visit carries the registration's signature; a later visit is signed again.
+  call('checkIn', { visitorId: reg.visitor.id });
+  const first = g.sheets.Visits.objects().at(-1);
+  eq([first.Signature, first['Signed copy']], [person.Signature, person['Signed copy']], 'first visit links the registration signature');
+  call('checkIn', { visitorId: reg.visitor.id, signature: sig, agreement });
+  const again = g.sheets.Visits.objects().at(-1);
+  ok(again['Signed copy'] && again['Signed copy'] !== person['Signed copy'], 'every visit can have its own signed copy');
+  eq(g.mail.length, mails + 2, 'and the stored email gets that copy too');
+  const shown = call('adminSignature', { token: tok, visitId: again['Visit ID'] });
+  ok(shown.ok && shown.signature === sig && shown.signedCopy === again['Signed copy'] && shown.first === 'Peter', 'the admin screen can show it');
+  ok(call('adminHistory', { token: tok }).visits.some((v) => v.signedCopy === again['Signed copy']), 'history links the signed copy');
+  eq(call('adminSignature', { visitId: again['Visit ID'] }).error, 'admin');
+
+  // Retention: an old visit's own signed copy goes with it; the registration copy stays with the visitor.
+  call('kioskSignOut', { visitId: first['Visit ID'] });
+  call('kioskSignOut', { visitId: again['Visit ID'] });
+  const visitsSheet = g.sheets.Visits, head = visitsSheet.rows[0];
+  visitsSheet.rows.slice(1).forEach((r) => { r[head.indexOf('Signed in')] = new Date(Date.now() - 400 * 86400000); });
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, photos: 'off', badges: false, signature: { mode: 'every', emailCopy: true }, retentionDays: 365 } });
+  const purged = call('purgeOld');
+  eq(purged.removed && purged.removed.visits, 2, 'both old visits are deleted');
+  const trashed = (url) => g.files[g.ctx.driveId_(url)].trashed;
+  ok(trashed(again.Signature) && trashed(again['Signed copy']), "the later visit's signature and signed copy are trashed");
+  ok(!trashed(person.Signature) && !trashed(person['Signed copy']), 'the registration copy stays while the visitor is kept');
+  ok(call('adminSignature', { token: tok, visitId: again['Visit ID'] }).error === 'not_found', 'and the deleted visit has no signed copy');
+
+  // Without emailCopy, or without an address, nothing is sent; odd input is ignored.
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, photos: 'off', badges: false, signature: { mode: 'new', emailCopy: false } } });
+  const before = g.mail.length;
+  call('register', { first: 'Samir', last: 'N', company: 'Initech', visiting: 'Bill', purpose: 'TPS', agreed: true, signature: sig, agreement, email: 'samir@example.com' });
+  call('register', { first: 'Michael', last: 'Bolton', company: 'Initech', visiting: 'Bill', purpose: 'TPS', agreed: true, signature: 'data:text/html;base64,PHNjcmlwdD4=', email: 'not an email' });
+  eq(g.mail.length, before, 'no copy emailed when it is turned off');
+  const mb = g.sheets.Visitors.objects().at(-1);
+  eq([mb.Email, mb.Signature, mb['Signed copy'], mb['Photo folder']], ['', '', '', ''], 'a bad signature or email is ignored');
 }
 
 // ------------------------------------------------------------------ retries

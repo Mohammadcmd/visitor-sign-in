@@ -10,7 +10,7 @@
 // whenever the network answers and fall back to the saved copy.
 // The face-recognition models never change, so they're kept separately.
 // Requests to Google (the Sheets backend) are never touched.
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const BUILD = 'dev';
 const SHELL = `kiosk-shell-${VERSION}-${BUILD}`;
 const MODELS = 'kiosk-models-1';
@@ -18,7 +18,7 @@ const MODELS = 'kiosk-models-1';
 const FILES = [
   './', 'index.html', 'styles.css', 'config.js', 'kiosk-connection.js', 'manifest.webmanifest', 'assets/icon-512.png',
   'js/api.js', 'js/app.js', 'js/backend-code.js', 'js/checks.js', 'js/face.js', 'js/files.js', 'js/i18n.js', 'js/keyboard.js',
-  'js/match.js', 'js/nfc.js', 'js/plans.js', 'js/qr.js', 'js/settings.js', 'js/setup.js', 'js/transitions.js',
+  'js/match.js', 'js/nfc.js', 'js/plans.js', 'js/qr.js', 'js/settings.js', 'js/setup.js', 'js/signature.js', 'js/transitions.js',
   'vendor/face-api/face-api.js', 'vendor/qrcode/qrcode.js',
 ];
 

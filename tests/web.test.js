@@ -39,5 +39,8 @@ for (const [, , en, , es] of pairs) {
 // The backend copy the setup wizard hands out matches the script.
 const { render } = { render: (code) => `export const BACKEND_CODE = ${JSON.stringify(code)};` };
 ok(read('web/js/backend-code.js').includes(render(read('apps-script/Code.gs'))), 'web/js/backend-code.js matches apps-script/Code.gs (run node scripts/sync-backend.mjs)');
+const backendVersion = (src, re) => Number((src.match(re) || [])[1]);
+ok(backendVersion(read('web/js/api.js'), /BACKEND_VERSION = (\d+)/) === backendVersion(read('apps-script/Code.gs'), /var BACKEND_VERSION = (\d+)/),
+  'the kiosk expects the Apps Script version the repo ships (BACKEND_VERSION in api.js and Code.gs)');
 
 console.log(`web tests passed (${checks} checks)`);

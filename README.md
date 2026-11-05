@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.0.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
+**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: the paywall](docs/PAYWALL.md)
 
 | | | |
 |---|---|---|
@@ -12,6 +12,8 @@ A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android
 | Expected visitors are greeted | Spanish for visitors | A polite decline, with staff alerted |
 | ![Admin: inside now](docs/screenshots/admin-inside.jpg) | ![Roll call](docs/screenshots/roll-call.jpg) | ![Admin: history](docs/screenshots/admin-history.jpg) |
 | Admin: who's inside | Emergency roll call | History and CSV export |
+| ![Signing the visitor rules](docs/screenshots/signature.jpg) | ![A signed copy in History](docs/screenshots/signed-copy.jpg) | ![Setup: signatures](docs/screenshots/setup-signature.jpg) |
+| Visitors sign the rules with a finger | The signed copy, as the visitor saw it | Setup: who signs, and an emailed copy |
 | ![Install page on an Android tablet](docs/screenshots/install-android.jpg) | ![Checking the tablet](docs/screenshots/setup-device.jpg) | ![Pro upgrade screen](docs/screenshots/upgrade.jpg) |
 | The install page knows the device | Setup checks the tablet first | Ready to sell: plans and licenses |
 
@@ -49,7 +51,7 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 | **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
 | **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
 | **8. Hosts** | Optional. The people visitors come to see, with their email addresses. Their names come up as visitors type. With Google Sheets, each host gets an email the moment their visitor signs in ("Your visitor has arrived"), and the visitor is told "We've let Pat know you're here." |
-| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons and visitor rules. An optional daily **end-of-day** sign-out, with a **daily summary email** (Google Sheets). How long to **keep records** before they're deleted automatically. **Languages**: offer Spanish, and translate your own questions and rules. |
+| **9. Finishing touches** | Photos (every visitor, only declined visitors, or none), face-recognition quick entry, visit reasons and visitor rules. **Signatures**: a tick box, or visitors sign the rules with a finger (new visitors, or every visit), with an emailed copy on request (Google Sheets). An optional daily **end-of-day** sign-out, with a **daily summary email** (Google Sheets). How long to **keep records** before they're deleted automatically. **Languages**: offer Spanish, and translate your own questions and rules. |
 
 The last screen sums everything up and lists what to do next. Everything can be changed later: **press and hold the logo on the welcome screen for 2.5 seconds**, enter the PIN, then **Settings**.
 
@@ -59,8 +61,8 @@ Setting up another tablet: export the settings from Admin → Settings and impor
 
 1. **Welcome screen** with your logo, name and tagline. Tap anywhere to start, or tap **Español** to do everything that follows in Spanish.
 2. **New visitor** or **Returning visitor**.
-3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why (if staff are expecting them, they're greeted and these are filled in); your screening questions; a photo; the visitor rules (agreed as an electronic signature); and an opt-in for quick entry next time.
-4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again.
+3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why (if staff are expecting them, they're greeted and these are filled in); your screening questions; a photo; the visitor rules (a tick box, or signed with a finger); and an opt-in for quick entry next time.
+4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again, and the rules are signed again if signatures are set to every visit.
 5. **Finish:** tap any visitor badge on the reader, or (without badges) they're signed in straight away.
 6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds. A badge marked "not returned" (see End of day) is cleared when it's tapped.
 
@@ -74,13 +76,27 @@ When an answer is set to decline (for example "Not a U.S. citizen or permanent r
 
 Answers set to **let in and alert** sign the visitor in, mark the visit (for example "Needs induction"), and alert staff the same way. Answers to questions asked only once keep applying on later visits.
 
+### Signatures
+
+Choose in setup (Finishing touches → Signature) whether the rules are agreed with a tick box or signed:
+
+- **New visitors sign** the rules once, at their first visit; that signed copy goes with their record and their first visit.
+- **Every visit:** returning visitors are shown the rules and sign again each time.
+
+Visitors sign with a finger in the box under the rules, with **Clear** to start over. A tap or a dot isn't accepted as a signature. What's kept is the rules exactly as the visitor saw them (in their language, with your company name filled in), the statement they signed, their signature and the time.
+
+- **On this tablet**, the signed copy is kept with the visitor's other records. Open it from **Admin → History → Signed copy**.
+- **With Google Sheets**, a PDF of the signed copy (your company name, the visitor's details, the rules, the signature and the time) is saved in the visitor's Drive folder, and the signature image next to it, with links in the Visitors and Visits tabs. Admin → History shows the signed copy with a QR code to open the PDF on a phone. Turn on **Offer visitors a copy by email** and visitors can type their email address to have the PDF sent to them.
+
+Electronic signatures are generally accepted for agreements like these (in the U.S., under the ESIGN Act and UETA), but check what your policies and industry require. This isn't legal advice.
+
 ### Languages
 
 Turn on **Offer Español** in setup (Finishing touches) and visitors can choose Spanish on the welcome screen, or switch on the next screen. Each visitor starts again in English.
 
 - Every visitor screen, message and the on-screen keyboard are translated. The keyboard's **àé** key types accented letters, which also helps with names like José Muñoz (searching ignores accents).
 - The built-in questions, rules, visit reasons and decline messages come translated. Your own text is listed in setup with a box for its Spanish; anything left blank is shown in English. Translations travel with the exported settings file, which is easier for long texts.
-- Answers are always recorded in English, so screening rules, alerts and reports work the same in either language. The rules agreement records the language it was agreed in.
+- Answers are always recorded in English, so screening rules, alerts and reports work the same in either language. The rules agreement records the language it was agreed in, and a signed copy shows the rules in the language they were signed in.
 - Setup and the admin screen stay in English. More languages can be added in `web/js/i18n.js`.
 
 ## Admin screen
@@ -91,7 +107,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
   - **Roll call**, for an evacuation or drill: everyone on site as cards with their photo, company, host and badge. Tap each person as they're accounted for; the ones still missing stay at the top, with a running count.
 - **Expected:** visitors staff are expecting today and in the next two weeks, with company, host, purpose and a note for the front desk. When an expected visitor signs in, they see "Welcome, Ana! We're expecting you", their details are filled in, and the list shows them as arrived (or declined). With Google Sheets, staff can also type rows straight into the sheet's **Expected** tab.
 - **Needs attention:** declined and flagged visitors from the last two weeks, with photos and answers. **Let in** or **Mark reviewed**.
-- **History:** every visit and decline from today, the last 7 or 30 days, or the last year, with search by name, company or host. **Export visits (CSV)**, and on this tablet also **Export visitors (CSV)** with every screening answer. In the Android app, exports go to the tablet's Downloads folder.
+- **History:** every visit and decline from today, the last 7 or 30 days, or the last year, with search by name, company or host. **Signed copy** shows what a visitor signed. **Export visits (CSV)**, and on this tablet also **Export visitors (CSV)** with every screening answer. In the Android app, exports go to the tablet's Downloads folder.
 - **Badges:** add badges by tapping them, link or relink tags, retire or restore badges. Badges signed out by End of day are marked **not returned** until they're tapped again or marked returned.
 - **Settings:** edit any part of the setup; export the settings; show the link to connect another tablet; copy the latest backend script; start over.
   - **Diagnostics:** app version, connection and script version, items waiting to be sent, storage used, badge reader, camera, face recognition and offline start-up, so problems can be spotted without a computer. **Check this tablet** runs the setup check again, and when a newer release is out it says so, with a QR code to get it.
@@ -106,8 +122,8 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 
 | Tab | Contents |
 |---|---|
-| **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, and a link to the visitor's Drive photo folder. |
-| **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, which host was emailed, time out and by whom (including "End of day"), and review notes. |
+| **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, a link to the visitor's Drive folder (photos and signed copies), their email (only if they asked for a signed copy), and links to their signature and signed copy. |
+| **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, which host was emailed, time out and by whom (including "End of day"), review notes, and links to the signature and signed copy for that visit. |
 | **Badges** | Badge number, NFC tag, status (available / in use / not returned / retired) and holder. |
 | **Expected** | Visitors staff are expecting: Date, First Name, Last Name, Company, Host, Purpose, Note, then Arrived (filled in by the kiosk), Added by and an id. Type rows in here, or add them from the kiosk. |
 | **Face data** *(hidden)* | Face signatures, only for visitors who opted into quick entry. Turning it off deletes their rows. |
@@ -115,7 +131,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 
 The first kiosk to connect becomes the sheet's owner: its random kiosk key is saved in the script's properties, and requests without it are refused. Other tablets join with the private link from Admin → Settings. The tablet keeps working through Wi-Fi drops: nonessential writes wait in an outbox and go out when it's back, and a retried request is never written twice.
 
-**Keeping records only as long as needed:** with a retention period set (30 days to 2 years), once a day the kiosk deletes visits older than that, visitors who haven't come back since (with their photos and face data), and past expected visitors. Badges and settings are kept.
+**Keeping records only as long as needed:** with a retention period set (30 days to 2 years), once a day the kiosk deletes visits older than that, visitors who haven't come back since (with their photos and face data), and past expected visitors. Signed copies go with them: on the tablet they're deleted with the visit, and with Google Sheets they're in the visitor's Drive folder, deleted with it. Badges and settings are kept.
 
 **Updating the script:** when a new version changes `apps-script/Code.gs`, Admin → Settings → Diagnostics says so. Copy the latest code into the Apps Script editor (Admin → Settings → Copy the latest Apps Script code), then **Deploy → Manage deployments → Edit → New version**, so the URL stays the same.
 
@@ -149,6 +165,7 @@ Built for modest tablets. On a CPU slowed to a quarter of a laptop's, the kiosk 
 
 - Face recognition runs on the tablet with [face-api.js](https://github.com/vladmandic/face-api). It's opt-in per visitor; photos are never sent to a recognition service. Biometric privacy laws vary; check the opt-in wording meets yours.
 - A match needs most frames to agree, a close distance and a clear gap to the next person; anything less falls back to typing a name. Thresholds are in `web/config.js`.
+- Signatures are personal data: they're kept only as a signed copy of the rules, and deleted with the records they belong to. A visitor's email address is asked for only when they want a copy, and used only to send it.
 - Visitors are asked not to enter ID numbers or other sensitive details. Declined visitors only see your general message; admins see the answers.
 - Set a retention period so records don't outlive their purpose, and post a notice by the kiosk ([template](docs/privacy-notice.md)).
 - Anyone with the kiosk key can call the backend. Keep the setup link private.
@@ -156,7 +173,7 @@ Built for modest tablets. On a CPU slowed to a quarter of a laptop's, the kiosk 
 ## Testing
 
 - `npm test`: the backend against an in-memory Google Sheet and Drive, file checks (versions, the offline file list, translation placeholders), license keys end to end (signing, checking, trial and expiry), and that the wizard's copy of the backend is current.
-- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, starting with no network, the tablet check, the install page, update notices and the paywall switched on. Set `SHOTS=<folder>` to save screenshots.
+- `npm run test:e2e`: the kiosk in Chromium with a fake camera: both setups (this tablet, and Google Sheets with the real script on fakes), sign-ins with and without badges, signing the rules (a tap isn't a signature, Clear, the signed copy in History and the CSV, and with Google Sheets the PDF, its links and the emailed copy), host suggestions and emails, expected visitors, a visitor in Spanish, a decline and a staff override, the admin screen (history, CSV exports, roll call, diagnostics), end of day with a badge not returned and the daily summary, other tablets joining, retention, starting with no network, the tablet check, the install page, update notices and the paywall switched on. Set `SHOTS=<folder>` to save screenshots.
 - After changing `apps-script/Code.gs`, run `node scripts/sync-backend.mjs`.
 
 ## Shock Tech

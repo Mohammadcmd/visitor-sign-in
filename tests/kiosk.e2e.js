@@ -15,6 +15,7 @@ const os = require('os');
 
 // The whole repository is served, like GitHub Pages: the install page at /, the kiosk at /web/.
 const WEB = path.join(__dirname, '..');
+const APP_VERSION = JSON.parse(fs.readFileSync(path.join(WEB, 'package.json'), 'utf8')).version;
 const SHOTS = process.env.SHOTS || '';
 const PIN = '482916';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -67,9 +68,9 @@ async function snap(page, name) {
   await page.screenshot({ path: path.join(SHOTS, `${String(++shot).padStart(2, '0')}-${name}.png`) });
 }
 
-const view = (page) => page.evaluate(() => document.body.dataset.view);
+const view = (page) => page.evaluate(() => document.body?.dataset.view);
 async function waitView(page, name) {
-  await page.waitForFunction((n) => document.body.dataset.view === n, name, { timeout: 15000 });
+  await page.waitForFunction((n) => document.body?.dataset.view === n, name, { timeout: 15000 });
   await page.waitForTimeout(500);
 }
 /** Types into a kiosk field with the on-screen keyboard's hardware-key path (slow enough not to look like a badge tap). */
@@ -95,6 +96,16 @@ async function enterPin(page, pin) {
   for (const d of pin) await page.click(`[data-pin-pad] button:text-is("${d}")`);
   await page.click('[data-pin="go"]');
 }
+/** Signs the signature pad with a mouse "finger": a looping scribble. */
+async function sign(page) {
+  await page.$eval('[data-sign-pad]', (el) => el.scrollIntoView({ block: 'center' }));
+  const box = await page.$eval('[data-sign-pad]', (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await page.mouse.move(box.x + 40, box.y + box.h * 0.6);
+  await page.mouse.down();
+  for (let i = 0; i <= 24; i++) await page.mouse.move(box.x + 40 + i * 12, box.y + box.h * (0.6 + 0.22 * Math.sin(i / 2)), { steps: 2 });
+  await page.mouse.up();
+}
+
 async function holdLogo(page) {
   const box = await page.$eval('[data-admin-hold]', (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await page.mouse.move(box.x, box.y);
@@ -260,6 +271,8 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.click('[data-photos-choice] [data-value="all"]');
     await page.click('[data-eod-choice] [data-value="23:59"]');
     await page.click('[data-retention-choice] [data-value="90"]');
+    await page.click('[data-sign-choice] [data-value="new"]');
+    ok(await page.$eval('[data-sign-email-toggle]', (e) => e.hidden), 'emailing a copy needs Google Sheets');
     await page.click('[data-lang-toggle="es"]');
     ok(/still shown in English/.test(await text(page, '[data-translations-title]')), 'the tagline needs a translation');
     ok(await page.$eval('[data-tr-list] li[data-state="built"] input', (e) => e.value.length > 0), 'built-in translations filled in');
@@ -307,7 +320,19 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await signInNewVisitor(page, { first: 'Ana', last: 'Lopez', citizen: 'U.S. citizen', expected: true });
     await formNext(page);
     ok(await step(page) === 'rules', 'rules after the photo');
-    await page.click('[data-agree]');
+    ok(await page.$eval('[data-agree]', (e) => e.hidden) && await page.$eval('[data-sign-box]', (e) => !e.hidden), 'a signature instead of the tick box');
+    await formNext(page);
+    ok(/Please sign in the box/.test(await text(page, '[data-form-error]')), 'signing is required');
+    await page.mouse.click(...(await page.$eval('[data-sign-pad]', (el) => { const r = el.getBoundingClientRect(); return [r.x + 50, r.y + 50]; })));
+    await formNext(page);
+    ok(await step(page) === 'rules', 'a single tap is not a signature');
+    await sign(page);
+    ok(await page.$eval('[data-sign-pad]', (c) => { const r = c.getBoundingClientRect(); return r.bottom <= innerHeight - 90; }), 'the signature pad fits on the screen above the buttons');
+    ok(await page.$eval('.sign-area', (e) => e.classList.contains('signed')), 'the pad shows it is signed');
+    await page.click('[data-sign-clear]');
+    ok(!(await page.$eval('.sign-area', (e) => e.classList.contains('signed'))), 'Clear starts over');
+    await sign(page);
+    await snap(page, 'signature');
     await formNext(page);
     ok(await step(page) === 'quick', 'quick entry question last');
     await page.click('[data-quick="no"]');
@@ -339,7 +364,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.click('[data-reason-ok]');
     await waitView(page, 'form');
     ok(await step(page) === 'rules', 'override continues at the rules');
-    await page.click('[data-agree]');
+    await sign(page);
     await formNext(page);
     await page.click('[data-quick="no"]');
     await waitView(page, 'badge');
@@ -385,9 +410,17 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.waitForSelector('[data-history-list] .history-row');
     ok(await page.$$eval('[data-history-list] .history-row', (l) => l.length) === 4, 'history shows every visit and decline');
     await snap(page, 'admin-history');
+    ok(await page.$$eval('[data-history-list] [data-signed]', (l) => l.length) === 2, 'the two visitors who signed have a signed copy');
+    await page.click('[data-history-list] .history-row:has-text("Ana Lopez") [data-signed]');
+    await page.waitForSelector('[data-overlay="signed"]:not([hidden])');
+    ok(await text(page, '[data-signed-title]') === 'Ana Lopez' && /I will stay with my host/.test(await text(page, '[data-signed-rules]')), 'the signed copy shows the rules she signed');
+    ok(await page.$eval('[data-signed-image]', (img) => img.src.startsWith('data:image/png') && img.naturalWidth > 50), 'and her signature');
+    await snap(page, 'signed-copy');
+    await page.click('[data-signed-close]');
     const [csv] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visits]')]);
     const csvText = fs.readFileSync(await csv.path(), 'utf8');
     ok(/^\ufeffSigned in,Signed out,First name/.test(csvText) && /Cara,Smith/.test(csvText) && csvText.trim().split('\r\n').length === 5, 'visits CSV');
+    ok(/Signed copy/.test(csvText.split('\r\n')[0]) && /Ana,Lopez.*,Yes\r?$/m.test(csvText), 'the CSV says who signed');
     ok(/Cara,Smith,Globex,Pat Kim,Meeting,/.test(csvText), 'a reason picked in Spanish is recorded in English');
     const [people] = await Promise.all([page.waitForEvent('download'), page.click('[data-export-visitors]')]);
     const peopleText = fs.readFileSync(await people.path(), 'utf8');
@@ -420,7 +453,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await page.waitForSelector('[data-settings-rows] .set-row');
     await page.waitForFunction(() => /App version/.test(document.querySelector('[data-diagnostics]').textContent));
     const diag = await text(page, '[data-diagnostics]');
-    ok(/1\.0\.0/.test(diag) && /On this tablet/.test(diag) && /Last card read/.test(diag), `diagnostics: ${diag.slice(0, 120)}`);
+    ok(diag.includes(APP_VERSION) && /On this tablet/.test(diag) && /Last card read/.test(diag), `diagnostics: ${diag.slice(0, 120)}`);
     await page.waitForSelector('[data-update-box]:not([hidden])');
     ok(/Version 9\.9\.9 is available/.test(await text(page, '[data-update-box]')) && await page.$('[data-update-box] svg.qr'), 'a newer release is offered, with a QR code');
     await page.click('[data-run-checks]');
@@ -499,6 +532,11 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await snap(cloud, 'cloud-hosts');
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-photos-choice] [data-value="off"]');
+    await cloud.click('[data-sign-choice] [data-value="new"]');
+    await cloud.click('[data-sign-email-toggle]');
+    ok(await cloud.$eval('[data-sign-email-toggle]', (e) => e.getAttribute('aria-checked') === 'true'), 'offer an emailed copy');
+    await cloud.$eval('[data-sign-choice]', (e) => e.scrollIntoView({ block: 'center' }));
+    await snap(cloud, 'setup-signature');
     ok(await cloud.$eval('[data-summary-box]', (e) => e.hidden), 'summary option waits for an end-of-day time');
     await cloud.click('[data-eod-choice] [data-value="23:59"]');
     await cloud.click('[data-summary-toggle]');
@@ -529,7 +567,12 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await cloud.click('[data-screen="form"] .step.active .option[data-value="No"]');
     await formNext(cloud);
     ok(await step(cloud) === 'rules', 'no photo step with photos off');
-    await cloud.click('[data-agree]');
+    await sign(cloud);
+    ok(await cloud.$eval('[data-sign-email]', (e) => !e.hidden), 'the visitor can ask for a copy');
+    await set(cloud, 'input[name="email"]', 'milton@initech');
+    await formNext(cloud);
+    ok(/check the email address/.test(await text(cloud, '[data-form-error]')), 'a mistyped email is caught');
+    await set(cloud, 'input[name="email"]', 'milton@initech.example');
     await formNext(cloud);
     await waitView(cloud, 'done');
     await snap(cloud, 'cloud-done');
@@ -538,6 +581,10 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(backend.mail.some((m) => m.to === 'security@initech.example' && /Visitor alert: Milton/.test(m.subject)), 'alert email sent');
     ok(backend.mail.some((m) => m.to === 'bill@initech.example' && /Your visitor has arrived: Milton Waddams/.test(m.subject)), 'host emailed');
     ok(/let Bill Lumbergh know/.test(await text(cloud, '[data-done-host]')), 'visitor told their host knows');
+    const copyMail = backend.mail.find((m) => m.to === 'milton@initech.example');
+    ok(copyMail && /Your signed visitor rules for Initech/.test(copyMail.subject) && copyMail.attachments.length === 1, 'the signed copy is emailed to the visitor');
+    const milton = backend.sheets.Visitors.objects().find((r) => r['First Name'] === 'Milton');
+    ok(milton['Signed copy'] && milton.Email === 'milton@initech.example' && backend.sheets.Visits.objects().at(-1)['Signed copy'] === milton['Signed copy'], 'the sheet links the signed copy on the visitor and the visit');
     await cloud.click('[data-screen="done"] [data-go="welcome"]');
     await waitView(cloud, 'welcome');
 
@@ -580,6 +627,29 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     const sent = backend.mail.find((m) => /^Visitor summary/.test(m.subject));
     ok(daily.summary === true && sent && sent.to === 'security@initech.example' && /Milton Waddams/.test(sent.body), `daily summary: ${JSON.stringify(daily)}`);
     ok(!cloud.errors.length && !second.errors.length && !third.errors.length, `no page errors: ${[...cloud.errors, ...second.errors, ...third.errors].join(' | ')}`);
+
+    // A sheet still on an older script (version 4) can't keep signatures: visitors tick the box until it's updated.
+    const oldScript = { handle: (req) => { const out = backend.handle(req); return req.action === 'ping' ? { ...out, version: 4 } : out; } };
+    const stale = await open(browser, `${base}?api=${encodeURIComponent(EXEC)}&key=${encodeURIComponent(key)}`, oldScript);
+    await waitView(stale, 'welcome');
+    await stale.waitForTimeout(800);
+    await stale.click('[data-screen="welcome"]');
+    await waitView(stale, 'choice');
+    await stale.click('[data-action="new"]');
+    await waitView(stale, 'form');
+    await formNext(stale);
+    await set(stale, 'input[name="first"]', 'Samir');
+    await set(stale, 'input[name="last"]', 'Nagheenanajar');
+    await formNext(stale);
+    await set(stale, 'input[name="company"]', 'Initech');
+    await set(stale, 'input[name="visiting"]', 'Bill Lumbergh');
+    await set(stale, 'input[name="purpose"]', 'Meeting');
+    await formNext(stale);
+    await stale.click('[data-screen="form"] .step.active .option[data-value="No"]');
+    await formNext(stale);
+    ok(await step(stale) === 'rules' && await stale.$eval('[data-agree]', (e) => !e.hidden) && await stale.$eval('[data-sign-box]', (e) => e.hidden), 'an outdated script gets the tick box, not a signature that would be lost');
+    ok(!stale.errors.length, `no page errors: ${stale.errors.join(' | ')}`);
+    await stale.context().close();
 
     // ================================================================ offline start-up
     const off = await open(browser, `${base}?demo`, null, { offline: true });

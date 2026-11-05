@@ -8,7 +8,7 @@ import { settings, saveLocal, hashPin, useSettings } from './settings.js';
 export const MODE = CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
 export const DEMO = MODE === 'demo';
 export const ON_TABLET = MODE !== 'cloud';
-export const BACKEND_VERSION = 4;
+export const BACKEND_VERSION = 5;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];
@@ -202,7 +202,7 @@ function load() {
 
 /** Actions that only read: nothing to write back afterwards. */
 const READS = new Set(['ping', 'getSettings', 'faceIndex', 'findVisitor', 'findOpenVisits', 'findExpected', 'adminLogin',
-  'adminInside', 'adminBadges', 'adminAttention', 'adminHistory', 'adminVisitors', 'adminPhoto', 'adminExpected']);
+  'adminInside', 'adminBadges', 'adminAttention', 'adminHistory', 'adminVisitors', 'adminPhoto', 'adminExpected', 'adminSignature']);
 
 function save(s) {
   try { localStorage.setItem(STORE, JSON.stringify(s)); } catch {
@@ -310,6 +310,16 @@ function matchExpected(s, first, last, id) {
     || list.find((e) => near(nameKey(e.first), nameKey(first)) && near(nameKey(e.last), nameKey(last))) || null;
 }
 
+const isSignature = (x) => typeof x === 'string' && x.length < 400000 && /^data:image\/png;base64,/.test(x);
+function cleanAgreement(x) {
+  const ag = x && typeof x === 'object' ? x : {};
+  return {
+    title: clean(ag.title, 120) || 'Visitor rules',
+    rules: (Array.isArray(ag.rules) ? ag.rules : []).slice(0, 20).map((r) => String(r || '').trim().slice(0, 800)).filter(Boolean),
+    statement: clean(ag.statement, 300),
+  };
+}
+
 function signOut(s, visit, by) {
   visit.signedOut = now();
   visit.signedOutBy = by;
@@ -333,6 +343,13 @@ function startVisit(s, v, a, badgeNo, replacedBy) {
     signedIn: now(), screening,
   };
   visit.expected = !!expected;
+  // The signed rules: signed for this visit, or (on a first visit) the copy signed at registration.
+  if (isSignature(a.signature)) {
+    photos.put(`signature:${visit.id}`, a.signature);
+    Object.assign(visit, { signature: `signature:${visit.id}`, agreement: cleanAgreement(a.agreement), signedLanguage: clean(a.language, 20) });
+  } else if (!v.visits && v.signature) {
+    Object.assign(visit, { signature: v.signature, agreement: v.agreement, signedLanguage: v.signedLanguage });
+  }
   s.visits.push(visit);
   v.visits = (v.visits || 0) + 1;
   v.lastVisit = new Date().toLocaleDateString();
@@ -374,6 +391,10 @@ async function localAction(s, action, a) {
       v.screening = screeningText(flags, a.override || pass);
       s.visitors.push(v);
       if (a.photo) await photos.put(`visitor:${v.id}`, a.photo);
+      if (isSignature(a.signature)) {
+        await photos.put(`signature:${v.id}`, a.signature);
+        Object.assign(v, { signature: `signature:${v.id}`, agreement: cleanAgreement(a.agreement), signedAt: now(), signedLanguage: clean(a.language, 20) });
+      }
       if (v.quickEntry && Array.isArray(a.descriptor)) s.faces.push({ visitorId: v.id, descriptor: a.descriptor });
       return { ok: true, visitor: { id: v.id, first: v.first, last: v.last, company: v.company, quickEntry: v.quickEntry, kind: kindOf(v.screening) } };
     }
@@ -460,10 +481,14 @@ async function localAction(s, action, a) {
       const cutoff = Date.now() - days * 86400000;
       const old = (iso) => { const t = new Date(iso).getTime(); return !Number.isNaN(t) && t < cutoff; };
       const before = { visits: s.visits.length, visitors: s.visitors.length, expected: s.expected.length };
-      for (const v of s.visits) if (v.signedOut && old(v.signedIn) && v.photo) await photos.del(v.photo);
+      for (const v of s.visits) {
+        if (!v.signedOut || !old(v.signedIn)) continue;
+        if (v.photo) await photos.del(v.photo);
+        if (v.signature && v.signature !== `signature:${v.visitorId}`) await photos.del(v.signature);
+      }
       s.visits = s.visits.filter((v) => !(v.signedOut && old(v.signedIn)));
       const gone = new Set(s.visitors.filter((v) => old(v.lastVisitAt || v.registered)).map((v) => v.id));
-      for (const id of gone) await photos.del(`visitor:${id}`);
+      for (const id of gone) { await photos.del(`visitor:${id}`); await photos.del(`signature:${id}`); }
       s.visitors = s.visitors.filter((v) => !gone.has(v.id));
       s.faces = s.faces.filter((f) => !gone.has(f.visitorId));
       const day = dayKey(cutoff);
@@ -565,7 +590,7 @@ async function localAction(s, action, a) {
         out.push({
           visitId: v.id, signedIn: v.signedIn, signedOut: v.signedOut || '', first: v.first, last: v.last,
           company: v.company, visiting: v.visiting, purpose: v.purpose, kind: v.kind, badge: v.badge || '',
-          method: v.method, signedOutBy: v.signedOutBy || '', screening: v.screening || '', hostNotified: '',
+          method: v.method, signedOutBy: v.signedOutBy || '', screening: v.screening || '', hostNotified: '', signedCopy: v.signature ? 'on this tablet' : '',
         });
       }
       return { ok: true, visits: out };
@@ -604,6 +629,14 @@ async function localAction(s, action, a) {
         visits: v.visits || 0, screening: v.screening || '',
       })),
     };
+    case 'adminSignature': {
+      const v = s.visits.find((x) => x.id === a.visitId);
+      if (!v || !v.signature) return { ok: false, error: 'not_found' };
+      return {
+        ok: true, signature: await photos.get(v.signature), agreement: v.agreement || null, signedCopy: '',
+        first: v.first, last: v.last, company: v.company, when: v.signedIn, language: v.signedLanguage || '',
+      };
+    }
     case 'adminPhoto': {
       const v = s.visits.find((x) => x.id === a.visitId);
       if (!v) return { ok: false, error: 'not_found' };

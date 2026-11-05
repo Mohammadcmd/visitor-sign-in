@@ -36,6 +36,7 @@ export const FEATURES = {
   quickEntry: 'Quick entry by face',
   export: 'CSV export of visits and visitors',
   dailySummary: 'Daily summary email',
+  signatures: 'Signatures on the visitor rules',
 };
 export const FREE_LIMITS = { screeningQuestions: 1 };
 export const PLANS = {

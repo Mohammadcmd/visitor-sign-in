@@ -39,6 +39,7 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 - [ ] With Google Sheets, paste the `/exec` URL on the *Connect* step.
 - [ ] Choose an admin PIN only admins know (6 to 8 digits). It's stored as a one-way hash; it can be changed in Admin → Settings → Admin login.
 - [ ] Register the badges by tapping them during setup (or later in Admin → Badges). Label each card with its number (V1, V2, …).
+- [ ] Decide how visitors agree to the rules: a tick box, or a signature from new visitors or at every visit (Finishing touches → Signature). With Google Sheets, choose whether to offer an emailed copy.
 - [ ] Offer Spanish if your visitors would use it, and translate your own questions and rules (Finishing touches → Languages).
 - [ ] More tablets on the same sheet: Admin → Settings → **Connect another tablet**, then scan the QR code with each tablet (or open the private link on it).
 
@@ -50,6 +51,7 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 - [ ] Use **Staff override** on the decline screen, and **Let in** from Needs attention.
 - [ ] Sign out (badge tap, or "Leaving?") and try **Undo**.
 - [ ] Add an expected visitor and sign in as them; check the host email (Google Sheets).
+- [ ] With signatures on, sign in a new visitor with a finger, then open Admin → History → Signed copy. With Google Sheets, open the PDF in the visitor's Drive folder, and ask for an emailed copy to check it arrives.
 - [ ] Open **Admin → Settings → Diagnostics**: everything should read normally (connection, script version, badge reader, camera, offline start-up).
 - [ ] Run a **Roll call** once so staff know where it is.
 - [ ] Then clear the test records: delete the test rows in the sheet, or (on the tablet) Admin → Settings → Start over and set up again.

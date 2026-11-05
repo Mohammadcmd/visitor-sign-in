@@ -62,7 +62,7 @@ export function forgetConnection() {
 const saved = connection();
 
 /** The kiosk's version. Keep it in step with package.json and sw.js (the tests check). */
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 export const CONFIG = {
   // Where new versions are published (GitHub owner/repository). Admin → Settings → Diagnostics says when one is out.
