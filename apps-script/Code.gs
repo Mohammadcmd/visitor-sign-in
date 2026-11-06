@@ -21,7 +21,7 @@
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
 
-var BACKEND_VERSION = 5;
+var BACKEND_VERSION = 7;
 
 var TABS = {
   visitors: 'Visitors',
@@ -119,7 +119,8 @@ function doPost(e) {
 // with the same request id, so the first result is remembered and replayed.
 var WRITE_ACTIONS = ['purgeOld', 'endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
   'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
-  'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow'];
+  'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow',
+  'adminPhoneLink', 'phoneRegister', 'phoneCheckIn', 'phoneSignOut', 'phoneDecline', 'assignPass'];
 var REPLAY_TTL = 30 * 60;  // seconds
 
 /** Dispatches one API call. Separate from doPost so tests can call it directly. */
@@ -128,9 +129,14 @@ function handle_(req) {
   forgetTabs_();
   if (req && req.action === 'claim') return withLock_(function () { return claim_(req.key); });
   var props = PropertiesService.getScriptProperties();
-  var key = props.getProperty('KIOSK_KEY');
-  if (!key) return { ok: false, error: 'not_connected' };
-  if (req.key !== key) return { ok: false, error: 'kiosk_key' };
+  if (req && typeof req.phone === 'string') {
+    var refused = phoneAllowed_(req);
+    if (refused) return refused;
+  } else {
+    var key = props.getProperty('KIOSK_KEY');
+    if (!key) return { ok: false, error: 'not_connected' };
+    if (req.key !== key) return { ok: false, error: 'kiosk_key' };
+  }
 
   var rid = typeof req.rid === 'string' && /^[A-Za-z0-9-]{6,64}$/.test(req.rid) ? 'rid:' + req.rid : '';
   if (!rid || WRITE_ACTIONS.indexOf(req.action) < 0) return dispatch_(req);
@@ -173,6 +179,7 @@ function dispatch_(req) {
     case 'setQuickEntry': return withLock_(function () { return setQuickEntry_(a); });
     case 'assignBadge': return withLock_(function () { return assignBadge_(a); });
     case 'checkIn': return withLock_(function () { return checkIn_(a); });
+    case 'assignPass': return withLock_(function () { return assignPass_(a); });
     case 'tapAtWelcome': return withLock_(function () { return tapAtWelcome_(a); });
     case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
@@ -181,6 +188,11 @@ function dispatch_(req) {
     case 'findExpected': return withLock_(function () { return findExpected_(a); });
     case 'adminLogin': return adminLogin_(a);
     case 'adminSetPin': return withLock_(function () { return adminSetPin_(a); });
+    case 'phoneStart': return phoneStart_();
+    case 'phoneRegister': return withLock_(function () { return phoneRegister_(a); });
+    case 'phoneCheckIn': return withLock_(function () { return phoneCheckIn_(a); });
+    case 'phoneSignOut': return withLock_(function () { return phoneSignOut_(a); });
+    case 'phoneDecline': return withLock_(function () { return phoneDecline_(a); });
   }
 
   // Everything below needs an admin token.
@@ -203,6 +215,7 @@ function dispatch_(req) {
     case 'adminSaveSettings': return withLock_(function () { return adminSaveSettings_(a); });
     case 'adminReview': return withLock_(function () { return adminReview_(a); });
     case 'adminAllow': return withLock_(function () { return adminAllow_(a); });
+    case 'adminPhoneLink': return withLock_(function () { return adminPhoneLink_(a); });
   }
   return { ok: false, error: 'unknown_action' };
 }
@@ -366,7 +379,10 @@ function register_(a) {
   if (v.quickEntry && fileId && isDescriptor_(a.descriptor)) {
     addFaceRow_(id, a.descriptor, 'signup', fileId);
   }
-  if (flags.length && !a.override && !pass) alert_('flagged', v, flags, a.photo);
+  if (flags.length && !a.override && !pass) {
+    alert_('flagged', v, flags, a.photo);
+    CacheService.getScriptCache().put('alerted:' + id, '1', 600);
+  }
   attentionChanged_();
   return { ok: true, visitor: publicVisitor_(id, v, screening) };
 }
@@ -396,7 +412,7 @@ function recordDecline_(a) {
   appendRow_(TABS.visits, {
     'Signed in': now, 'First Name': v.first, 'Last Name': v.last, 'Company': v.company,
     'Visiting': v.visiting, 'Purpose': v.purpose, 'Kind': 'Declined', 'Badge': '',
-    'How they signed in': clean_(a.method) || 'new visitor', 'Signed out': now, 'Signed out by': 'Declined at the kiosk',
+    'How they signed in': clean_(a.method) || 'new visitor', 'Signed out': now, 'Signed out by': a.method === 'phone' ? 'Declined on their phone' : 'Declined at the kiosk',
     'Screening': 'Declined: ' + reasonList_(reasons), 'Photo': photoUrl,
     'Visitor ID': clean_(a.visitorId), 'Visit ID': id
   });
@@ -500,6 +516,47 @@ function assignBadge_(a) {
   return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified, expected: started.expected };
 }
 
+/**
+ * Numbered visitor passes (no reader): signs the visitor in and gives them the
+ * lowest-numbered free pass, which the kiosk tells them to take. Someone
+ * signing in again keeps the pass they have. With every pass out, they're
+ * still signed in, and told to see the front desk (noPass).
+ */
+function assignPass_(a) {
+  var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
+  if (!person) return { ok: false, error: 'not_found' };
+  return startWithPass_(person, a, 'Signed in again');
+}
+
+function startWithPass_(person, a, replacedBy) {
+  var open = openVisitFor_(person.values['Visitor ID']);
+  var held = open && open.values['Badge'] ? findRow_(TABS.badges, 'Badge', open.values['Badge']) : null;
+  var pass = held || freePass_();
+  var badgeNo = pass ? String(pass.values['Badge']) : '';
+  var started = startVisit_(person, a, badgeNo, replacedBy);
+  if (pass) {
+    var p = person.values;
+    setCells_(TABS.badges, pass.row, {
+      'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
+      'Visitor ID': p['Visitor ID'], 'Visit ID': started.visitId, 'Since': new Date(), 'Note': ''
+    });
+  }
+  return { ok: true, badge: badgeNo, noPass: !pass, visitId: started.visitId, hostNotified: started.hostNotified, expected: started.expected };
+}
+
+/** The free pass with the lowest number (V2 before V10). */
+function freePass_() {
+  var best = null, bestNo = Infinity;
+  readTab_(TABS.badges).forEach(function (r, i) {
+    var status = lower_(r['Status']);
+    if (status && status !== 'available') return;
+    var m = /(\d+)/.exec(String(r['Badge']));
+    var n = m ? Number(m[1]) : 1e9;
+    if (n < bestNo) { bestNo = n; best = { row: i + 2, values: r }; }
+  });
+  return best;
+}
+
 /** Signs a visitor in without a badge (kiosks set up without visitor badges). */
 function checkIn_(a) {
   var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
@@ -555,7 +612,10 @@ function startVisit_(person, a, badgeNo, replacedBy) {
   setCells_(TABS.visitors, person.row, {
     'Last visit': now, 'Visit count': (Number(p['Visit count']) || 0) + 1
   });
-  if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
+  // A new visitor's alert went out when they registered: their first visit doesn't send it again.
+  var alerted = CacheService.getScriptCache().get('alerted:' + a.visitorId);
+  if (alerted) CacheService.getScriptCache().remove('alerted:' + a.visitorId);
+  else if (flags.length && !a.override) alert_('flagged', { first: p['First Name'], last: p['Last Name'], company: p['Company'], visiting: visiting }, flags, '');
   if (flags.length || /^flagged/i.test(screening)) attentionChanged_();
   return { visitId: visitId, hostNotified: host, expected: !!expected };
 }
@@ -867,6 +927,144 @@ function kioskSignOut_(a) {
   if (!visit || visit.values['Signed out']) return { ok: false, error: 'not_found' };
   signOutVisit_(visit, 'Signed out at kiosk');
   return { ok: true, first: visit.values['First Name'], badge: String(visit.values['Badge'] || ''), visitId: a.visitId };
+}
+
+// ---------------------------------------------------------------- phone sign-in (a QR code)
+//
+// For a front door without a tablet: a printed QR code opens the kiosk on the
+// visitor's own phone. Phones use their own key (PHONE_KEY, made and changed
+// by an admin), which allows only these actions. A phone can sign a visitor
+// in and out and record a decline. It can never look anyone up, see staff
+// names, face data, or anything the admin screen shows. Each visitor's phone
+// keeps a secret token (only its hash is on the Visitors tab), so a phone can
+// sign in again, or sign out, only the visitor it signed in.
+
+var PHONE_ACTIONS = ['phoneStart', 'phoneRegister', 'phoneCheckIn', 'phoneSignOut', 'phoneDecline'];
+var PHONE_RATE = { seconds: 10 * 60, max: 60 }; // at most 60 phone sign-ins, sign-outs and declines in 10 minutes
+
+function phoneAllowed_(req) {
+  var key = PropertiesService.getScriptProperties().getProperty('PHONE_KEY');
+  if (!key || req.phone !== key) return { ok: false, error: 'phone_link' };
+  if (PHONE_ACTIONS.indexOf(req.action) < 0) return { ok: false, error: 'not_allowed' };
+  if (req.action === 'phoneStart') return null;
+  // Anyone could photograph the poster, so phones get a limited number of writes.
+  var cache = CacheService.getScriptCache();
+  var bucket = 'phone-rate:' + Math.floor(Date.now() / (PHONE_RATE.seconds * 1000));
+  var n = Number(cache.get(bucket) || 0) + 1;
+  if (n > PHONE_RATE.max) return { ok: false, error: 'too_many' };
+  cache.put(bucket, String(n), PHONE_RATE.seconds);
+  return null;
+}
+
+/** Switches phone sign-in on (making the key the QR code carries), changes the key (a new QR code), or off; peek only reads it. */
+function adminPhoneLink_(a) {
+  var props = PropertiesService.getScriptProperties();
+  if (a.off) { props.deleteProperty('PHONE_KEY'); return { ok: true, key: '' }; }
+  var key = props.getProperty('PHONE_KEY');
+  if (a.peek) return { ok: true, key: key || '' };
+  if (!key || a.change) { key = 'ph' + randomCode_(30); props.setProperty('PHONE_KEY', key); }
+  return { ok: true, key: key };
+}
+
+/** What a phone needs to show the sign-in: the visitor-facing settings only. */
+function phoneStart_() {
+  var s = readSettings_();
+  if (!s || !s.setupComplete) return { ok: false, error: 'not_set_up' };
+  var org = s.org || {}, screening = s.screening || {};
+  return {
+    ok: true, version: BACKEND_VERSION,
+    logo: org.logoFileId ? readLogo_(org.logoFileId) : '',
+    settings: {
+      setupComplete: true, storage: 'cloud', badges: false, passes: !!s.passes && !s.badges, quickEntry: false, hosts: [], notifyHosts: s.notifyHosts !== false,
+      org: { name: org.name || '', tagline: org.tagline || '', accent: org.accent || '' },
+      form: s.form || {}, screening: { questions: screening.questions || [], declineMessage: screening.declineMessage || '' },
+      photos: s.photos, languages: s.languages, translations: s.translations, signature: s.signature,
+      trialStarted: s.trialStarted || '', phone: s.phone || {}
+    }
+  };
+}
+
+/** Only what a visitor may send from a phone: no override, no quick entry, no expected-visitor lookup. */
+function phoneArgs_(a) {
+  return {
+    first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: a.purpose, agreed: a.agreed === true,
+    photo: a.photo, answers: a.answers, flags: a.flags, reasons: a.reasons, signature: a.signature, agreement: a.agreement,
+    language: a.language, email: a.email, method: 'phone'
+  };
+}
+
+function phoneHash_(token) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'visitor-phone:' + token);
+  return bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+
+/** The visitor this phone signed in, if its token matches. */
+function phonePerson_(visitorId, token) {
+  if (typeof token !== 'string' || token.length < 20) return null;
+  var person = findRow_(TABS.visitors, 'Visitor ID', String(visitorId || ''));
+  if (!person || !person.values['Phone key'] || person.values['Phone key'] !== phoneHash_(token)) return null;
+  return person;
+}
+
+/** A new visitor on their phone: registered and signed in (no badge). The phone keeps the token. */
+function phoneRegister_(a) {
+  var args = phoneArgs_(a);
+  var reg = register_(args);
+  if (!reg.ok) return reg;
+  var token = randomCode_(32);
+  ensureColumn_(TABS.visitors, 'Phone key');
+  var person = findRow_(TABS.visitors, 'Visitor ID', reg.visitor.id);
+  setCells_(TABS.visitors, person.row, { 'Phone key': phoneHash_(token) });
+  person = findRow_(TABS.visitors, 'Visitor ID', reg.visitor.id);
+  var started = phoneVisit_(person, { visitorId: reg.visitor.id, method: 'phone', flags: args.flags, visiting: args.visiting, purpose: args.purpose });
+  return { ok: true, visitor: reg.visitor, visitId: started.visitId, hostNotified: started.hostNotified, badge: started.badge || '', noPass: !!started.noPass, token: token };
+}
+
+/** A visit started on a phone: with numbered passes, the phone tells them which pass to take. */
+function phoneVisit_(person, a) {
+  var s = readSettings_() || {};
+  if (s.passes && !s.badges) return startWithPass_(person, a, 'Signed in again');
+  return startVisit_(person, a, '', 'Signed in again');
+}
+
+/** A visitor this phone signed in before, signing in again. */
+function phoneCheckIn_(a) {
+  var person = phonePerson_(a.visitorId, a.token);
+  if (!person) return { ok: false, error: 'phone_visitor' };
+  var args = phoneArgs_(a);
+  // Staff may have let them in after a decline (Needs attention → Let in): that approval is kept with the visit.
+  var pass = takePass_(person.values['First Name'], person.values['Last Name']);
+  var started = phoneVisit_(person, {
+    visitorId: person.values['Visitor ID'], method: 'phone', flags: pass ? [] : args.flags, visiting: args.visiting, purpose: args.purpose,
+    signature: args.signature, agreement: args.agreement, language: args.language, email: args.email, override: pass || undefined
+  });
+  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified, badge: started.badge || '', noPass: !!started.noPass, first: person.values['First Name'] };
+}
+
+/** Signing out on the phone that signed them in. */
+function phoneSignOut_(a) {
+  var visit = findRow_(TABS.visits, 'Visit ID', String(a.visitId || ''));
+  if (!visit) return { ok: false, error: 'not_found' };
+  if (!phonePerson_(visit.values['Visitor ID'], a.token)) return { ok: false, error: 'phone_visitor' };
+  var first = visit.values['First Name'], badge = String(visit.values['Badge'] || '');
+  if (visit.values['Signed out']) return { ok: true, already: true, first: first };
+  signOutVisit_(visit, 'Signed out on their phone');
+  return { ok: true, first: first, badge: badge };
+}
+
+/**
+ * Screening declined a visitor on their phone: recorded, with the alert, as at
+ * the kiosk. If staff already let them in, the phone carries on, and the
+ * approval stays in place for phoneRegister or phoneCheckIn to record.
+ */
+function phoneDecline_(a) {
+  var raw = CacheService.getScriptCache().get(passKey_(clean_(a.first), clean_(a.last)));
+  if (raw) {
+    var pass = {};
+    try { pass = JSON.parse(raw); } catch (err) { pass = {}; }
+    return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
+  }
+  return recordDecline_(phoneArgs_(a));
 }
 
 /** Puts a visitor back in after an accidental sign-out (kiosk Undo, within a minute). */

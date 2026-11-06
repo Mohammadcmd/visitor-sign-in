@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 const { loadBackend } = require('./fake-google');
 const { execFileSync } = require('child_process');
 const os = require('os');
@@ -35,9 +35,9 @@ function serve() {
   });
 }
 
-async function open(browser, url, backend, { offline = false } = {}) {
+async function open(browser, url, backend, { offline = false, device = null } = {}) {
   // The offline cache stays out of the way except in the test made for it.
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
+  const ctx = await browser.newContext({ ...(device || { viewport: { width: 1280, height: 800 } }), permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
   const page = await ctx.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -505,7 +505,14 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await set(cloud, 'input[name="s-pin2"]', PIN);
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-setup-skip]'); await cloud.waitForTimeout(600);
-    await cloud.click('[data-badges-choice] .option[data-value="no"]');
+    // Numbered visitor passes, no reader: the kiosk says which one to take.
+    await cloud.click('[data-badges-choice] .option[data-value="passes"]');
+    ok(await cloud.$eval('[data-pass-panel]', (e) => !e.hidden), 'numbered passes ask how many');
+    await set(cloud, 'input[name="s-passes"]', '500');
+    await next(cloud); await cloud.waitForTimeout(600);
+    ok(/from 1 to 200/.test(await text(cloud, '[data-setup-error]')), 'a sensible number of passes');
+    await set(cloud, 'input[name="s-passes"]', '3');
+    await snap(cloud, 'setup-passes');
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-storage-choice] .option[data-value="cloud"]');
     await snap(cloud, 'cloud-storage');
@@ -575,6 +582,9 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await set(cloud, 'input[name="email"]', 'milton@initech.example');
     await formNext(cloud);
     await waitView(cloud, 'done');
+    ok(await text(cloud, '[data-done-pass]') === 'Please take visitor pass V1.' && await text(cloud, '[data-done-badge]') === 'Pass V1', 'the visitor is told which pass to take');
+    ok(/give your pass back/.test(await text(cloud, '[data-done-leave]')), 'and to give it back');
+    ok(backend.sheets.Badges.objects().map((b) => `${b.Badge}:${b.Status}`).join(' ') === 'V1:in use V2:available V3:available', 'the setup made passes V1 to V3, and V1 is out');
     await snap(cloud, 'cloud-done');
     const visits = backend.sheets.Visits.rows;
     ok(visits.length === 2 && /Needs induction/.test(visits[1].join('|')), 'flagged visit in the sheet');
@@ -603,6 +613,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await second.click('[data-leave-match]');
     await second.waitForSelector('[data-overlay="signout"]:not([hidden])');
     ok(/Goodbye, Milton/.test(await text(second, '[data-signout-title]')), 'signed out on screen');
+    ok(/give visitor pass V1 back/.test(await text(second, '[data-signout-text]')), 'and asked for the pass back');
     const [head, row] = backend.sheets.Visits.rows;
     ok(row[head.indexOf('Signed out')] && row[head.indexOf('Signed out by')] === 'Signed out at kiosk', 'sign-out written to the sheet');
     // Third tablet: joins from the wizard with the kiosk key.
@@ -650,6 +661,96 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await step(stale) === 'rules' && await stale.$eval('[data-agree]', (e) => !e.hidden) && await stale.$eval('[data-sign-box]', (e) => e.hidden), 'an outdated script gets the tick box, not a signature that would be lost');
     ok(!stale.errors.length, `no page errors: ${stale.errors.join(' | ')}`);
     await stale.context().close();
+
+    // ================================================================ phone sign-in: a QR code by the door
+    await holdLogo(cloud);
+    await cloud.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(cloud, PIN);
+    await waitView(cloud, 'admin');
+    await cloud.click('[data-admin-tab="settings"]');
+    await cloud.waitForSelector('[data-phone-card]:not([hidden]) [data-phone-on]');
+    ok(/sign in on their own phone/.test(await text(cloud, '[data-phone-text]')), 'the admin can put up a QR code instead of a tablet');
+    await cloud.click('[data-phone-on]');
+    await cloud.waitForSelector('[data-phone-qr]:not([hidden]) svg.qr');
+    const phoneUrl = await text(cloud, '[data-phone-qr] code');
+    ok(/\/web\/\?visit=ph[A-Z0-9]{30}&api=https%3A%2F%2Fscript\.google\.com/.test(phoneUrl) && backend.props.PHONE_KEY, `a phone link: ${phoneUrl}`);
+    await cloud.$eval('[data-phone-card]', (e) => e.scrollIntoView({ block: 'center' }));
+    await snap(cloud, 'phone-admin');
+    await cloud.click('[data-phone-poster]');
+    await cloud.waitForSelector('[data-overlay="poster"]:not([hidden]) [data-poster-qr] svg.qr');
+    ok(/Visitor sign-in/.test(await text(cloud, '[data-poster]')) && /Initech/.test(await text(cloud, '[data-poster]')), 'a poster with the company and the code');
+    await snap(cloud, 'phone-poster');
+    await cloud.click('[data-poster-close]');
+    await cloud.click('[data-admin-exit]');
+    await waitView(cloud, 'welcome');
+
+    // A visitor scans it: the visitor screens on their own phone.
+    const iphone = await open(browser, phoneUrl, backend, { device: devices['iPhone 13'] });
+    await waitView(iphone, 'welcome');
+    ok(await iphone.$eval('[data-org-name]', (e) => e.textContent) === 'Initech', 'the phone shows the company');
+    ok(await iphone.$eval('[data-leave-open]', (e) => e.hidden) && await iphone.$eval('[data-foot-badge]', (e) => e.hidden), 'no badge or sign-out prompt before signing in');
+    ok(await iphone.evaluate(() => innerWidth === screen.width && document.documentElement.scrollWidth <= innerWidth + 1), 'laid out at the phone\'s own width, nothing wider');
+    await snap(iphone, 'phone-welcome');
+    await iphone.tap('[data-screen="welcome"] .welcome-title');
+    await waitView(iphone, 'form');
+    ok(true, 'a new phone goes straight to the questions');
+    await formNext(iphone);
+    await iphone.tap('input[name="first"]');
+    ok(await iphone.$eval('input[name="first"]', (e) => !e.readOnly && !e.hasAttribute('inputmode')), "the phone's own keyboard is used");
+    ok(await iphone.$eval('[data-keyboard]', (e) => getComputedStyle(e).display === 'none'), 'not the on-screen one');
+    await iphone.fill('input[name="first"]', 'Peter');
+    await iphone.fill('input[name="last"]', 'Gibbons');
+    await snap(iphone, 'phone-name');
+    await formNext(iphone);
+    for (const [name, value] of [['company', 'Initech'], ['visiting', 'Bill Lumbergh'], ['purpose', 'TPS reports']]) {
+      await iphone.tap(`input[name="${name}"]`);
+      await iphone.fill(`input[name="${name}"]`, value);
+    }
+    ok(!(await iphone.$$('[data-host-suggest] .chip')).length, "staff names aren't suggested on a visitor's phone");
+    await formNext(iphone);
+    await iphone.tap('[data-screen="form"] .step.active .option[data-value="Yes"]');
+    await formNext(iphone);
+    ok(await step(iphone) === 'rules', 'the rules, to sign');
+    await sign(iphone);
+    await snap(iphone, 'phone-signature');
+    await formNext(iphone);
+    await waitView(iphone, 'done');
+    ok(/You're all set, Peter/.test(await text(iphone, '[data-done-title]')) && /let Bill Lumbergh know/.test(await text(iphone, '[data-done-host]')), 'signed in, and the host is told');
+    ok(await text(iphone, '[data-done-pass]') === 'Please take visitor pass V1.', 'the phone says which pass to take');
+    ok(/open this page again and tap "Leaving\?"/.test(await text(iphone, '[data-done-leave]')), 'the visitor is told how to sign out');
+    await snap(iphone, 'phone-done');
+    const peter = backend.sheets.Visitors.objects().find((r) => r['First Name'] === 'Peter');
+    const peterVisit = backend.sheets.Visits.objects().find((v) => v['First Name'] === 'Peter');
+    ok(peter && peter['Phone key'] && peter['Signed copy'] && peterVisit['How they signed in'] === 'phone' && !peterVisit['Signed out'], 'the sheet has the visitor, the signed copy and a phone visit');
+    ok(backend.mail.some((m) => m.to === 'bill@initech.example' && /Peter Gibbons/.test(m.subject)), 'the host is emailed');
+
+    // Leaving: the same phone signs them out.
+    await iphone.tap('[data-screen="done"] [data-go="welcome"]');
+    await waitView(iphone, 'welcome');
+    ok(await iphone.$eval('[data-leave-open]', (e) => !e.hidden), '"Leaving?" is there while they are inside');
+    await iphone.tap('[data-leave-open]');
+    await iphone.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Peter/.test(await text(iphone, '[data-signout-title]')) && await iphone.$eval('[data-undo]', (e) => e.hidden), 'signed out on the phone');
+    ok(/give visitor pass V1 back/.test(await text(iphone, '[data-signout-text]')), 'and asked for the pass back');
+    ok(backend.sheets.Visits.objects().find((v) => v['Visit ID'] === peterVisit['Visit ID'])['Signed out by'] === 'Signed out on their phone', 'the sheet says so');
+    await iphone.tap('[data-overlay="signout"]');
+    ok(await iphone.$eval('[data-leave-open]', (e) => e.hidden), '"Leaving?" goes away');
+
+    // Next time, the phone remembers them.
+    await iphone.tap('[data-screen="welcome"] .welcome-title');
+    await waitView(iphone, 'choice');
+    ok(/Sign in as Peter Gibbons/.test(await text(iphone, '[data-action="returning"]')) && /Someone else/.test(await text(iphone, '[data-action="new"]')), 'a returning visitor on the same phone');
+    await snap(iphone, 'phone-returning');
+    await iphone.tap('[data-action="returning"]');
+    await waitView(iphone, 'done');
+    ok(/Welcome back, Peter/.test(await text(iphone, '[data-done-title]')), 'signed in again with one tap');
+    ok(backend.sheets.Visits.objects().filter((v) => v['First Name'] === 'Peter' && !v['Signed out']).length === 1, 'one open visit');
+    ok(!iphone.errors.length, `no page errors on the phone: ${iphone.errors.join(' | ')}`);
+    await iphone.context().close();
+
+    // The phone link can't look anyone up.
+    const peek = backend.handle({ phone: backend.props.PHONE_KEY, action: 'findVisitor', args: { first: 'Peter', last: 'Gibbons' } });
+    ok(peek.error === 'not_allowed', 'the phone link only signs in and out');
 
     // ================================================================ offline start-up
     const off = await open(browser, `${base}?demo`, null, { offline: true });

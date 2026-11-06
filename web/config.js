@@ -13,6 +13,10 @@
 //    The tablet remembers both and removes them from the address bar.
 //    Open ?disconnect to forget them.
 // Open ?demo to try the kiosk with sample data (nothing is saved, admin PIN 123456).
+// A phone link (the QR code by the door, Admin → Settings → Phone sign-in) is
+//    https://<kiosk address>/?visit=<phone key>&api=<Apps Script /exec URL>
+// It opens the visitor screens on the visitor's own phone; nothing is saved
+// as a kiosk connection.
 
 const STORAGE_KEY = 'kiosk-connection';
 const LEGACY_KEY = 'shocktech-kiosk-connection';
@@ -75,6 +79,11 @@ export const CONFIG = {
   BUILT_IN: !!saved.builtIn,
   // ?demo: sample company and data, a panel that simulates badge taps, admin PIN 123456
   DEMO: query.has('demo') && !saved.api,
+  // ?visit=…&api=…: a visitor's phone, from the QR code by the door
+  PHONE: /^ph[A-Z0-9]{30}$/.test(query.get('visit') || '') && /^https:\/\//.test(query.get('api') || '') ? { key: query.get('visit'), api: query.get('api') } : null,
+  // Where this kiosk is on the web (such as 'https://yourcompany.com/web/'), for the phone sign-in QR code.
+  // Empty: the address it's open at (browser kiosks); the Android app needs it set.
+  PUBLIC_URL: '',
 
   // Return to the welcome screen after this long without a touch (ms)
   IDLE_MS: 90 * 1000,

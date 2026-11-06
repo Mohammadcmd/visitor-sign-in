@@ -14,6 +14,7 @@ The kiosk ships with per-tablet licensing that is **switched off**: with it off,
 - **The trial:** 30 days (`trialDays`) from when setup is finished, then a license is needed. Setup itself is never paused.
 - **Status files** let you renew a kiosk or switch it off from your side. When online, each kiosk reads its own license's small signed file from your website (`statusUrl`) a few times a day. Renewals are picked up without anyone typing a key. A license you switch off pauses at the next check.
 - **Clock tricks don't work.** The kiosk remembers the real date your website reported, so setting the tablet's clock back doesn't stretch a license.
+- **A phone sign-in QR code is licensed like a kiosk.** It has its own code (Admin → Settings → Phone sign-in), and its key is entered there and kept in the shared settings. When it isn't paid, visitors' phones show "Sign-ins are paused", and signing out still works. Issue it the same way: `npm run license:issue -- --customer "Acme" --tablet <the QR code's code>`.
 - **Each tablet keeps its own key.** If a tablet's app data is erased, it gets a new code and needs a new key (re-issue it, for free if it's the same tablet).
 
 ## Switching it on

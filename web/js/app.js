@@ -1,6 +1,6 @@
 // Visitor sign-in kiosk: screen flow and wiring.
 import { CONFIG, APP_VERSION } from '../config.js';
-import { call, queue, DEMO, MODE, BACKEND_VERSION, dayKey, pendingCount } from './api.js';
+import { call, queue, DEMO, MODE, PHONE, phoneVisitor, BACKEND_VERSION, dayKey, pendingCount } from './api.js';
 import { Keyboard } from './keyboard.js';
 import { listenForTaps } from './nfc.js';
 import * as face from './face.js';
@@ -12,7 +12,7 @@ import {
 import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
-import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense, isPaused, tabletCode, saveKey, checkStatus } from './plans.js';
+import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense, isPaused, tabletCode, saveKey, checkStatus, usePoint } from './plans.js';
 import { SignaturePad } from './signature.js';
 // QR codes are only drawn in the admin screen, so their code loads when first needed.
 let qrModule = null;
@@ -62,6 +62,23 @@ const state = {
 };
 
 const kb = new Keyboard($('[data-keyboard]'));
+
+// On a visitor's phone (the QR code by the door) its own keyboard is used: the
+// visitor fields are ordinary inputs, so its "next" key and autofill work too.
+function nativeInput(input) {
+  if (!PHONE || !input || !input.readOnly) return;
+  input.readOnly = false;
+  const mode = { email: 'email', digits: 'numeric', url: 'url' }[input.dataset.kb];
+  if (mode) input.setAttribute('inputmode', mode); else input.removeAttribute('inputmode');
+  if (input.dataset.cap === 'words') input.setAttribute('autocapitalize', 'words');
+}
+const nativeInputs = (root) => $$('input[readonly]', root).forEach(nativeInput);
+if (PHONE) {
+  document.body.classList.add('phone');
+  document.addEventListener('pointerdown', (e) => nativeInput(e.target.closest?.('input[readonly]')), true);
+  kb.open = (input) => nativeInput(input);
+  kb.close = () => {};
+}
 
 /** Quick entry is on in the settings, and the plan includes it. */
 const quickOn = (s = settings()) => quickEntryOn(s) && can('quickEntry');
@@ -169,6 +186,8 @@ function errorText(res) {
     case 'badge_retired': return t('Badge {badge} is out of service. Please use a different badge.', { badge: res.badge });
     case 'missing': return t('Some answers are missing. Please go back and check.');
     case 'kiosk_key': case 'not_connected': return t('This kiosk is not connected correctly. Please see the front desk.');
+    case 'phone_link': case 'not_allowed': case 'not_on_phone': return t("This sign-in link isn't working. Please see the front desk.");
+    case 'too_many': return t('Lots of people are signing in right now. Please try again in a few minutes, or see the front desk.');
     case 'unknown_action': return 'This needs the latest Apps Script code. Admin → Settings → Copy the latest Apps Script code, then deploy a new version.';
     default: return t('Something went wrong. Please see the front desk.');
   }
@@ -227,15 +246,19 @@ function applySettings() {
   $('[data-rules]').innerHTML = s.form.rules.map((r) => `<li>${esc(fill(tc(r, s), s))}</li>`).join('');
 
   // With badges, visitors sign out by tapping them; without, there's a button.
-  $('[data-foot-badge]').hidden = !s.badges;
-  $$('[data-leave-open]').forEach((b) => { b.hidden = s.badges; });
-  $('[data-admin-tab="badges"]').hidden = !s.badges;
-  $('[data-done-text]').textContent = s.badges
-    ? t('Please wear your badge where it can be seen. Your host will meet you at the front desk.')
-    : t('Please take a seat. Your host will meet you at the front desk.');
-  $('[data-done-leave]').textContent = s.badges
-    ? t('When you leave, tap your badge on the reader to sign out.')
-    : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
+  $('[data-foot-badge]').hidden = !s.badges || PHONE;
+  // On a phone, "Leaving?" appears only while the visitor this phone signed in is inside.
+  $$('[data-leave-open]').forEach((b) => { b.hidden = PHONE ? !phoneVisitor.get()?.visitId : s.badges; });
+  $('[data-admin-tab="badges"]').hidden = !s.badges && !s.passes;
+  $('[data-add-badge]').hidden = !s.badges;
+  $('[data-add-pass]').hidden = !s.passes;
+  $('[data-done-text]').textContent = s.badges ? t('Please wear your badge where it can be seen. Your host will meet you at the front desk.')
+    : s.passes ? t('Please wear your pass where it can be seen. Your host will meet you at the front desk.')
+      : t('Please take a seat. Your host will meet you at the front desk.');
+  $('[data-done-leave]').textContent = PHONE ? t(s.passes ? 'When you leave, give your pass back, open this page again and tap "Leaving?" to sign out.' : 'When you leave, open this page again and tap "Leaving?" to sign out.')
+    : s.badges ? t('When you leave, tap your badge on the reader to sign out.')
+      : s.passes ? t('When you leave, give your pass back and tap "Leaving?" on the welcome screen to sign out.')
+        : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
   $('[data-find-hint]').textContent = quickOn(s)
     ? t('Start typing your name. If you turned on quick entry, the camera may recognize you first.')
     : t('Start typing your name.');
@@ -258,6 +281,7 @@ function useLang(code) {
   applySettings();
   kb.render();
   tickClock();
+  if (PHONE) renderPhoneChoice();
 }
 
 /** Language buttons on the welcome screen, and a switch on the next screen. */
@@ -322,6 +346,8 @@ const ENTER = {
     stopIdle();
     refreshAttention();
     renderPaused();
+    // On a phone, "Leaving?" shows while the visitor it signed in is inside.
+    if (PHONE) $$('[data-leave-open]').forEach((btn) => { btn.hidden = !phoneVisitor.get()?.visitId; });
   },
   choice() {
     // Warm the camera so the returning-visitor check starts instantly.
@@ -356,6 +382,7 @@ const ENTER = {
     const first = state.answers.first || state.visitor?.first || '';
     $('[data-declined-title]').textContent = first ? t('Thank you, {name}', { name: first }) : t('Thank you');
     $('[data-declined-text]').textContent = fill(tc(settings().screening.declineMessage));
+    $('[data-staff-override]').hidden = PHONE;
   },
   admin() {
     adminTab('inside');
@@ -372,17 +399,56 @@ const ENTER = {
 $('[data-screen="welcome"]').addEventListener('click', () => {
   if (suppressClick) { suppressClick = false; return; }
   if (state.busy) return;
-  if (isPaused()) { const card = $('[data-paused]'); card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge'); return; }
+  if (isPaused() || state.phoneDown) { const card = $('[data-paused]'); card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge'); return; }
+  // A phone that hasn't signed anyone in goes straight to the new-visitor questions.
+  if (PHONE && !phoneVisitor.get()?.visitorId) { state.flow = 'new'; show('form'); return; }
+  if (PHONE) renderPhoneChoice();
   show('choice');
 });
+
+/** On a phone that signed someone in before: "Sign in as Ana Lopez" or "Someone else". */
+function renderPhoneChoice() {
+  const me = phoneVisitor.get();
+  if (!me) return;
+  const card = (sel) => $(`[data-screen="choice"] ${sel}`);
+  card('[data-action="returning"] .choice-title').textContent = t('Sign in as {name}', { name: `${me.first} ${me.last}` });
+  card('[data-action="returning"] .choice-text').textContent = t('This phone remembers you.');
+  card('[data-action="new"] .choice-title').textContent = t('Someone else');
+  card('[data-action="new"] .choice-text').textContent = t('Sign in as a new visitor.');
+  for (const el of $$('[data-screen="choice"] .choice-title, [data-screen="choice"] .choice-text')) el.setAttribute('data-no-i18n', '');
+}
 
 $$('[data-go]').forEach((b) => b.addEventListener('click', (e) => {
   e.stopPropagation();
   show(b.dataset.go);
 }));
 $('[data-action="new"]').addEventListener('click', (e) => { state.flow = 'new'; show('form', { rect: e.currentTarget.getBoundingClientRect() }); });
-$('[data-action="returning"]').addEventListener('click', (e) => show('find', { rect: e.currentTarget.getBoundingClientRect() }));
-$$('[data-leave-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); show('leave'); }));
+$('[data-action="returning"]').addEventListener('click', (e) => {
+  if (PHONE) {
+    // Phones can't look visitors up: this one signs in the visitor it remembers.
+    const me = phoneVisitor.get();
+    if (!me) return;
+    state.visitor = { id: me.visitorId, first: me.first, last: me.last, company: me.company };
+    state.method = 'phone';
+    continueReturning(centerOf(e.currentTarget));
+    return;
+  }
+  show('find', { rect: e.currentTarget.getBoundingClientRect() });
+});
+$$('[data-leave-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); if (PHONE) phoneSignOut(); else show('leave'); }));
+
+/** Signing out the visitor this phone signed in. */
+async function phoneSignOut() {
+  const me = phoneVisitor.get();
+  if (!me?.visitId || state.busy) return;
+  busy(true, 'Signing you out…');
+  const res = await api('kioskSignOut', { visitId: me.visitId });
+  busy(false);
+  if (!res.ok && res.error !== 'not_found') { toast(errorText(res)); return; }
+  phoneVisitor.set({ ...me, visitId: '' });
+  applySettings();
+  showSignedOut({ first: res.first || me.first, badge: res.badge || '', visitId: '' });
+}
 
 function tickClock() {
   $('[data-clock]').textContent = new Date().toLocaleString(locale(), { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -395,6 +461,7 @@ let suppressClick = false;
   let timer;
   const cancel = () => clearTimeout(timer);
   logo.addEventListener('pointerdown', () => {
+    if (PHONE) return;
     timer = setTimeout(() => {
       // Swallow the click that ends this press, but not a later tap (the PIN pad may take that click).
       suppressClick = true;
@@ -407,7 +474,7 @@ let suppressClick = false;
 
 /** The small red dot by the clock: declined or flagged visitors nobody has reviewed yet. */
 async function refreshAttention() {
-  if (!settings().setupComplete) return;
+  if (!settings().setupComplete || PHONE) return;
   const res = await api('ping');
   if (!res.ok) return;
   state.lastPing = { ...res, at: Date.now() };
@@ -480,6 +547,7 @@ function renderStep({ instant = false, back = false } = {}) {
   const steps = $$('[data-screen="form"] .step');
   const from = steps.find((s) => s.classList.contains('active'));
   const to = steps.find((s) => s.dataset.step === name);
+  if (PHONE) nativeInputs(screenEl('form'));
   if (instant || !from) steps.forEach((s) => s.classList.toggle('active', s === to));
   else if (from !== to) fx.step(from, to, back);
   const total = state.steps.filter((s) => s !== 'intro').length;
@@ -501,7 +569,7 @@ function renderStep({ instant = false, back = false } = {}) {
     const signing = signMode() !== 'off';
     $('[data-agree]').hidden = signing;
     $('[data-sign-box]').hidden = !signing;
-    $('[data-sign-email]').hidden = !(signing && MODE === 'cloud' && settings().signature.emailCopy);
+    $('[data-sign-email]').hidden = !(signing && (MODE === 'cloud' || PHONE) && settings().signature.emailCopy);
     $('[data-screen="form"] .step[data-step="rules"]').classList.toggle('signing', signing);
     if (signing) setTimeout(() => pad.resize(), 450); // after the step transition
   }
@@ -606,7 +674,7 @@ $('[data-form-back]').addEventListener('click', () => {
 /** Staff expecting this visitor: greet them and fill in what staff already told us. */
 let expectedSeq = 0;
 async function lookUpExpected() {
-  if (!can('expected')) return;
+  if (!can('expected') || PHONE) return;
   const first = (state.answers.first || '').trim(), last = (state.answers.last || '').trim();
   const seq = ++expectedSeq;
   const res = await api('findExpected', { first, last });
@@ -778,6 +846,16 @@ async function submitNewVisitor(quickEntry, origin) {
   });
   busy(false);
   if (!res.ok) { formError(errorText(res)); return; }
+  if (PHONE) {
+    // Signed in already (no badge); the phone keeps the visitor so it can sign them in again or out.
+    phoneVisitor.set({ visitorId: res.visitor.id, token: res.token, first: res.visitor.first, last: res.visitor.last, company: res.visitor.company, visitId: res.visitId });
+    state.visitor = res.visitor;
+    state.method = 'new visitor';
+    state.hostNotified = res.hostNotified || '';
+    state.noPass = !!res.noPass;
+    showDone(res.badge || '');
+    return;
+  }
   state.visitor = res.visitor;
   state.method = 'new visitor';
   if (quickEntry && descriptor) rememberSample(res.visitor, descriptor);
@@ -790,15 +868,29 @@ async function submitNewVisitor(quickEntry, origin) {
 async function afterIdentified(origin) {
   if (settings().badges) { show('badge', { origin }); return; }
   busy(true, 'Signing you in…');
-  const res = await api('checkIn', {
+  // Numbered passes: the kiosk gives out the next free one (a phone's sign-in does it on the sheet).
+  const withPass = settings().passes && !PHONE;
+  let res = await api(withPass ? 'assignPass' : 'checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
     visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
     ...(state.flow === 'returning' ? signedFields() : {}),
   });
+  // An Apps Script older than version 7 doesn't give out passes: sign in without one.
+  if (withPass && !res.ok && res.error === 'unknown_action') {
+    res = await api('checkIn', { visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined, visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id });
+    if (res.ok) res.noPass = true;
+  }
   busy(false);
-  if (!res.ok) { toast(errorText(res)); return; }
+  if (!res.ok) {
+    // The phone's visitor is no longer on file (deleted, say): start again as new.
+    if (PHONE && res.error === 'phone_visitor') { phoneVisitor.clear(); toast(t('Please sign in as a new visitor.')); show('welcome'); return; }
+    toast(errorText(res));
+    return;
+  }
+  if (PHONE) phoneVisitor.set({ ...phoneVisitor.get(), visitId: res.visitId });
   state.hostNotified = res.hostNotified || '';
-  showDone('');
+  state.noPass = !!res.noPass;
+  showDone(res.badge || '');
 }
 
 function showDone(badge) {
@@ -806,8 +898,13 @@ function showDone(badge) {
     ? t("You're all set, {name}!", { name: state.visitor.first })
     : t('Welcome back, {name}!', { name: state.visitor.first });
   const b = $('[data-done-badge]');
-  b.textContent = badge ? t('Badge {badge}', { badge }) : '';
+  const passes = settings().passes;
+  b.textContent = badge ? t(passes ? 'Pass {badge}' : 'Badge {badge}', { badge }) : '';
   b.hidden = !badge;
+  // Numbered passes: which one to take (or, with all of them out, to ask at the front desk).
+  const pass = $('[data-done-pass]');
+  pass.textContent = !passes ? '' : badge ? t('Please take visitor pass {badge}.', { badge }) : state.noPass ? t('All the visitor passes are in use. Please ask at the front desk for one.') : '';
+  pass.hidden = !pass.textContent;
   const host = $('[data-done-host]');
   host.textContent = state.hostNotified ? t("We've let {host} know you're here.", { host: state.hostNotified }) : '';
   host.hidden = !state.hostNotified;
@@ -1129,7 +1226,7 @@ async function findOpen({ live = false } = {}) {
 
 // ------------------------------------------------------------------ badge taps
 
-listenForTaps(onTap, (key) => {
+if (!PHONE) listenForTaps(onTap, (key) => {
   touch();
   if (kb.input) kb.type(key);
   else if (key === 'Backspace' && $('[data-overlay="pin"]').hidden === false) pinPress('back');
@@ -1218,9 +1315,10 @@ function showSignedOut(res) {
   const ov = $('[data-overlay="signout"]');
   const org = settings().org.name;
   $('[data-signout-title]').textContent = t('Goodbye, {name}!', { name: res.first });
-  $('[data-signout-text]').textContent = `${res.badge ? t("You're signed out. Please leave badge {badge} at the front desk.", { badge: res.badge }) : t("You're signed out.")} ${org ? t('Thanks for visiting {org}.', { org }) : t('Thanks for visiting.')}`;
+  const giveBack = res.badge ? t(settings().passes ? "You're signed out. Please give visitor pass {badge} back at the front desk." : "You're signed out. Please leave badge {badge} at the front desk.", { badge: res.badge }) : t("You're signed out.");
+  $('[data-signout-text]').textContent = `${giveBack} ${org ? t('Thanks for visiting {org}.', { org }) : t('Thanks for visiting.')}`;
   const undo = $('[data-undo]');
-  undo.hidden = false;
+  undo.hidden = PHONE;
   undo.textContent = t('Not you? Undo');
   ov.hidden = false;
   clearTimeout(state.undo?.timer);
@@ -1781,6 +1879,13 @@ $('[data-add-badge]').addEventListener('click', () => {
   adminBanner('Tap a new badge card on the reader. It gets the next number (V1, V2, …). Keep tapping to add more.', true);
 });
 
+$('[data-add-pass]').addEventListener('click', async () => {
+  const r = await adminApi('adminAddBadge', {});
+  if (!r.ok) { toast(errorText(r)); return; }
+  toast(`Added pass ${r.badge}. Label a pass to match.`);
+  loadBadges();
+});
+
 function adminBanner(text, withStop) {
   const b = $('[data-admin-banner]');
   b.hidden = false;
@@ -1844,6 +1949,7 @@ function loadSettingsPane() {
   secret.hidden = true;
   $('[data-connect-qr]').hidden = true;
   renderPlanCard();
+  renderPhoneCard();
   if (MODE === 'cloud') {
     info.textContent = `Every sign-in goes to your Google Sheet${CONFIG.BUILT_IN ? ' (built into this app)' : ''}. Visitor photos are in your Google Drive.`
       + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
@@ -1946,6 +2052,140 @@ async function checkForUpdate() {
   $('[data-reload-now]', box)?.addEventListener('click', () => location.reload());
 }
 
+// ------------------------------------------------------------------ phone sign-in (a QR code by the door)
+
+const POINT_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const newPointCode = () => {
+  const c = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => POINT_ALPHABET[x % 32]).join('');
+  return `${c.slice(0, 4)}-${c.slice(4)}`;
+};
+/** Where this kiosk is on the web, for the QR code. The Android app needs CONFIG.PUBLIC_URL. */
+function kioskWebAddress() {
+  if (CONFIG.PUBLIC_URL) return CONFIG.PUBLIC_URL.replace(/\/?$/, '/');
+  if (Kiosk || !/^https?:$/.test(location.protocol)) return '';
+  return `${location.origin}${location.pathname.replace(/[^/]*$/, '')}`;
+}
+const phoneLink = (key) => `${kioskWebAddress()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(CONFIG.API_URL)}`;
+
+/** Admin → Settings → Phone sign-in: switch it on, the QR code and poster, a new code, off. Google Sheets only. */
+async function renderPhoneCard() {
+  const card = $('[data-phone-card]');
+  card.hidden = MODE !== 'cloud';
+  if (card.hidden) return;
+  const text = $('[data-phone-text]'), qr = $('[data-phone-qr]'), actions = $('[data-phone-actions]');
+  const res = await adminApi('adminPhoneLink', { peek: true });
+  qr.hidden = true;
+  $('[data-phone-license]').hidden = true;
+  if (!res.ok) { text.textContent = errorText(res); actions.innerHTML = ''; return; }
+  if (!res.key) {
+    text.textContent = 'No tablet by the door? Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and photo, and the sign-ins go to your Google Sheet. '
+      + 'Phones can only sign visitors in and out: they never see other visitors, your staff list or anything on this admin screen.';
+    actions.innerHTML = '<button type="button" class="btn-primary" data-phone-on>Switch on phone sign-in</button>';
+    $('[data-phone-on]', actions).addEventListener('click', () => phoneLinkAction({}));
+    return;
+  }
+  const s = settings();
+  let licensed = '';
+  if (PAYWALL.enabled) {
+    $('[data-phone-license]').hidden = false;
+    if (!s.phone.license) licensed = 'no license yet (the trial applies)';
+    else {
+      try {
+        const info = await verifyLicense(s.phone.license, PAYWALL.publicKey, s.phone.code);
+        licensed = info.expires ? `licensed until ${info.expires}` : 'licensed';
+      } catch (err) { licensed = err.message; }
+    }
+  }
+  const web = kioskWebAddress();
+  text.textContent = `Phone sign-in is on${PAYWALL.enabled ? ` · QR code ${s.phone.code} · ${licensed}` : ''}. `
+    + (web ? 'Print the poster and put it by the door. Visitors who sign in on their phone sign out on it, or at the front desk.'
+      : "To make its QR code, open this admin screen in the browser kiosk, or set the kiosk's web address (PUBLIC_URL in web/config.js).");
+  actions.innerHTML = `${web ? '<button type="button" class="btn-primary" data-phone-poster>Print the poster</button>' : ''}
+    <button type="button" class="btn-secondary" data-phone-change>Change the QR code</button>
+    <button type="button" class="btn-ghost" data-phone-off>Switch off</button>`;
+  if (web) {
+    const link = phoneLink(res.key);
+    qr.hidden = false;
+    qr.innerHTML = `${await qrSvg(link, { size: 170, label: 'Phone sign-in link' })}<code>${esc(link)}</code>`;
+    $('[data-phone-poster]', actions).addEventListener('click', () => openPoster(link));
+  }
+  $('[data-phone-change]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again: printed posters stop working', () => phoneLinkAction({ change: true })));
+  $('[data-phone-off]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to switch off', () => phoneLinkAction({ off: true })));
+}
+
+async function phoneLinkAction(args) {
+  busy(true, 'One moment…');
+  const res = await adminApi('adminPhoneLink', args);
+  // The QR code is licensed like a kiosk, so it gets its own code the first time.
+  if (res.ok && res.key && !settings().phone.code) await savePhoneSettings({ code: newPointCode(), license: '' });
+  busy(false);
+  if (!res.ok) { toast(errorText(res)); return; }
+  toast(args.off ? 'Phone sign-in is off: the QR code no longer works.'
+    : args.change ? 'A new QR code: print the new poster. The old one no longer works.' : 'Phone sign-in is on. Print the poster.', 6000);
+  renderPhoneCard();
+}
+
+async function savePhoneSettings(phone) {
+  const next = { ...settings(), phone };
+  const toSave = JSON.parse(JSON.stringify(next));
+  toSave.org.logo = '';
+  const res = await adminApi('adminSaveSettings', { settings: toSave });
+  if (res.ok) useSettings(next, { cache: true });
+  return res;
+}
+
+$('[data-phone-license-apply]').addEventListener('click', async () => {
+  const err = $('[data-phone-license-error]');
+  err.textContent = '';
+  const key = $('input[name="phone-license"]').value.trim();
+  try { await verifyLicense(key, PAYWALL.publicKey, settings().phone.code); } catch (e) { err.textContent = e.message; return; }
+  busy(true, 'Saving…');
+  const res = await savePhoneSettings({ ...settings().phone, license: key });
+  busy(false);
+  if (!res.ok) { err.textContent = errorText(res); return; }
+  $('input[name="phone-license"]').value = '';
+  toast('License added for the QR code.');
+  renderPhoneCard();
+});
+
+// The poster: print it, or save it as an image to print elsewhere.
+let posterLink = '';
+async function openPoster(link) {
+  posterLink = link;
+  $('[data-poster-qr]').innerHTML = await qrSvg(link, { size: 340, label: 'Scan to sign in' });
+  $('[data-overlay="poster"]').hidden = false;
+}
+$('[data-poster-close]').addEventListener('click', () => { $('[data-overlay="poster"]').hidden = true; });
+$('[data-poster-print]').addEventListener('click', () => {
+  document.body.classList.add('printing-poster');
+  window.print();
+  setTimeout(() => document.body.classList.remove('printing-poster'), 1000);
+});
+$('[data-poster-save]').addEventListener('click', async () => {
+  try {
+    const where = await saveFile('visitor-sign-in-poster.svg', await posterSvg(posterLink), 'image/svg+xml');
+    toast(`Poster saved to ${where}. Open it there to print.`, 6000);
+  } catch { toast("The poster couldn't be saved here."); }
+});
+
+/** The poster as a letter-size SVG image: logo, title, the QR code and how to use it. */
+async function posterSvg(link) {
+  const s = settings();
+  const qr = await qrSvg(link, { size: 480, label: 'Scan to sign in' });
+  const qrData = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(qr)))}`;
+  const logo = logoFor(s);
+  const text = (y, size, value, color = '#0d1b2a', weight = 400) => `<text x="425" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${esc(value)}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="850" height="1100" viewBox="0 0 850 1100">
+  <rect width="850" height="1100" fill="#ffffff"/>
+  <image href="${logo}" xlink:href="${logo}" x="225" y="70" width="400" height="140" preserveAspectRatio="xMidYMid meet"/>
+  ${text(290, 64, 'Visitor sign-in', '#0d1b2a', 700)}
+  ${text(345, 32, s.org.name, '#4a5a6b')}
+  <image href="${qrData}" xlink:href="${qrData}" x="185" y="400" width="480" height="480"/>
+  ${text(950, 30, "Open your phone's camera and point it at the code.")}
+  ${text(995, 26, 'Iniciar sesión: escanee el código con la cámara.', '#4a5a6b')}
+</svg>`;
+}
+
 // ------------------------------------------------------------------ plans (only with the paywall switched on)
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -1991,10 +2231,11 @@ document.addEventListener('kiosk-license-changed', () => {
 
 /** While paused, the welcome screen asks visitors to see the front desk; signing out and badge returns still work. */
 function renderPaused() {
-  const paused = isPaused();
+  const paused = isPaused() || !!state.phoneDown;
   screenEl('welcome').classList.toggle('paused', paused);
   $('[data-paused]').hidden = !paused;
-  if (paused) $('[data-paused-staff]').textContent = [`Kiosk license: ${planLine().split(':')[0]}`, `Tablet ${tabletCode()}`, sellerLine()].filter(Boolean).join(' · ');
+  if (state.phoneDown) $('[data-paused-staff]').textContent = t("This sign-in link isn't working. Please see the front desk.");
+  else if (paused) $('[data-paused-staff]').textContent = [`Kiosk license: ${planLine().split(':')[0]}`, `${PHONE ? 'QR code' : 'Tablet'} ${tabletCode()}`, sellerLine()].filter(Boolean).join(' · ');
 }
 
 function renderPlanCard() {
@@ -2139,7 +2380,7 @@ setInterval(() => {
   if (state.screen === 'admin') { if (idle > 3 * 60 * 1000 && $('[data-overlay="rollcall"]').hidden) exitAdmin(); return; }
   if (state.screen === 'done') { if (idle > 15 * 1000) show('welcome'); return; }
   if (state.screen === 'declined') { if (idle > 45 * 1000 && $('[data-overlay="pin"]').hidden && $('[data-overlay="reason"]').hidden) show('welcome'); return; }
-  const limit = state.screen === 'badge' ? CONFIG.BADGE_IDLE_MS : CONFIG.IDLE_MS;
+  const limit = (state.screen === 'badge' ? CONFIG.BADGE_IDLE_MS : CONFIG.IDLE_MS) * (PHONE ? 4 : 1);
   if (idle < limit) return;
   let n = 10;
   $('[data-idle-count]').textContent = n;
@@ -2194,7 +2435,7 @@ async function endOfDayCheck() {
     eodRunning = false;
   }
 }
-setInterval(endOfDayCheck, 60 * 1000);
+if (!PHONE) setInterval(endOfDayCheck, 60 * 1000);
 
 // ------------------------------------------------------------------ deleting old records
 
@@ -2208,7 +2449,7 @@ async function retentionCheck() {
   const res = await api('purgeOld');
   if (res.ok) { try { localStorage.setItem(PURGE_KEY, dayKey()); } catch { /* runs again later */ } }
 }
-setInterval(() => { if (state.screen === 'welcome') retentionCheck(); }, 10 * 60 * 1000);
+if (!PHONE) setInterval(() => { if (state.screen === 'welcome') retentionCheck(); }, 10 * 60 * 1000);
 
 // Keep the screen awake where the browser allows it.
 let wakeLock = null;
@@ -2272,8 +2513,7 @@ function startKiosk() {
   tickClock();
   refreshFaceIndex();
   refreshAttention();
-  endOfDayCheck();
-  retentionCheck();
+  if (!PHONE) { endOfDayCheck(); retentionCheck(); }
 }
 
 initSetup({
@@ -2288,7 +2528,23 @@ initSetup({
   },
 });
 
+/** A visitor's phone: the company's visitor settings from the sheet, then the welcome screen. */
+async function startPhone() {
+  let res;
+  try { res = await api('getSettings'); } catch { res = { ok: false, error: 'network' }; }
+  state.phoneDown = !res.ok || (res.version || 1) < BACKEND_VERSION;
+  if (res.ok) {
+    useSettings({ ...res.settings, org: { ...res.settings.org, logo: res.logo || '' } });
+    usePoint(settings().phone);
+  }
+  await refreshPlan().catch(() => {});
+  startKiosk();
+  renderPaused();
+  if (res.ok && PAYWALL.enabled) checkStatus().then(renderPaused).catch(() => {});
+}
+
 (async () => {
+  if (PHONE) { await startPhone(); return; }
   if (DEMO) useSettings(demoSettings());
   else if (MODE === 'cloud') {
     const cached = loadCache();

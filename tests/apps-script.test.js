@@ -19,7 +19,7 @@ const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
   eq(b.handle({ action: 'claim', key: 'short' }).error, 'bad_key');
   const claim = b.handle({ action: 'claim', key: KEY });
   ok(claim.ok && claim.claimed, 'first kiosk claims the sheet');
-  eq(claim.version, 5);
+  eq(claim.version, 7);
   eq(claim.setupComplete, false);
   eq(claim.hasPin, false);
   eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings', 'Expected']);
@@ -592,5 +592,155 @@ const firstTry = b.handle({ key: KEY, action: 'register', args, rid: 'abc123-ret
 const again = b.handle({ key: KEY, action: 'register', args, rid: 'abc123-retry' });
 eq(again.visitor.id, firstTry.visitor.id);
 eq(b.sheets.Visitors.rows.length, before + 1);
+
+// ------------------------------------------------------------------ one alert per flagged visitor
+{
+  const k = loadBackend();
+  k.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => k.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, photos: 'off', form: { rules: [] }, screening: { questions: [], alertEmails: 'security@initech.example' } } });
+  const flags = [{ label: 'Induction done?', answer: 'No', flagLabel: 'Needs induction' }];
+  const sent = k.mail.length;
+  const reg = call('register', { first: 'Milton', last: 'Waddams', company: 'Initech', visiting: 'Bill', purpose: 'Meeting', agreed: true, flags });
+  call('checkIn', { visitorId: reg.visitor.id, flags });
+  eq(k.mail.slice(sent).filter((m) => /Visitor alert/.test(m.subject)).length, 1, 'a flagged new visitor sends staff one alert, not two');
+  call('checkIn', { visitorId: reg.visitor.id, flags });
+  eq(k.mail.slice(sent).filter((m) => /Visitor alert/.test(m.subject)).length, 2, 'a later flagged visit alerts again');
+}
+
+// ------------------------------------------------------------------ phone sign-in (a QR code)
+{
+  const k = loadBackend();
+  k.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => k.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', {
+    token: tok, logo,
+    settings: {
+      setupComplete: true, org: { name: 'Initech', tagline: 'Hello' }, badges: true, photos: 'off', form: { rules: ['Stay with your host.'] },
+      screening: { questions: [{ id: 'q1', text: 'Induction done?' }], alertEmails: 'security@initech.example', declineMessage: 'Sorry.' },
+      hosts: [{ name: 'Bill Lumbergh', email: 'bill@initech.example' }], notifyHosts: true, phone: { code: 'QR12-ABCD', license: '' },
+      admin: { name: 'Pat' },
+    },
+  });
+
+  const phone = (action, args, key) => k.handle({ phone: key, action, args });
+  eq(phone('phoneStart', {}, 'ph' + 'x'.repeat(30)).error, 'phone_link', 'no phone sign-in until an admin switches it on');
+  eq(call('adminPhoneLink', {}).error, 'admin', 'only an admin makes the phone link');
+  eq(call('adminPhoneLink', { token: tok, peek: true }).key, '', 'peeking shows it is off, without switching it on');
+  const link = call('adminPhoneLink', { token: tok });
+  ok(link.ok && /^ph[A-Z0-9]{30}$/.test(link.key), JSON.stringify(link));
+  eq(call('adminPhoneLink', { token: tok }).key, link.key, 'asking again gives the same link');
+  const P = (action, args = {}) => phone(action, args, link.key);
+
+  // What a phone sees: the visitor-facing settings only.
+  const start = P('phoneStart');
+  ok(start.ok && start.version === 7 && start.settings.org.name === 'Initech' && /^data:image\/png/.test(start.logo), 'the company, its logo and version');
+  ok(start.settings.badges === false && start.settings.quickEntry === false, 'no badges or face recognition on phones');
+  eq(start.settings.hosts, [], "staff names aren't sent to phones");
+  const said = JSON.stringify(start);
+  ok(!/bill@initech|Bill Lumbergh|security@initech|pinHash|"admin"/.test(said), 'nor email addresses or admin settings');
+  eq(start.settings.form.rules, ['Stay with your host.']);
+  eq(start.settings.phone.code, 'QR12-ABCD', "the QR code's own license code");
+
+  // A phone can't do what a kiosk does.
+  for (const action of ['findVisitor', 'faceIndex', 'findOpenVisits', 'findExpected', 'tapAtWelcome', 'getSettings', 'adminInside', 'register', 'checkIn']) {
+    eq(P(action, { first: 'Ana', last: 'Lopez', token: tok }).error, 'not_allowed', `phones can't ${action}`);
+  }
+  eq(phone('phoneStart', {}, KEY).error, 'phone_link', "the kiosk key isn't a phone link");
+  eq(k.handle({ key: link.key, action: 'ping' }).error, 'kiosk_key', "and the phone link isn't a kiosk key");
+
+  // A new visitor signs in on their phone: registered and signed in at once, no badge.
+  const sent = k.mail.length;
+  const reg = P('phoneRegister', { first: 'Milton', last: 'Waddams', company: 'Initech', visiting: 'Bill Lumbergh', purpose: 'Meeting', agreed: true, override: { by: 'Me', reason: 'trust me' }, quickEntry: true });
+  ok(reg.ok && reg.visitId && reg.token.length === 32 && reg.hostNotified === 'Bill Lumbergh', JSON.stringify(reg));
+  const person = k.sheets.Visitors.objects().find((r) => r['First Name'] === 'Milton');
+  ok(person['Phone key'] && person['Phone key'] !== reg.token && person['Phone key'].length === 64, 'only a hash of the token is kept');
+  ok(!/override|Overridden/i.test(person.Screening) && person['Quick entry'] === 'No', "a phone can't override screening or turn on quick entry");
+  const visit = k.sheets.Visits.objects().at(-1);
+  eq([visit['How they signed in'], visit.Badge, visit['Visit ID']], ['phone', '', reg.visitId], 'the visit says it was on a phone');
+  ok(k.mail.slice(sent).some((m) => m.to === 'bill@initech.example'), 'the host is emailed');
+
+  // Signing in again and out: only with the phone's token.
+  eq(P('phoneCheckIn', { visitorId: reg.visitor.id, token: 'X'.repeat(32) }).error, 'phone_visitor', 'another phone cannot sign them in');
+  const again = P('phoneCheckIn', { visitorId: reg.visitor.id, token: reg.token, visiting: 'Bill Lumbergh', purpose: 'Meeting' });
+  ok(again.ok && again.visitId !== reg.visitId && again.first === 'Milton', JSON.stringify(again));
+  eq(k.sheets.Visits.objects().find((v) => v['Visit ID'] === reg.visitId)['Signed out by'], 'Signed in again');
+  eq(P('phoneSignOut', { visitId: again.visitId, token: 'X'.repeat(32) }).error, 'phone_visitor', 'nor sign them out');
+  const out = P('phoneSignOut', { visitId: again.visitId, token: reg.token });
+  ok(out.ok && out.first === 'Milton', JSON.stringify(out));
+  eq(k.sheets.Visits.objects().find((v) => v['Visit ID'] === again.visitId)['Signed out by'], 'Signed out on their phone');
+  ok(P('phoneSignOut', { visitId: again.visitId, token: reg.token }).already, 'signing out twice is fine');
+
+  // A decline on a phone: recorded with the alert, like at the kiosk.
+  const before = k.mail.length;
+  const dec = P('phoneDecline', { first: 'Ivy', last: 'Ancient', company: 'Globex', reasons: [{ label: 'Induction done?', answer: 'No' }] });
+  ok(dec.ok && dec.declineId, JSON.stringify(dec));
+  const drow = k.sheets.Visits.objects().find((v) => v['Visit ID'] === dec.declineId);
+  eq([drow.Kind, drow['How they signed in'], drow['Signed out by']], ['Declined', 'phone', 'Declined on their phone']);
+  ok(k.mail.slice(before).some((m) => m.to === 'security@initech.example'), 'staff are alerted');
+
+  // Staff let a declined visitor in: the phone carries on, and the visit records the approval.
+  const declined = k.sheets.Visits.objects().find((v) => v['Visit ID'] === dec.declineId);
+  ok(call('adminAllow', { token: tok, visitId: declined['Visit ID'], reason: 'Induction booked' }).ok, 'staff let Ivy in');
+  const passed = P('phoneDecline', { first: 'Ivy', last: 'Ancient', company: 'Globex', reasons: [{ label: 'Induction done?', answer: 'No' }] });
+  ok(passed.ok && passed.passed && passed.by === 'Pat', `the phone hears she was let in: ${JSON.stringify(passed)}`);
+  const ivy = P('phoneRegister', { first: 'Ivy', last: 'Ancient', company: 'Globex', visiting: 'Bill Lumbergh', purpose: 'Meeting', agreed: true });
+  ok(ivy.ok && /^Overridden by Pat: Induction booked/.test(k.sheets.Visitors.objects().find((r) => r['First Name'] === 'Ivy').Screening), 'and the approval is recorded with her sign-in');
+
+  // A new QR code (the old one stops working), and switching it off.
+  const changed = call('adminPhoneLink', { token: tok, change: true });
+  ok(changed.key !== link.key, 'a new link');
+  eq(P('phoneStart').error, 'phone_link', 'the old QR code stops working');
+  ok(phone('phoneStart', {}, changed.key).ok, 'the new one works');
+  ok(phone('phoneSignOut', { visitId: again.visitId, token: reg.token }, changed.key).ok, "and the visitor's phone still knows them");
+  call('adminPhoneLink', { token: tok, off: true });
+  eq(phone('phoneStart', {}, changed.key).error, 'phone_link', 'switched off');
+
+  // Anyone could photograph the poster: phones get a limited number of writes.
+  const third = call('adminPhoneLink', { token: tok }).key;
+  let last;
+  for (let i = 0; i < 61; i++) last = phone('phoneSignOut', { visitId: 'S-none', token: reg.token }, third);
+  eq(last.error, 'too_many', 'too many phone sign-ins in 10 minutes are refused');
+  ok(phone('phoneStart', {}, third).ok, 'showing the sign-in still works');
+}
+
+// ------------------------------------------------------------------ numbered visitor passes (no reader)
+{
+  const k = loadBackend();
+  k.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => k.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, passes: true, photos: 'off', form: { rules: [] } } });
+  for (let i = 0; i < 3; i++) call('adminAddBadge', { token: tok });
+  eq(call('adminBadges', { token: tok }).badges.map((b) => [b.badge, b.tag, b.status]), [['V1', '', 'available'], ['V2', '', 'available'], ['V3', '', 'available']], 'passes are badges without a tag');
+  const person = (first) => call('register', { first, last: 'Test', company: 'Initech', visiting: 'Bill', purpose: 'Meeting', agreed: true }).visitor.id;
+  const ana = person('Ana'), ben = person('Ben'), cy = person('Cy'), dee = person('Dee');
+  const a1 = call('assignPass', { visitorId: ana });
+  ok(a1.ok && a1.badge === 'V1' && !a1.noPass && a1.visitId, `the first visitor gets pass V1: ${JSON.stringify(a1)}`);
+  eq(call('assignPass', { visitorId: ben }).badge, 'V2', 'the next one V2');
+  eq(k.sheets.Visits.objects().at(-1).Badge, 'V2', 'the visit records the pass');
+  const again = call('assignPass', { visitorId: ana });
+  ok(again.badge === 'V1' && again.visitId !== a1.visitId, 'signing in again keeps the same pass');
+  const out = call('kioskSignOut', { visitId: again.visitId });
+  ok(out.ok && out.badge === 'V1', 'signing out says which pass to give back');
+  eq(call('assignPass', { visitorId: cy }).badge, 'V1', 'a returned pass is given out again, lowest number first');
+  eq(call('assignPass', { visitorId: dee }).badge, 'V3');
+  const full = call('assignPass', { visitorId: ana });
+  ok(full.ok && full.badge === '' && full.noPass && full.visitId, 'with every pass out, the visitor is still signed in, without one');
+  eq(call('assignPass', { visitorId: 'P-none' }).error, 'not_found');
+
+  // On a phone, the same: the phone tells them which pass to take.
+  const phoneKey = call('adminPhoneLink', { token: tok }).key;
+  const P = (action, args = {}) => k.handle({ phone: phoneKey, action, args });
+  ok(P('phoneStart').settings.passes === true, 'phones know about the passes');
+  call('kioskSignOut', { visitId: k.sheets.Visits.objects().find((v) => v['First Name'] === 'Dee' && !v['Signed out'])['Visit ID'] });
+  const pr = P('phoneRegister', { first: 'Eve', last: 'Test', company: 'Initech', visiting: 'Bill', purpose: 'Meeting', agreed: true });
+  ok(pr.ok && pr.badge === 'V3' && !pr.noPass, `a phone sign-in gets a pass: ${JSON.stringify(pr)}`);
+  const po = P('phoneSignOut', { visitId: pr.visitId, token: pr.token });
+  ok(po.ok && po.badge === 'V3', 'and signing out on the phone asks for it back');
+  ok(P('phoneCheckIn', { visitorId: pr.visitor.id, token: pr.token }).badge === 'V3', 'signing in again on the phone gets a free pass');
+}
 
 console.log(`apps-script tests passed (${checks} checks)`);

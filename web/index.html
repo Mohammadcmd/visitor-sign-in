@@ -17,7 +17,9 @@
   <script>
     // The kiosk is laid out for at least 1180 x 820. On smaller tablets, widen the
     // layout viewport so the browser scales the whole kiosk down to fit the screen.
+    // A visitor's phone (the QR code by the door, ?visit=…) keeps its own width.
     (function () {
+      if (/[?&]visit=/.test(location.search)) return;
       var w = Math.max(screen.width, screen.height), h = Math.min(screen.width, screen.height);
       if (!w || !h || (w >= 1180 && h >= 820)) return;
       var width = Math.max(1180, Math.ceil(820 * w / h));
@@ -136,10 +138,19 @@
               <strong>Yes, we hand out visitor badges</strong>
               <small>Needs a USB or Bluetooth NFC/RFID reader that types the card number, like most generic readers.</small>
             </button>
+            <button type="button" class="option option-card" role="radio" data-value="passes">
+              <strong>Numbered visitor passes, no reader</strong>
+              <small>At the end of signing in, the kiosk tells each visitor which pass to take (V1, V2, …), and asks for it back when they sign out.</small>
+            </button>
             <button type="button" class="option option-card" role="radio" data-value="no">
               <strong>No badges</strong>
               <small>Visitors sign in and out on the screen. No reader needed.</small>
             </button>
+          </div>
+          <div class="pass-panel" data-pass-panel hidden>
+            <label class="field"><span>How many visitor passes do you have?</span>
+              <input readonly inputmode="none" name="s-passes" data-kb="digits" maxlength="3" autocomplete="off" placeholder="10"></label>
+            <p class="hint" data-pass-hint>They're numbered V1, V2, … Label your passes to match. You can add or retire passes later in the admin screen → Badges.</p>
           </div>
           <div class="tap-panel" data-badge-panel hidden>
             <div class="tap-panel-head">
@@ -642,6 +653,7 @@
       <div class="done-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
       <h2 data-done-title>You're all set!</h2>
       <p class="done-badge" data-done-badge></p>
+      <p class="done-pass" data-done-pass hidden></p>
       <p class="done-text" data-done-text>Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
       <p class="done-host" data-done-host hidden></p>
       <p class="done-text small" data-done-leave>When you leave, tap your badge on the reader to sign out.</p>
@@ -735,7 +747,8 @@
       </div>
       <div class="admin-pane" data-admin-pane="badges" hidden>
         <div class="admin-head"><h2>Badges</h2>
-          <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button></div>
+          <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button>
+          <button type="button" class="btn-primary" data-add-pass hidden>+ Add a pass</button></div>
         <p class="admin-banner" data-admin-banner hidden></p>
         <div class="admin-list" data-badge-list></div>
       </div>
@@ -760,6 +773,18 @@
             <div class="row-actions">
               <button type="button" class="btn-secondary" data-diag-refresh>Refresh</button>
               <button type="button" class="btn-secondary" data-run-checks>Check this tablet</button>
+            </div>
+          </div>
+          <div class="set-card" data-phone-card hidden>
+            <h3>Phone sign-in (QR code)</h3>
+            <p class="set-text" data-phone-text></p>
+            <div class="phone-qr" data-phone-qr hidden></div>
+            <div class="row-actions" data-phone-actions></div>
+            <div class="phone-license" data-phone-license hidden>
+              <label class="field"><span>License key for this QR code</span>
+                <input readonly inputmode="none" name="phone-license" data-kb="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="VSI1.…"></label>
+              <div class="row-actions"><button type="button" class="btn-secondary" data-phone-license-apply>Use this key</button></div>
+              <p class="form-error" data-phone-license-error role="alert"></p>
             </div>
           </div>
           <div class="set-card" data-plan-card hidden>
@@ -874,6 +899,24 @@
       <div class="quick-actions">
         <button type="button" class="btn-secondary btn-lg" data-upgrade-close>Not now</button>
         <button type="button" class="btn-primary btn-lg" data-upgrade-apply>Use this key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The poster for the door: visitors scan it and sign in on their phone -->
+  <div class="overlay" data-overlay="poster" hidden>
+    <div class="center-card poster-card">
+      <div class="poster" data-poster>
+        <img class="poster-logo" data-org-logo alt="">
+        <h2 class="poster-title">Visitor sign-in</h2>
+        <p class="poster-org" data-org-name data-no-i18n></p>
+        <div class="poster-qr" data-poster-qr></div>
+        <p class="poster-how">Open your phone's camera and point it at the code.<br>Iniciar sesión: escanee el código con la cámara.</p>
+      </div>
+      <div class="quick-actions poster-actions">
+        <button type="button" class="btn-secondary btn-lg" data-poster-close>Close</button>
+        <button type="button" class="btn-secondary btn-lg" data-poster-save>Save as an image</button>
+        <button type="button" class="btn-primary btn-lg" data-poster-print>Print</button>
       </div>
     </div>
   </div>

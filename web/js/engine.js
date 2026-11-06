@@ -282,6 +282,19 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
         const visit = await startVisit(s, v, a, '', 'Signed in again');
         return { ok: true, visitId: visit.id, expected: visit.expected };
       }
+      case 'assignPass': {
+        // Numbered passes (no reader): the pass they hold, or the free one with the lowest number.
+        const v = s.visitors.find((x) => x.id === a.visitorId);
+        if (!v) return { ok: false, error: 'not_found' };
+        const open = s.visits.find((x) => x.visitorId === v.id && !x.signedOut);
+        const held = open && open.badge ? s.badges.find((x) => x.badge === open.badge) : null;
+        const passNo = (no) => { const m = /(\d+)/.exec(String(no)); return m ? Number(m[1]) : 1e9; };
+        const free = s.badges.filter((x) => (x.status || 'available') === 'available').sort((x, y) => passNo(x.badge) - passNo(y.badge))[0];
+        const pass = held || free || null;
+        const visit = await startVisit(s, v, a, pass ? pass.badge : '', 'Signed in again');
+        if (pass) Object.assign(pass, { status: 'in use', holder: `${v.first} ${v.last}`, visitorId: v.id, visitId: visit.id, since: visit.signedIn, note: '' });
+        return { ok: true, badge: pass ? pass.badge : '', noPass: !pass, visitId: visit.id, expected: visit.expected };
+      }
       case 'purgeOld': {
         const days = Number(st.retentionDays) || 0;
         if (days < 30) return { ok: true, removed: null };

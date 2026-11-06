@@ -77,8 +77,14 @@ const local = {
 const CODE_RE = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 let code = null;
 
+// A phone sign-in QR code is licensed like a kiosk: its code and key are in the shared settings.
+let point = null;
+/** On a visitor's phone: use the QR code's code and license instead of this device's. */
+export function usePoint(p) { point = p && p.code ? { code: p.code, key: p.license || '' } : { code: 'NONE-NONE', key: '' }; }
+
 /** This tablet's code, such as K7M2-9XQ4: made once, kept with the kiosk's data. A license names it. */
 export function tabletCode() {
+  if (point) return point.code;
   if (code) return code;
   const saved = local.get(KEYS.code);
   if (CODE_RE.test(saved || '')) { code = saved; return code; }
@@ -158,7 +164,7 @@ const ymd = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${Strin
 const days = (ms) => Math.max(0, Math.ceil(ms / 86400000));
 
 /** This tablet's license key (kept on this tablet: each tablet has its own). */
-export const savedKey = () => local.get(KEYS.license) || '';
+export const savedKey = () => (point ? point.key : local.get(KEYS.license) || '');
 
 /** Keeps a checked license key on this tablet. */
 export function saveKey(text) {

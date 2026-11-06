@@ -5,10 +5,12 @@ import { CONFIG } from '../config.js';
 import { settings, saveLocal, useSettings } from './settings.js';
 import { createEngine, emptyStore, makeClock, READS } from './engine.js';
 
-export const MODE = CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
+export const MODE = CONFIG.PHONE ? 'phone' : CONFIG.API_URL ? 'cloud' : CONFIG.DEMO ? 'demo' : 'local';
 export const DEMO = MODE === 'demo';
-export const ON_TABLET = MODE !== 'cloud';
-export const BACKEND_VERSION = 5;
+export const ON_TABLET = MODE === 'local' || MODE === 'demo';
+/** A visitor's own phone (the QR code by the door): only signing in and out. */
+export const PHONE = MODE === 'phone';
+export const BACKEND_VERSION = 7;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];
@@ -32,7 +34,7 @@ async function send(url, key, action, args, rid) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ key, action, args, rid }),
+      body: JSON.stringify(PHONE ? { phone: key, action, args, rid } : { key, action, args, rid }),
       redirect: 'follow',
       signal: ctrl.signal,
     });
@@ -54,11 +56,16 @@ export const pendingCount = () => (ON_TABLET ? 0 : readOutbox().length);
  */
 export async function call(action, args = {}, rid = requestId()) {
   if (ON_TABLET) return local(action, args);
+  if (PHONE) {
+    const mapped = phoneCall(action, args);
+    if (!mapped) return { ok: false, error: 'not_on_phone' };
+    [action, args] = mapped;
+  }
   let lastErr;
   for (const wait of RETRY_WAITS) {
     if (wait) await sleep(wait);
     try {
-      const out = await send(CONFIG.API_URL, CONFIG.KIOSK_KEY, action, args, rid);
+      const out = PHONE ? await send(CONFIG.PHONE.api, CONFIG.PHONE.key, action, args, rid) : await send(CONFIG.API_URL, CONFIG.KIOSK_KEY, action, args, rid);
       reportNet(true);
       return out;
     } catch (err) {
@@ -67,6 +74,34 @@ export async function call(action, args = {}, rid = requestId()) {
   }
   reportNet(false);
   throw lastErr;
+}
+
+// ------------------------------------------------------------------ a visitor's phone
+
+/**
+ * The visitor this phone signed in, kept on the phone (per company link): who
+ * they are, the secret token that lets this phone sign them in again or out,
+ * and their open visit.
+ */
+const PHONE_MEMORY = PHONE ? `kiosk-phone-visitor:${CONFIG.PHONE.api.slice(-24)}` : '';
+export const phoneVisitor = {
+  get() { try { return JSON.parse(localStorage.getItem(PHONE_MEMORY)) || null; } catch { return null; } },
+  set(v) { try { localStorage.setItem(PHONE_MEMORY, JSON.stringify(v)); } catch { /* private mode: not remembered */ } },
+  clear() { try { localStorage.removeItem(PHONE_MEMORY); } catch { /* nothing stored */ } },
+};
+
+/** The kiosk's calls, as a phone makes them (or null: not on a phone). */
+function phoneCall(action, args) {
+  const me = phoneVisitor.get() || {};
+  switch (action) {
+    case 'getSettings':
+    case 'ping': return ['phoneStart', {}];
+    case 'register': return ['phoneRegister', args];
+    case 'recordDecline': return ['phoneDecline', args];
+    case 'checkIn': return ['phoneCheckIn', { ...args, visitorId: me.visitorId, token: me.token }];
+    case 'kioskSignOut': return ['phoneSignOut', { ...args, token: me.token }];
+    default: return null;
+  }
 }
 
 /** One call to a backend that isn't saved yet, so the setup wizard can test a connection. */
@@ -80,6 +115,7 @@ export function callBackend(url, key, action, args = {}) {
  */
 export function queue(action, args) {
   if (ON_TABLET) { local(action, args); return; }
+  if (PHONE) return; // phones send only what they wait for
   const box = readOutbox();
   box.push({ action, args, rid: requestId() });
   writeOutbox(box.slice(-OUTBOX_MAX));
@@ -132,7 +168,7 @@ function writeOutbox(box) {
   }
 }
 
-if (!ON_TABLET) {
+if (MODE === 'cloud') {
   window.addEventListener('online', flushOutbox);
   setInterval(flushOutbox, 30 * 1000);
   setTimeout(flushOutbox, 3000);
