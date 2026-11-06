@@ -901,6 +901,12 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; p
 .sign-clear { position: absolute; right: 10px; top: 8px; }
 .sign-box .field { margin-top: 14px; }
 .signed-card { text-align: left; width: min(760px, calc(100% - 48px)); max-height: calc(100% - 48px); overflow-y: auto; }
+/* Numbered visitor passes: which one to take, big enough to read across the room */
+.pass-panel { margin-top: 18px; max-width: 420px; }
+.pass-panel[hidden] { display: none; }
+.done-pass { font-size: 22px; font-weight: 700; color: var(--ink); background: rgba(var(--blue-bright-rgb), 0.12); border-radius: 16px; padding: 12px 20px; margin: 4px 0 10px; }
+.done-pass[hidden] { display: none; }
+
 /* ================================================================ phone sign-in */
 .phone-qr { display: flex; gap: 16px; align-items: center; margin: 12px 0; font-size: 13px; word-break: break-all; }
 .phone-qr[hidden] { display: none; }

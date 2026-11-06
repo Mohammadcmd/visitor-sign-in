@@ -197,6 +197,16 @@ Asked for next: businesses that don't want a screen can put a QR code outside, a
   - Admin → Settings → Phone sign-in has the QR code, a printable poster (or SVG to save) and the QR code's license.
 - **Tests:** 49 backend checks (rights, tokens, rate limit, approvals) and an iPhone-sized end-to-end run: sign in, sign out, return, poster.
 
+## Numbered visitor passes
+
+Asked for next: at the end of signing in, tell visitors which visitor pass to grab.
+
+- A third badge choice, `passes`, for passes with no reader. Setup asks how many and makes V1 to Vn (badges without a tag).
+- `assignPass`, in Apps Script version 7 and in the shared engine, gives the lowest-numbered free pass. Someone signing in again keeps theirs. With every pass out, the visitor is signed in without one (`noPass`).
+- Phones get a pass too, on their sign-in and check-in.
+- Signing out frees the pass, and the screen asks for it back.
+- Tests: 14 backend checks, 5 engine checks, and the end-to-end Google Sheets company now runs on three passes. Milton gets V1 and gives it back, then Peter's phone gets V1.
+
 ## Where things are
 
 | Thing | Location |

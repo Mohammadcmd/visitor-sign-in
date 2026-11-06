@@ -249,13 +249,16 @@ function applySettings() {
   $('[data-foot-badge]').hidden = !s.badges || PHONE;
   // On a phone, "Leaving?" appears only while the visitor this phone signed in is inside.
   $$('[data-leave-open]').forEach((b) => { b.hidden = PHONE ? !phoneVisitor.get()?.visitId : s.badges; });
-  $('[data-admin-tab="badges"]').hidden = !s.badges;
-  $('[data-done-text]').textContent = s.badges
-    ? t('Please wear your badge where it can be seen. Your host will meet you at the front desk.')
-    : t('Please take a seat. Your host will meet you at the front desk.');
-  $('[data-done-leave]').textContent = PHONE ? t('When you leave, open this page again and tap "Leaving?" to sign out.')
+  $('[data-admin-tab="badges"]').hidden = !s.badges && !s.passes;
+  $('[data-add-badge]').hidden = !s.badges;
+  $('[data-add-pass]').hidden = !s.passes;
+  $('[data-done-text]').textContent = s.badges ? t('Please wear your badge where it can be seen. Your host will meet you at the front desk.')
+    : s.passes ? t('Please wear your pass where it can be seen. Your host will meet you at the front desk.')
+      : t('Please take a seat. Your host will meet you at the front desk.');
+  $('[data-done-leave]').textContent = PHONE ? t(s.passes ? 'When you leave, give your pass back, open this page again and tap "Leaving?" to sign out.' : 'When you leave, open this page again and tap "Leaving?" to sign out.')
     : s.badges ? t('When you leave, tap your badge on the reader to sign out.')
-      : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
+      : s.passes ? t('When you leave, give your pass back and tap "Leaving?" on the welcome screen to sign out.')
+        : t('When you leave, tap "Leaving?" on the welcome screen to sign out.');
   $('[data-find-hint]').textContent = quickOn(s)
     ? t('Start typing your name. If you turned on quick entry, the camera may recognize you first.')
     : t('Start typing your name.');
@@ -444,7 +447,7 @@ async function phoneSignOut() {
   if (!res.ok && res.error !== 'not_found') { toast(errorText(res)); return; }
   phoneVisitor.set({ ...me, visitId: '' });
   applySettings();
-  showSignedOut({ first: res.first || me.first, badge: '', visitId: '' });
+  showSignedOut({ first: res.first || me.first, badge: res.badge || '', visitId: '' });
 }
 
 function tickClock() {
@@ -849,7 +852,8 @@ async function submitNewVisitor(quickEntry, origin) {
     state.visitor = res.visitor;
     state.method = 'new visitor';
     state.hostNotified = res.hostNotified || '';
-    showDone('');
+    state.noPass = !!res.noPass;
+    showDone(res.badge || '');
     return;
   }
   state.visitor = res.visitor;
@@ -864,11 +868,18 @@ async function submitNewVisitor(quickEntry, origin) {
 async function afterIdentified(origin) {
   if (settings().badges) { show('badge', { origin }); return; }
   busy(true, 'Signing you in…');
-  const res = await api('checkIn', {
+  // Numbered passes: the kiosk gives out the next free one (a phone's sign-in does it on the sheet).
+  const withPass = settings().passes && !PHONE;
+  let res = await api(withPass ? 'assignPass' : 'checkIn', {
     visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined,
     visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id,
     ...(state.flow === 'returning' ? signedFields() : {}),
   });
+  // An Apps Script older than version 7 doesn't give out passes: sign in without one.
+  if (withPass && !res.ok && res.error === 'unknown_action') {
+    res = await api('checkIn', { visitorId: state.visitor.id, method: state.method, flags: state.result?.flags || [], override: state.override || undefined, visiting: state.answers.visiting, purpose: canonicalPurpose(state.answers.purpose), expectedId: state.expected?.id });
+    if (res.ok) res.noPass = true;
+  }
   busy(false);
   if (!res.ok) {
     // The phone's visitor is no longer on file (deleted, say): start again as new.
@@ -878,7 +889,8 @@ async function afterIdentified(origin) {
   }
   if (PHONE) phoneVisitor.set({ ...phoneVisitor.get(), visitId: res.visitId });
   state.hostNotified = res.hostNotified || '';
-  showDone('');
+  state.noPass = !!res.noPass;
+  showDone(res.badge || '');
 }
 
 function showDone(badge) {
@@ -886,8 +898,13 @@ function showDone(badge) {
     ? t("You're all set, {name}!", { name: state.visitor.first })
     : t('Welcome back, {name}!', { name: state.visitor.first });
   const b = $('[data-done-badge]');
-  b.textContent = badge ? t('Badge {badge}', { badge }) : '';
+  const passes = settings().passes;
+  b.textContent = badge ? t(passes ? 'Pass {badge}' : 'Badge {badge}', { badge }) : '';
   b.hidden = !badge;
+  // Numbered passes: which one to take (or, with all of them out, to ask at the front desk).
+  const pass = $('[data-done-pass]');
+  pass.textContent = !passes ? '' : badge ? t('Please take visitor pass {badge}.', { badge }) : state.noPass ? t('All the visitor passes are in use. Please ask at the front desk for one.') : '';
+  pass.hidden = !pass.textContent;
   const host = $('[data-done-host]');
   host.textContent = state.hostNotified ? t("We've let {host} know you're here.", { host: state.hostNotified }) : '';
   host.hidden = !state.hostNotified;
@@ -1298,7 +1315,8 @@ function showSignedOut(res) {
   const ov = $('[data-overlay="signout"]');
   const org = settings().org.name;
   $('[data-signout-title]').textContent = t('Goodbye, {name}!', { name: res.first });
-  $('[data-signout-text]').textContent = `${res.badge ? t("You're signed out. Please leave badge {badge} at the front desk.", { badge: res.badge }) : t("You're signed out.")} ${org ? t('Thanks for visiting {org}.', { org }) : t('Thanks for visiting.')}`;
+  const giveBack = res.badge ? t(settings().passes ? "You're signed out. Please give visitor pass {badge} back at the front desk." : "You're signed out. Please leave badge {badge} at the front desk.", { badge: res.badge }) : t("You're signed out.");
+  $('[data-signout-text]').textContent = `${giveBack} ${org ? t('Thanks for visiting {org}.', { org }) : t('Thanks for visiting.')}`;
   const undo = $('[data-undo]');
   undo.hidden = PHONE;
   undo.textContent = t('Not you? Undo');
@@ -1859,6 +1877,13 @@ async function loadBadges() {
 $('[data-add-badge]').addEventListener('click', () => {
   state.adminMode = { type: 'add' };
   adminBanner('Tap a new badge card on the reader. It gets the next number (V1, V2, …). Keep tapping to add more.', true);
+});
+
+$('[data-add-pass]').addEventListener('click', async () => {
+  const r = await adminApi('adminAddBadge', {});
+  if (!r.ok) { toast(errorText(r)); return; }
+  toast(`Added pass ${r.badge}. Label a pass to match.`);
+  loadBadges();
 });
 
 function adminBanner(text, withStop) {

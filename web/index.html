@@ -138,10 +138,19 @@
               <strong>Yes, we hand out visitor badges</strong>
               <small>Needs a USB or Bluetooth NFC/RFID reader that types the card number, like most generic readers.</small>
             </button>
+            <button type="button" class="option option-card" role="radio" data-value="passes">
+              <strong>Numbered visitor passes, no reader</strong>
+              <small>At the end of signing in, the kiosk tells each visitor which pass to take (V1, V2, …), and asks for it back when they sign out.</small>
+            </button>
             <button type="button" class="option option-card" role="radio" data-value="no">
               <strong>No badges</strong>
               <small>Visitors sign in and out on the screen. No reader needed.</small>
             </button>
+          </div>
+          <div class="pass-panel" data-pass-panel hidden>
+            <label class="field"><span>How many visitor passes do you have?</span>
+              <input readonly inputmode="none" name="s-passes" data-kb="digits" maxlength="3" autocomplete="off" placeholder="10"></label>
+            <p class="hint" data-pass-hint>They're numbered V1, V2, … Label your passes to match. You can add or retire passes later in the admin screen → Badges.</p>
           </div>
           <div class="tap-panel" data-badge-panel hidden>
             <div class="tap-panel-head">
@@ -644,6 +653,7 @@
       <div class="done-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg></div>
       <h2 data-done-title>You're all set!</h2>
       <p class="done-badge" data-done-badge></p>
+      <p class="done-pass" data-done-pass hidden></p>
       <p class="done-text" data-done-text>Please wear your badge where it can be seen. Your host will meet you at the front desk.</p>
       <p class="done-host" data-done-host hidden></p>
       <p class="done-text small" data-done-leave>When you leave, tap your badge on the reader to sign out.</p>
@@ -737,7 +747,8 @@
       </div>
       <div class="admin-pane" data-admin-pane="badges" hidden>
         <div class="admin-head"><h2>Badges</h2>
-          <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button></div>
+          <button type="button" class="btn-primary" data-add-badge>+ Add badge by tapping it</button>
+          <button type="button" class="btn-primary" data-add-pass hidden>+ Add a pass</button></div>
         <p class="admin-banner" data-admin-banner hidden></p>
         <div class="admin-list" data-badge-list></div>
       </div>

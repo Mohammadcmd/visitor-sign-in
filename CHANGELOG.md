@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+**Numbered visitor passes (no reader)**
+- A third choice in setup next to NFC/RFID badges and no badges: numbered passes (V1, V2, …). At the end of signing in, the kiosk or the visitor's phone says which pass to take: the lowest-numbered free one, or the same one when signing in again.
+- Signing out frees the pass and asks for it back. With every pass out, the visitor is still signed in and asked to get one at the front desk.
+- Admin → Badges: **Add a pass** (no reader needed). Apps Script version 7.
+
 **Phone sign-in: a QR code instead of a tablet (Google Sheets)**
 - A printable poster with a QR code: visitors sign in on their own phone, with the same questions, rules, signature, photo, Spanish and declines, plus host emails and staff alerts.
 - The phone remembers its visitor: "Leaving?" signs them out, and "Sign in as …" brings them back next time.

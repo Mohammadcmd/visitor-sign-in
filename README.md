@@ -46,7 +46,7 @@ Open the kiosk on the tablet. The first time, it opens the setup wizard (about 5
 | **1. Company** | Name, a tagline, and one brand color. Every screen's colors are worked out from it, with a live preview. |
 | **2. Admin login** | The admin's name and a 6 to 8 digit PIN. The PIN is only stored as a one-way hash. Easy PINs like `123456` are refused. |
 | **3. Logo** | A PNG with a transparent background. The wizard checks the transparency and shrinks large files. No logo? A clean text logo in your color is made for you. |
-| **4. Visitor badges** | Use NFC/RFID badges, or none. With badges, tap each card on the reader right there: they're numbered V1, V2, … Without badges, visitors sign out on the screen ("Leaving?"). |
+| **4. Visitor badges** | NFC/RFID badges, numbered visitor passes without a reader, or none. With badges, tap each card on the reader right there: they're numbered V1, V2, … With numbered passes, say how many you have (V1, V2, …); the kiosk tells each visitor which one to take. Without a reader, visitors sign out on the screen ("Leaving?"). |
 | **5. Records** | **On this tablet** (private, nothing to set up) or **Google Sheets** (a live sheet your team can open anywhere, photos in your Google Drive, several tablets on one sheet). |
 | **6. Connect Google Sheets** | Only with Google Sheets. Step-by-step instructions: make a sheet, paste the script (the wizard copies or downloads it for you), deploy it, and paste the web app URL. The wizard tests the connection and explains any problem. |
 | **7. Screening questions** | Optional. Pick ready-made questions (U.S. person for ITAR/EAR, illness symptoms, prohibited items, safety induction, tools, NDA, accessibility) or write your own (yes/no, multiple choice or short answer). For each one: which answers **politely decline** the visitor or **let them in and alert staff**, and whether it's asked once or on every visit. Choose the decline message, and with Google Sheets, who gets alert emails. |
@@ -63,7 +63,9 @@ Setting up another tablet: export the settings from Admin → Settings and impor
 2. **New visitor** or **Returning visitor**.
 3. **New visitors** answer one screen at a time: name; company, who they're visiting (matching hosts are suggested as they type) and why (if staff are expecting them, they're greeted and these are filled in); your screening questions; a photo; the visitor rules (a tick box, or signed with a finger); and an opt-in for quick entry next time.
 4. **Returning visitors** start typing their name. If they opted into quick entry, the camera may recognize them first. Questions marked "every visit" are asked again, and the rules are signed again if signatures are set to every visit.
-5. **Finish:** tap any visitor badge on the reader, or (without badges) they're signed in straight away.
+5. **Finish:** tap any visitor badge on the reader. With numbered passes, they're signed in and told which pass to take ("Please take visitor pass V4"). Without badges, they're signed in straight away.
+   - **How passes are given out:** the kiosk gives the lowest-numbered free pass. Someone signing in again keeps the pass they have. If every pass is out, they're still signed in and asked to get one at the front desk.
+   - **Signing out:** frees the pass and asks for it back. Add or retire passes in Admin → Badges.
 6. **Leaving:** tap the badge on the reader at the welcome screen, or tap **Leaving?** and find their name. "Not you? Undo" stays up for a few seconds. A badge marked "not returned" (see End of day) is cleared when it's tapped.
 
 ### Declined visitors

@@ -133,7 +133,8 @@ function fillForm() {
   renderPreview();
   renderPinChecks();
   renderLogo();
-  renderChoice('[data-badges-choice]', draft.badges ? 'yes' : 'no');
+  renderChoice('[data-badges-choice]', draft.badges ? 'yes' : draft.passes ? 'passes' : 'no');
+  field('s-passes').value = extra.passCount ? String(extra.passCount) : '';
   renderBadgePanel();
   renderChoice('[data-storage-choice]', draft.storage);
   $$('[data-storage-choice] .option').forEach((o) => { o.disabled = connected() || !!edit; });
@@ -227,6 +228,11 @@ function validate(name) {
     if (easyPin(p)) return error('That PIN is too easy to guess. Avoid repeated or sequential digits.', field('s-pin'));
     if (p !== p2) return error("The two PINs don't match.", field('s-pin2'));
   }
+  if (name === 'badges' && draft.passes && !edit) {
+    const n = Number(val('s-passes') || 10);
+    if (!Number.isInteger(n) || n < 1 || n > 200) return error('Enter how many visitor passes you have, from 1 to 200.', field('s-passes'));
+    extra.passCount = n;
+  }
   if (name === 'badges' && draft.badges && !edit && !extra.badges.length && !extra.badgeWarned) {
     extra.badgeWarned = true;
     return error('No badges registered yet. You can add them later in the admin screen → Badges. Tap Continue again to go on without them.');
@@ -289,6 +295,7 @@ async function finish() {
       saveLocal(s);
       const login = await call('adminLogin', { pin: val('s-pin') });
       for (const b of extra.badges) await call('adminAddBadge', { token: login.token, tag: b.tag });
+      if (s.passes) for (let i = 0; i < (extra.passCount || 0); i++) await call('adminAddBadge', { token: login.token });
       return true;
     }
     const { api, key, hasPin } = extra.cloud;
@@ -318,6 +325,7 @@ async function finish() {
     toSave.admin.pinHash = '';
     await send('adminSaveSettings', { token: tok, settings: toSave, logo: logo || '' });
     for (const b of extra.badges) await callBackend(api, key, 'adminAddBadge', { token: tok, tag: b.tag });
+    if (s.passes) for (let i = 0; i < (extra.passCount || 0); i++) await callBackend(api, key, 'adminAddBadge', { token: tok });
     if (!CONFIG.BUILT_IN) saveConnection(api, key);
     useSettings(s, { cache: true });
     return true;
@@ -456,6 +464,12 @@ async function chooseLogo(file) {
 
 function renderBadgePanel() {
   $('[data-badge-panel]').hidden = !draft.badges;
+  // Numbered passes: how many to make (when editing, they're managed in the admin screen → Badges).
+  $('[data-pass-panel]').hidden = !draft.passes;
+  field('s-passes').closest('.field').hidden = !!edit;
+  $('[data-pass-hint]').textContent = edit
+    ? 'Add or retire passes in the admin screen → Badges.'
+    : "They're numbered V1, V2, … Label your passes to match. You can add or retire passes later in the admin screen → Badges.";
   const list = extra.badges;
   $('[data-badge-panel]').classList.toggle('got', list.length > 0);
   $('[data-badge-panel-title]').textContent = edit
@@ -775,7 +789,8 @@ function renderReady() {
     ['Company', `<span class="dot" style="background:${esc(s.org.accent)}"></span>${esc(s.org.name)}`, s.org.tagline],
     ['Admin', esc(s.admin.name), 'PIN set. Hold the logo on the welcome screen for 2.5 seconds to open the admin screen.'],
     ['Logo', s.org.logo ? 'Your logo' : 'Text logo with your company name', ''],
-    ['Visitor badges', s.badges ? `Yes${extra.badges.length ? `: ${extra.badges.length} registered` : ''}` : 'No badges', s.badges ? 'Visitors tap a badge to finish signing in, and again to sign out.' : 'Visitors sign in and out on the screen.'],
+    ['Visitor badges', s.badges ? `Yes${extra.badges.length ? `: ${extra.badges.length} registered` : ''}` : s.passes ? `Numbered passes${extra.passCount ? `: V1 to V${extra.passCount}` : ''}` : 'No badges',
+      s.badges ? 'Visitors tap a badge to finish signing in, and again to sign out.' : s.passes ? 'The kiosk tells each visitor which pass to take, and asks for it back when they sign out.' : 'Visitors sign in and out on the screen.'],
     ['Records', s.storage === 'cloud' ? `Google Sheets: "${esc(extra.cloud?.sheetName || 'your sheet')}"` : 'On this tablet', s.storage === 'cloud' ? 'Photos go to your Google Drive.' : 'Kept privately on this tablet.'],
     ['Screening', qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}` : 'No extra questions',
       qs.length ? [declines && `${declines} can decline`, flags && `${flags} alert staff`, s.screening.alertEmails && `emails to ${s.screening.alertEmails}`].filter(Boolean).join(' · ') : ''],
@@ -892,6 +907,7 @@ function wire() {
     const o = e.target.closest('.option');
     if (!o) return;
     draft.badges = o.dataset.value === 'yes';
+    draft.passes = o.dataset.value === 'passes';
     renderChoice('[data-badges-choice]', o.dataset.value);
     renderBadgePanel();
   });

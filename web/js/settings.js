@@ -81,6 +81,7 @@ export const DEFAULTS = Object.freeze({
   admin: { name: '', pinHash: '' },
   storage: 'local',            // 'local': this tablet | 'cloud': Google Sheets
   badges: true,                // visitors tap an NFC/RFID badge to finish signing in and to sign out
+  passes: false,               // no reader: numbered visitor passes, and the kiosk tells each visitor which one to take
   form: {
     askHost: true,
     askPurpose: true,
@@ -194,6 +195,7 @@ export function normalize(input) {
     admin: { name: str((s.admin || {}).name, 60), pinHash: str((s.admin || {}).pinHash, 100) },
     storage: s.storage === 'cloud' ? 'cloud' : 'local',
     badges: s.badges !== false,
+    passes: s.badges === false && s.passes === true,
     form: {
       askHost: form.askHost !== false,
       askPurpose: form.askPurpose !== false,

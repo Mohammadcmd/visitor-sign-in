@@ -19,7 +19,7 @@ const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
   eq(b.handle({ action: 'claim', key: 'short' }).error, 'bad_key');
   const claim = b.handle({ action: 'claim', key: KEY });
   ok(claim.ok && claim.claimed, 'first kiosk claims the sheet');
-  eq(claim.version, 6);
+  eq(claim.version, 7);
   eq(claim.setupComplete, false);
   eq(claim.hasPin, false);
   eq(b.order, ['Visitors', 'Visits', 'Badges', 'Face data', 'Settings', 'Expected']);
@@ -636,7 +636,7 @@ eq(b.sheets.Visitors.rows.length, before + 1);
 
   // What a phone sees: the visitor-facing settings only.
   const start = P('phoneStart');
-  ok(start.ok && start.version === 6 && start.settings.org.name === 'Initech' && /^data:image\/png/.test(start.logo), 'the company, its logo and version');
+  ok(start.ok && start.version === 7 && start.settings.org.name === 'Initech' && /^data:image\/png/.test(start.logo), 'the company, its logo and version');
   ok(start.settings.badges === false && start.settings.quickEntry === false, 'no badges or face recognition on phones');
   eq(start.settings.hosts, [], "staff names aren't sent to phones");
   const said = JSON.stringify(start);
@@ -704,6 +704,43 @@ eq(b.sheets.Visitors.rows.length, before + 1);
   for (let i = 0; i < 61; i++) last = phone('phoneSignOut', { visitId: 'S-none', token: reg.token }, third);
   eq(last.error, 'too_many', 'too many phone sign-ins in 10 minutes are refused');
   ok(phone('phoneStart', {}, third).ok, 'showing the sign-in still works');
+}
+
+// ------------------------------------------------------------------ numbered visitor passes (no reader)
+{
+  const k = loadBackend();
+  k.handle({ action: 'claim', key: KEY });
+  const call = (action, args) => k.handle({ key: KEY, action, args });
+  const tok = call('adminSetPin', { pin: '246810' }).token;
+  call('adminSaveSettings', { token: tok, settings: { setupComplete: true, org: { name: 'Initech' }, badges: false, passes: true, photos: 'off', form: { rules: [] } } });
+  for (let i = 0; i < 3; i++) call('adminAddBadge', { token: tok });
+  eq(call('adminBadges', { token: tok }).badges.map((b) => [b.badge, b.tag, b.status]), [['V1', '', 'available'], ['V2', '', 'available'], ['V3', '', 'available']], 'passes are badges without a tag');
+  const person = (first) => call('register', { first, last: 'Test', company: 'Initech', visiting: 'Bill', purpose: 'Meeting', agreed: true }).visitor.id;
+  const ana = person('Ana'), ben = person('Ben'), cy = person('Cy'), dee = person('Dee');
+  const a1 = call('assignPass', { visitorId: ana });
+  ok(a1.ok && a1.badge === 'V1' && !a1.noPass && a1.visitId, `the first visitor gets pass V1: ${JSON.stringify(a1)}`);
+  eq(call('assignPass', { visitorId: ben }).badge, 'V2', 'the next one V2');
+  eq(k.sheets.Visits.objects().at(-1).Badge, 'V2', 'the visit records the pass');
+  const again = call('assignPass', { visitorId: ana });
+  ok(again.badge === 'V1' && again.visitId !== a1.visitId, 'signing in again keeps the same pass');
+  const out = call('kioskSignOut', { visitId: again.visitId });
+  ok(out.ok && out.badge === 'V1', 'signing out says which pass to give back');
+  eq(call('assignPass', { visitorId: cy }).badge, 'V1', 'a returned pass is given out again, lowest number first');
+  eq(call('assignPass', { visitorId: dee }).badge, 'V3');
+  const full = call('assignPass', { visitorId: ana });
+  ok(full.ok && full.badge === '' && full.noPass && full.visitId, 'with every pass out, the visitor is still signed in, without one');
+  eq(call('assignPass', { visitorId: 'P-none' }).error, 'not_found');
+
+  // On a phone, the same: the phone tells them which pass to take.
+  const phoneKey = call('adminPhoneLink', { token: tok }).key;
+  const P = (action, args = {}) => k.handle({ phone: phoneKey, action, args });
+  ok(P('phoneStart').settings.passes === true, 'phones know about the passes');
+  call('kioskSignOut', { visitId: k.sheets.Visits.objects().find((v) => v['First Name'] === 'Dee' && !v['Signed out'])['Visit ID'] });
+  const pr = P('phoneRegister', { first: 'Eve', last: 'Test', company: 'Initech', visiting: 'Bill', purpose: 'Meeting', agreed: true });
+  ok(pr.ok && pr.badge === 'V3' && !pr.noPass, `a phone sign-in gets a pass: ${JSON.stringify(pr)}`);
+  const po = P('phoneSignOut', { visitId: pr.visitId, token: pr.token });
+  ok(po.ok && po.badge === 'V3', 'and signing out on the phone asks for it back');
+  ok(P('phoneCheckIn', { visitorId: pr.visitor.id, token: pr.token }).badge === 'V3', 'signing in again on the phone gets a free pass');
 }
 
 console.log(`apps-script tests passed (${checks} checks)`);

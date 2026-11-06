@@ -21,7 +21,7 @@
  *   SPREADSHEET_ID   only needed when the script is NOT bound to the sheet
  */
 
-var BACKEND_VERSION = 6;
+var BACKEND_VERSION = 7;
 
 var TABS = {
   visitors: 'Visitors',
@@ -120,7 +120,7 @@ function doPost(e) {
 var WRITE_ACTIONS = ['purgeOld', 'endOfDay', 'findExpected', 'adminAddExpected', 'adminRemoveExpected', 'register', 'addFaceSample', 'setQuickEntry', 'assignBadge', 'checkIn', 'tapAtWelcome',
   'kioskSignOut', 'undoSignOut', 'recordDecline', 'adminSignOut', 'adminAddBadge', 'adminLinkTag',
   'adminRetireBadge', 'adminRestoreBadge', 'adminSetPin', 'adminSaveSettings', 'adminReview', 'adminAllow',
-  'adminPhoneLink', 'phoneRegister', 'phoneCheckIn', 'phoneSignOut', 'phoneDecline'];
+  'adminPhoneLink', 'phoneRegister', 'phoneCheckIn', 'phoneSignOut', 'phoneDecline', 'assignPass'];
 var REPLAY_TTL = 30 * 60;  // seconds
 
 /** Dispatches one API call. Separate from doPost so tests can call it directly. */
@@ -179,6 +179,7 @@ function dispatch_(req) {
     case 'setQuickEntry': return withLock_(function () { return setQuickEntry_(a); });
     case 'assignBadge': return withLock_(function () { return assignBadge_(a); });
     case 'checkIn': return withLock_(function () { return checkIn_(a); });
+    case 'assignPass': return withLock_(function () { return assignPass_(a); });
     case 'tapAtWelcome': return withLock_(function () { return tapAtWelcome_(a); });
     case 'kioskSignOut': return withLock_(function () { return kioskSignOut_(a); });
     case 'undoSignOut': return withLock_(function () { return undoSignOut_(a); });
@@ -513,6 +514,47 @@ function assignBadge_(a) {
     'Visitor ID': a.visitorId, 'Visit ID': visitId, 'Since': now, 'Note': ''
   });
   return { ok: true, badge: b['Badge'], visitId: visitId, hostNotified: started.hostNotified, expected: started.expected };
+}
+
+/**
+ * Numbered visitor passes (no reader): signs the visitor in and gives them the
+ * lowest-numbered free pass, which the kiosk tells them to take. Someone
+ * signing in again keeps the pass they have. With every pass out, they're
+ * still signed in, and told to see the front desk (noPass).
+ */
+function assignPass_(a) {
+  var person = findRow_(TABS.visitors, 'Visitor ID', a.visitorId);
+  if (!person) return { ok: false, error: 'not_found' };
+  return startWithPass_(person, a, 'Signed in again');
+}
+
+function startWithPass_(person, a, replacedBy) {
+  var open = openVisitFor_(person.values['Visitor ID']);
+  var held = open && open.values['Badge'] ? findRow_(TABS.badges, 'Badge', open.values['Badge']) : null;
+  var pass = held || freePass_();
+  var badgeNo = pass ? String(pass.values['Badge']) : '';
+  var started = startVisit_(person, a, badgeNo, replacedBy);
+  if (pass) {
+    var p = person.values;
+    setCells_(TABS.badges, pass.row, {
+      'Status': 'in use', 'Holder': p['First Name'] + ' ' + p['Last Name'],
+      'Visitor ID': p['Visitor ID'], 'Visit ID': started.visitId, 'Since': new Date(), 'Note': ''
+    });
+  }
+  return { ok: true, badge: badgeNo, noPass: !pass, visitId: started.visitId, hostNotified: started.hostNotified, expected: started.expected };
+}
+
+/** The free pass with the lowest number (V2 before V10). */
+function freePass_() {
+  var best = null, bestNo = Infinity;
+  readTab_(TABS.badges).forEach(function (r, i) {
+    var status = lower_(r['Status']);
+    if (status && status !== 'available') return;
+    var m = /(\d+)/.exec(String(r['Badge']));
+    var n = m ? Number(m[1]) : 1e9;
+    if (n < bestNo) { bestNo = n; best = { row: i + 2, values: r }; }
+  });
+  return best;
 }
 
 /** Signs a visitor in without a badge (kiosks set up without visitor badges). */
@@ -933,7 +975,7 @@ function phoneStart_() {
     ok: true, version: BACKEND_VERSION,
     logo: org.logoFileId ? readLogo_(org.logoFileId) : '',
     settings: {
-      setupComplete: true, storage: 'cloud', badges: false, quickEntry: false, hosts: [], notifyHosts: s.notifyHosts !== false,
+      setupComplete: true, storage: 'cloud', badges: false, passes: !!s.passes && !s.badges, quickEntry: false, hosts: [], notifyHosts: s.notifyHosts !== false,
       org: { name: org.name || '', tagline: org.tagline || '', accent: org.accent || '' },
       form: s.form || {}, screening: { questions: screening.questions || [], declineMessage: screening.declineMessage || '' },
       photos: s.photos, languages: s.languages, translations: s.translations, signature: s.signature,
@@ -974,8 +1016,15 @@ function phoneRegister_(a) {
   var person = findRow_(TABS.visitors, 'Visitor ID', reg.visitor.id);
   setCells_(TABS.visitors, person.row, { 'Phone key': phoneHash_(token) });
   person = findRow_(TABS.visitors, 'Visitor ID', reg.visitor.id);
-  var started = startVisit_(person, { visitorId: reg.visitor.id, method: 'phone', flags: args.flags, visiting: args.visiting, purpose: args.purpose }, '', 'Signed in again');
-  return { ok: true, visitor: reg.visitor, visitId: started.visitId, hostNotified: started.hostNotified, token: token };
+  var started = phoneVisit_(person, { visitorId: reg.visitor.id, method: 'phone', flags: args.flags, visiting: args.visiting, purpose: args.purpose });
+  return { ok: true, visitor: reg.visitor, visitId: started.visitId, hostNotified: started.hostNotified, badge: started.badge || '', noPass: !!started.noPass, token: token };
+}
+
+/** A visit started on a phone: with numbered passes, the phone tells them which pass to take. */
+function phoneVisit_(person, a) {
+  var s = readSettings_() || {};
+  if (s.passes && !s.badges) return startWithPass_(person, a, 'Signed in again');
+  return startVisit_(person, a, '', 'Signed in again');
 }
 
 /** A visitor this phone signed in before, signing in again. */
@@ -985,11 +1034,11 @@ function phoneCheckIn_(a) {
   var args = phoneArgs_(a);
   // Staff may have let them in after a decline (Needs attention → Let in): that approval is kept with the visit.
   var pass = takePass_(person.values['First Name'], person.values['Last Name']);
-  var started = startVisit_(person, {
+  var started = phoneVisit_(person, {
     visitorId: person.values['Visitor ID'], method: 'phone', flags: pass ? [] : args.flags, visiting: args.visiting, purpose: args.purpose,
     signature: args.signature, agreement: args.agreement, language: args.language, email: args.email, override: pass || undefined
-  }, '', 'Signed in again');
-  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified, first: person.values['First Name'] };
+  });
+  return { ok: true, visitId: started.visitId, hostNotified: started.hostNotified, badge: started.badge || '', noPass: !!started.noPass, first: person.values['First Name'] };
 }
 
 /** Signing out on the phone that signed them in. */
@@ -997,10 +1046,10 @@ function phoneSignOut_(a) {
   var visit = findRow_(TABS.visits, 'Visit ID', String(a.visitId || ''));
   if (!visit) return { ok: false, error: 'not_found' };
   if (!phonePerson_(visit.values['Visitor ID'], a.token)) return { ok: false, error: 'phone_visitor' };
-  var first = visit.values['First Name'];
+  var first = visit.values['First Name'], badge = String(visit.values['Badge'] || '');
   if (visit.values['Signed out']) return { ok: true, already: true, first: first };
   signOutVisit_(visit, 'Signed out on their phone');
-  return { ok: true, first: first };
+  return { ok: true, first: first, badge: badge };
 }
 
 /**

@@ -10,7 +10,7 @@ export const DEMO = MODE === 'demo';
 export const ON_TABLET = MODE === 'local' || MODE === 'demo';
 /** A visitor's own phone (the QR code by the door): only signing in and out. */
 export const PHONE = MODE === 'phone';
-export const BACKEND_VERSION = 6;
+export const BACKEND_VERSION = 7;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRY_WAITS = [0, 1500, 4000];

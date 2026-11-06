@@ -59,6 +59,18 @@ ok(files.get(`signature:${again.visitId}`) === sig, 'the signature is saved befo
 const shown = await act('adminSignature', { token: login.token, visitId: again.visitId });
 ok(shown.ok && shown.signature === sig && shown.agreement.rules[0] === 'Stay with your host.', 'and can be shown');
 
+// Numbered passes (no reader): the lowest free pass, and the same one when signing in again.
+await act('adminAddBadge', { token: login.token });
+eq(s.badges.map((b) => b.badge), ['V1', 'V2'], 'a pass is a badge without a tag');
+const pass = await act('assignPass', { visitorId: reg.visitor.id });
+ok(pass.ok && pass.badge === 'V1' && !pass.noPass, `the lowest free pass: ${JSON.stringify(pass)}`);
+const passAgain = await act('assignPass', { visitorId: reg.visitor.id });
+ok(passAgain.badge === 'V1' && passAgain.visitId !== pass.visitId, 'signing in again keeps it');
+const samir = await act('register', { first: 'Samir', last: 'Nagheenanajar', company: 'Initech', visiting: 'Bill', purpose: 'TPS reports', agreed: true });
+eq((await act('assignPass', { visitorId: samir.visitor.id })).badge, 'V2');
+const third = await act('register', { first: 'Michael', last: 'Bolton', company: 'Initech', visiting: 'Bill', purpose: 'TPS reports', agreed: true });
+ok((await act('assignPass', { visitorId: third.visitor.id })).noPass, 'with every pass out, still signed in, without one');
+
 // Two companies never share admin sessions.
 const other = createEngine({ version: 5, settings: () => current, saveSettings: () => {}, files: { put: async () => {}, get: async () => '', del: async () => {} } });
 eq((await other.act(emptyStore(), 'adminInside', { token: login.token })).error, 'admin', 'a token only works for its own company');

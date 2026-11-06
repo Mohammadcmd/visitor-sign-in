@@ -505,7 +505,14 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await set(cloud, 'input[name="s-pin2"]', PIN);
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-setup-skip]'); await cloud.waitForTimeout(600);
-    await cloud.click('[data-badges-choice] .option[data-value="no"]');
+    // Numbered visitor passes, no reader: the kiosk says which one to take.
+    await cloud.click('[data-badges-choice] .option[data-value="passes"]');
+    ok(await cloud.$eval('[data-pass-panel]', (e) => !e.hidden), 'numbered passes ask how many');
+    await set(cloud, 'input[name="s-passes"]', '500');
+    await next(cloud); await cloud.waitForTimeout(600);
+    ok(/from 1 to 200/.test(await text(cloud, '[data-setup-error]')), 'a sensible number of passes');
+    await set(cloud, 'input[name="s-passes"]', '3');
+    await snap(cloud, 'setup-passes');
     await next(cloud); await cloud.waitForTimeout(600);
     await cloud.click('[data-storage-choice] .option[data-value="cloud"]');
     await snap(cloud, 'cloud-storage');
@@ -575,6 +582,9 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await set(cloud, 'input[name="email"]', 'milton@initech.example');
     await formNext(cloud);
     await waitView(cloud, 'done');
+    ok(await text(cloud, '[data-done-pass]') === 'Please take visitor pass V1.' && await text(cloud, '[data-done-badge]') === 'Pass V1', 'the visitor is told which pass to take');
+    ok(/give your pass back/.test(await text(cloud, '[data-done-leave]')), 'and to give it back');
+    ok(backend.sheets.Badges.objects().map((b) => `${b.Badge}:${b.Status}`).join(' ') === 'V1:in use V2:available V3:available', 'the setup made passes V1 to V3, and V1 is out');
     await snap(cloud, 'cloud-done');
     const visits = backend.sheets.Visits.rows;
     ok(visits.length === 2 && /Needs induction/.test(visits[1].join('|')), 'flagged visit in the sheet');
@@ -603,6 +613,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await second.click('[data-leave-match]');
     await second.waitForSelector('[data-overlay="signout"]:not([hidden])');
     ok(/Goodbye, Milton/.test(await text(second, '[data-signout-title]')), 'signed out on screen');
+    ok(/give visitor pass V1 back/.test(await text(second, '[data-signout-text]')), 'and asked for the pass back');
     const [head, row] = backend.sheets.Visits.rows;
     ok(row[head.indexOf('Signed out')] && row[head.indexOf('Signed out by')] === 'Signed out at kiosk', 'sign-out written to the sheet');
     // Third tablet: joins from the wizard with the kiosk key.
@@ -705,6 +716,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await formNext(iphone);
     await waitView(iphone, 'done');
     ok(/You're all set, Peter/.test(await text(iphone, '[data-done-title]')) && /let Bill Lumbergh know/.test(await text(iphone, '[data-done-host]')), 'signed in, and the host is told');
+    ok(await text(iphone, '[data-done-pass]') === 'Please take visitor pass V1.', 'the phone says which pass to take');
     ok(/open this page again and tap "Leaving\?"/.test(await text(iphone, '[data-done-leave]')), 'the visitor is told how to sign out');
     await snap(iphone, 'phone-done');
     const peter = backend.sheets.Visitors.objects().find((r) => r['First Name'] === 'Peter');
@@ -719,6 +731,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await iphone.tap('[data-leave-open]');
     await iphone.waitForSelector('[data-overlay="signout"]:not([hidden])');
     ok(/Goodbye, Peter/.test(await text(iphone, '[data-signout-title]')) && await iphone.$eval('[data-undo]', (e) => e.hidden), 'signed out on the phone');
+    ok(/give visitor pass V1 back/.test(await text(iphone, '[data-signout-text]')), 'and asked for the pass back');
     ok(backend.sheets.Visits.objects().find((v) => v['Visit ID'] === peterVisit['Visit ID'])['Signed out by'] === 'Signed out on their phone', 'the sheet says so');
     await iphone.tap('[data-overlay="signout"]');
     ok(await iphone.$eval('[data-leave-open]', (e) => e.hidden), '"Leaving?" goes away');
