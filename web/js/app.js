@@ -12,7 +12,7 @@ import {
 import { initSetup, openSetup, setupTap } from './setup.js';
 import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
-import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense } from './plans.js';
+import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense, isPaused, tabletCode, saveKey, checkStatus } from './plans.js';
 import { SignaturePad } from './signature.js';
 // QR codes are only drawn in the admin screen, so their code loads when first needed.
 let qrModule = null;
@@ -321,6 +321,7 @@ const ENTER = {
     });
     stopIdle();
     refreshAttention();
+    renderPaused();
   },
   choice() {
     // Warm the camera so the returning-visitor check starts instantly.
@@ -358,10 +359,10 @@ const ENTER = {
   },
   admin() {
     adminTab('inside');
-    const e = entitlement();
-    if (PAYWALL.enabled && ['trial-ended', 'expired'].includes(e.status) && !state.planNoted) {
+    const note = licenseNotice();
+    if (note && !state.planNoted) {
       state.planNoted = true;
-      setTimeout(() => toast(`${e.status === 'expired' ? 'The Pro license has ended' : 'The Pro trial has ended'}. Some extras are paused: Settings → Plan.`, 6000), 600);
+      setTimeout(() => toast(note, 7000), 600);
     }
   },
 };
@@ -371,6 +372,7 @@ const ENTER = {
 $('[data-screen="welcome"]').addEventListener('click', () => {
   if (suppressClick) { suppressClick = false; return; }
   if (state.busy) return;
+  if (isPaused()) { const card = $('[data-paused]'); card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge'); return; }
   show('choice');
 });
 
@@ -1907,7 +1909,7 @@ async function renderDiagnostics() {
   add('Quick entry', quickOn() ? (face.modelsLoaded ? 'Face recognition ready' : 'Face recognition loading…') : 'Off');
   add('Offline start-up', Kiosk ? 'Built into the app' : navigator.serviceWorker?.controller ? 'Ready: the kiosk opens even without Wi-Fi' : 'Not active (needs an HTTPS address)', !Kiosk && !navigator.serviceWorker?.controller);
   add('Screen', `${innerWidth} × ${innerHeight}${document.documentElement.classList.contains('lite') ? ' · light effects for this tablet' : ''}`);
-  if (PAYWALL.enabled) add('Plan', planLine(), ['trial-ended', 'expired'].includes(entitlement().status));
+  if (PAYWALL.enabled) add('License', `${planLine()} · tablet ${tabletCode()}`, ['paused', 'grace'].includes(entitlement().status));
   box.innerHTML = rows.join('');
   checkForUpdate();
 }
@@ -1946,13 +1948,53 @@ async function checkForUpdate() {
 
 // ------------------------------------------------------------------ plans (only with the paywall switched on)
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 function planLine() {
   const e = entitlement();
-  if (e.status === 'licensed') return `Pro, licensed to ${e.license.customer || 'this business'}${e.license.expires ? ` until ${e.license.expires}` : ''}`;
-  if (e.status === 'trial') return `Pro trial: ${e.daysLeft} day${e.daysLeft === 1 ? '' : 's'} left`;
-  if (e.status === 'expired') return 'Free: the Pro license has ended';
-  if (e.status === 'trial-ended') return 'Free: the Pro trial has ended';
-  return 'Free';
+  const who = e.license?.customer || 'this business';
+  if (e.status === 'licensed') return e.license.expires ? `Licensed to ${who}, paid until ${e.license.expires}` : `Licensed to ${who}`;
+  if (e.status === 'grace') return `Renewal overdue: the license ended on ${e.license.expires}. New sign-ins pause on ${e.until}`;
+  if (e.status === 'trial') return `Trial: ${plural(e.daysLeft, 'day')} left`;
+  if (e.status === 'paused') {
+    if (e.reason === 'off') return 'Switched off by the seller: new sign-ins are paused';
+    if (e.reason === 'lapsed') return `The license ended on ${e.license.expires}: new sign-ins are paused`;
+    return 'The trial has ended: new sign-ins are paused';
+  }
+  return '';
+}
+
+/** A reminder for the admin screen, or ''. */
+function licenseNotice() {
+  const e = entitlement();
+  if (!PAYWALL.enabled) return '';
+  if (e.status === 'paused') return `${planLine()}. Signing out, the roll call and exports still work. Settings → License to renew.`;
+  if (e.status === 'grace') return `${planLine()}. Settings → License.`;
+  if (e.status === 'licensed' && e.renewSoon) return `This kiosk's license is due for renewal on ${e.license.expires} (${plural(e.daysLeft, 'day')}). Settings → License.`;
+  if (e.status === 'trial' && e.daysLeft <= 7) return `The trial ends in ${plural(e.daysLeft, 'day')}. Settings → License.`;
+  return '';
+}
+
+function sellerLine() {
+  const bits = [PAYWALL.seller, PAYWALL.supportEmail, PAYWALL.supportPhone].filter(Boolean);
+  return bits.length ? `Contact ${bits.join(' · ')}` : '';
+}
+
+// The license may have changed (a key added, settings imported): read the status file and work it out again.
+document.addEventListener('kiosk-license-changed', () => {
+  checkStatus().then(() => {
+    applySettings();
+    renderPaused();
+    if (state.screen === 'admin') renderPlanCard();
+  }).catch(() => {});
+});
+
+/** While paused, the welcome screen asks visitors to see the front desk; signing out and badge returns still work. */
+function renderPaused() {
+  const paused = isPaused();
+  screenEl('welcome').classList.toggle('paused', paused);
+  $('[data-paused]').hidden = !paused;
+  if (paused) $('[data-paused-staff]').textContent = [`Kiosk license: ${planLine().split(':')[0]}`, `Tablet ${tabletCode()}`, sellerLine()].filter(Boolean).join(' · ');
 }
 
 function renderPlanCard() {
@@ -1960,10 +2002,9 @@ function renderPlanCard() {
   card.hidden = !PAYWALL.enabled;
   if (!PAYWALL.enabled) return;
   const e = entitlement();
-  const paused = Object.keys(FEATURES).filter((f) => !can(f)).map((f) => FEATURES[f]);
   $('[data-plan-text]').innerHTML = `<strong>${esc(planLine())}</strong>${e.error ? `<br><span class="warn">${esc(e.error)}</span>` : ''}`
-    + (paused.length ? `<br>Paused until you add a license: ${esc(paused.join(', '))}.` : '')
-    + '<br>Signing visitors in, screening questions, records and the roll call always keep working.';
+    + `<br>Tablet code: <strong>${esc(tabletCode())}</strong>${sellerLine() ? `<br>${esc(sellerLine())}` : ''}`
+    + '<br>Signing out, records, exports and the roll call always keep working, even without a license.';
 }
 
 /** Has the feature, or shows what Pro adds and how to get it. */
@@ -1983,15 +2024,14 @@ let scanStop = null;
 async function openUpgrade(feature) {
   const ov = $('[data-overlay="upgrade"]');
   const e = entitlement();
-  $('[data-upgrade-title]').textContent = feature && FEATURES[feature] ? `${FEATURES[feature]} is part of Pro` : 'Visitor Sign-In Pro';
-  $('[data-upgrade-text]').textContent = e.status === 'trial' ? `You're on the free Pro trial: ${e.daysLeft} day${e.daysLeft === 1 ? '' : 's'} left.`
-    : e.status === 'licensed' ? `Licensed to ${e.license.customer}${e.license.expires ? ` until ${e.license.expires}` : ''}. To renew or move to a new key, enter it below.`
-      : 'Pro adds:';
-  $('[data-upgrade-list]').innerHTML = Object.values(FEATURES).map((f) => `<li>${esc(f)}</li>`).join('');
+  $('[data-upgrade-title]').textContent = "This tablet's license";
+  $('[data-upgrade-text]').textContent = `${planLine()}.${PAYWALL.price ? ` ${PAYWALL.price}, with every feature, updates and support.` : ''}`;
+  $('[data-tablet-code]').textContent = tabletCode();
+  $('[data-upgrade-seller]').textContent = sellerLine();
   const buy = $('[data-upgrade-buy]');
   buy.hidden = !PAYWALL.buyUrl;
   if (PAYWALL.buyUrl) {
-    $('[data-upgrade-qr]').innerHTML = await qrSvg(PAYWALL.buyUrl, { size: 150, label: 'Link to buy Pro' });
+    $('[data-upgrade-qr]').innerHTML = await qrSvg(PAYWALL.buyUrl, { size: 150, label: 'Link to buy or renew' });
     $('[data-upgrade-url]').textContent = PAYWALL.buyUrl;
   }
   $('input[name="license"]').value = '';
@@ -2028,27 +2068,22 @@ $('[data-license-scan]').addEventListener('click', async () => {
     }
   } catch { $('[data-upgrade-error]').textContent = "The camera couldn't scan here. Type or paste the key instead."; scanStop?.(); }
 });
-$('[data-upgrade-apply]').addEventListener('click', () => applyLicense($('input[name="license"]').value, state.adminToken));
+$('[data-upgrade-apply]').addEventListener('click', () => applyLicense($('input[name="license"]').value));
 
-/** Checks a license key and saves it in the settings (so every tablet on the sheet gets it). */
-async function applyLicense(key, token) {
+/** Checks a license key and keeps it on this tablet (each tablet has its own key). */
+async function applyLicense(key) {
   const err = $('[data-upgrade-error]');
   err.textContent = '';
   let info;
-  try { info = await verifyLicense(key); } catch (e) { err.textContent = e.message; return false; }
-  const next = { ...settings(), license: key.trim() };
-  const toSave = JSON.parse(JSON.stringify(next));
-  if (MODE === 'cloud') toSave.org.logo = '';
-  busy(true, 'Saving…');
-  const res = await api('adminSaveSettings', { token, settings: toSave });
-  busy(false);
-  if (!res.ok) { err.textContent = res.error === 'admin' ? 'The admin session ended. Unlock the admin screen again.' : errorText(res); return false; }
-  useSettings(next, { cache: MODE === 'cloud' });
+  try { info = await verifyLicense(key, PAYWALL.publicKey, tabletCode()); } catch (e) { err.textContent = e.message; return false; }
+  saveKey(key);
   await refreshPlan();
   applySettings();
+  renderPaused();
   closeUpgrade();
   if (state.screen === 'admin') loadSettingsPane();
-  toast(`Pro unlocked: licensed to ${info.customer || 'this business'}${info.expires ? ` until ${info.expires}` : ''}.`, 6000);
+  toast(`License added: ${info.customer || 'this business'}${info.expires ? `, paid until ${info.expires}` : ''}.`, 6000);
+  checkStatus().then(renderPaused);
   return true;
 }
 
@@ -2228,6 +2263,7 @@ async function refreshCloudSettings() {
 
 function startKiosk() {
   applySettings();
+  renderPaused();
   document.body.dataset.view = state.screen;
   $$('.screen').forEach((s) => s.classList.toggle('active', s.dataset.screen === 'welcome'));
   state.screen = 'welcome';
@@ -2262,6 +2298,12 @@ initSetup({
   }
   await refreshPlan().catch(() => {});
   applySettings();
+  if (PAYWALL.enabled) {
+    checkStatus().then(renderPaused).catch(() => {});
+    setInterval(() => { if (state.screen === 'welcome') checkStatus().then(renderPaused).catch(() => {}); }, 6 * 60 * 60 * 1000);
+    // The paid-until date can pass while the kiosk is running.
+    setInterval(() => refreshPlan().then(renderPaused).catch(() => {}), 60 * 60 * 1000);
+  }
   if (!settings().setupComplete) {
     document.body.dataset.view = 'setup';
     $$('.screen').forEach((s) => s.classList.toggle('active', s.dataset.screen === 'setup'));
@@ -2274,7 +2316,7 @@ initSetup({
   const linkKey = new URLSearchParams(location.search).get('license');
   if (linkKey && PAYWALL.enabled && settings().setupComplete) {
     history.replaceState(null, '', location.pathname);
-    openPin({ title: 'Add a license', hint: 'Enter the admin PIN to add the license to this kiosk.', onSuccess(token) { applyLicense(linkKey, token); } });
+    openPin({ title: 'Add a license', hint: 'Enter the admin PIN to add the license to this kiosk.', onSuccess() { openUpgrade(''); $('input[name="license"]').value = linkKey; applyLicense(linkKey); } });
   }
   // Face recognition loads once the kiosk is showing and the tablet is idle, so it never slows the start.
   const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 10000 }) : setTimeout(fn, 3000));

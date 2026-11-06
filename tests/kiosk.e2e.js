@@ -664,52 +664,108 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await off.$eval('[data-org-name]', (e) => e.textContent) === 'Northwind Labs', 'the kiosk opens with no network');
     await off.context().close();
 
-    // ================================================================ the paywall, switched on
+    // ================================================================ licensing switched on: a kiosk sold per tablet
     const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-key-'));
     const tool = (script, args) => execFileSync(process.execPath, [path.join(__dirname, '../tools/license', script), ...args], { cwd: keyDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const publicKey = JSON.parse(/publicKey: (\{.*\}),/.exec(tool('keygen.mjs', []))[1]);
-    const licenseKey = tool('issue.mjs', ['--customer', 'Northwind Labs', '--days', '365']).trim();
-    fs.rmSync(keyDir, { recursive: true, force: true });
     const paid = await open(browser, `${base}?demo`);
     await waitView(paid, 'welcome');
+    // The seller's website with the license status files (tools/license writes them into license-status/).
+    await paid.context().route('https://licenses.example.com/**', (route) => {
+      const file = path.join(keyDir, 'license-status', path.basename(new URL(route.request().url()).pathname));
+      const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Date', Date: new Date().toUTCString() };
+      return fs.existsSync(file) ? route.fulfill({ status: 200, contentType: 'text/plain', headers, body: fs.readFileSync(file, 'utf8') }) : route.fulfill({ status: 404, headers, body: '' });
+    });
+    const tabletCode = await paid.evaluate(async () => (await import('./js/plans.js')).tabletCode());
+    ok(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(tabletCode), `this tablet's code: ${tabletCode}`);
+    const elsewhere = tool('issue.mjs', ['--customer', 'Northwind Labs', '--tablet', 'ZZZZ-ZZZZ']).trim();
+    const licenseKey = tool('issue.mjs', ['--customer', 'Northwind Labs', '--tablet', tabletCode, '--paid', 'check', '--amount', '499', '--ref', '1001']).trim();
+    const licenseId = JSON.parse(fs.readFileSync(path.join(keyDir, 'licenses.json'), 'utf8')).licenses.at(-1).id;
+    const recheck = () => paid.evaluate(() => document.dispatchEvent(new Event('kiosk-license-changed')));
+
+    // Someone is inside with badge V1 when the trial runs out.
+    await paid.evaluate(async () => {
+      const { call } = await import('./js/api.js');
+      const photo = 'data:image/jpeg;base64,' + btoa('photo');
+      const reg = await call('register', { first: 'Pia', last: 'Hart', company: 'Globex', visiting: 'Pat Kim', purpose: 'Meeting', agreed: true, photo });
+      await call('assignBadge', { visitorId: reg.visitor.id, tag: 'DEMO0001' });
+    });
     await paid.evaluate(async (pub) => {
       const plans = await import('./js/plans.js');
       const { settings, useSettings } = await import('./js/settings.js');
-      Object.assign(plans.PAYWALL, { enabled: true, publicKey: pub, buyUrl: 'https://buy.example.com/visitor-sign-in-pro' });
+      Object.assign(plans.PAYWALL, {
+        enabled: true, publicKey: pub, buyUrl: 'https://buy.example.com/visitor-sign-in', statusUrl: 'https://licenses.example.com/',
+        seller: 'Shock Tech', supportEmail: 'sales@shocktech.example', price: '$499 per kiosk, then $149 a year',
+      });
       useSettings({ ...settings(), trialStarted: new Date(Date.now() - 45 * 86400000).toISOString() });
-      await plans.refresh();
     }, publicKey);
-    ok(await paid.$$eval('[data-lang-pick]', (l) => l[0].hidden) || true, 'kiosk still works after the trial');
+    await recheck();
+    await paid.waitForSelector('[data-paused]:not([hidden])');
+    ok(/Sign-ins are paused/.test(await text(paid, '[data-paused]')) && /Please see the front desk/.test(await text(paid, '[data-paused]')), 'after the trial, visitors are asked to see the front desk');
+    const staffLine = await text(paid, '[data-paused-staff]');
+    ok(staffLine.includes(`Tablet ${tabletCode}`) && /Shock Tech/.test(staffLine) && /sales@shocktech\.example/.test(staffLine), `staff see the tablet code and who to call: ${staffLine}`);
+    ok(await paid.$eval('.tap-cta', (e) => getComputedStyle(e).display === 'none'), 'no "tap to get started"');
+    await snap(paid, 'paused');
+    await paid.click('[data-screen="welcome"] .welcome-title');
+    await paid.waitForTimeout(700);
+    ok(await view(paid) === 'welcome', 'a tap does not start a sign-in');
+    await paid.click('[data-demo-tap="0"]');
+    await paid.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Pia/.test(await text(paid, '[data-signout-title]')), 'signing out with a badge still works while paused');
+    await paid.waitForSelector('[data-overlay="signout"][hidden]', { state: 'attached', timeout: 15000 });
+
+    // The admin screen still opens: the license screen, with the tablet code.
     await holdLogo(paid);
     await paid.waitForSelector('[data-overlay="pin"]:not([hidden])');
     await enterPin(paid, '123456');
     await waitView(paid, 'admin');
-    await paid.waitForFunction(() => /Pro trial has ended/.test(document.querySelector('[data-toast]').textContent), null, { timeout: 5000 });
-    ok(true, 'admin is told the trial ended');
-    await paid.click('[data-admin-tab="expected"]');
-    await paid.waitForSelector('[data-expected-list] .empty button');
-    ok(/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected is a Pro feature after the trial');
+    await paid.waitForFunction(() => /trial has ended: new sign-ins are paused/.test(document.querySelector('[data-toast]').textContent), null, { timeout: 5000 });
+    ok(true, 'the admin is told why');
     await paid.click('[data-admin-tab="history"]');
-    await paid.waitForSelector('[data-history-list] .admin-row, [data-history-list] .empty');
-    await paid.click('[data-export-visits]');
+    await paid.waitForSelector('[data-history-list] .admin-row');
+    ok(/Pia/.test(await text(paid, '[data-history-list]')), 'records are all still there');
+    await paid.click('[data-admin-tab="settings"]');
+    await paid.waitForSelector('[data-plan-card]:not([hidden])');
+    ok((await text(paid, '[data-plan-text]')).includes(tabletCode), 'the License card shows the tablet code');
+    await paid.click('[data-plan-open]');
     await paid.waitForSelector('[data-overlay="upgrade"]:not([hidden])');
-    ok(/CSV export of visits and visitors is part of Pro/.test(await text(paid, '[data-upgrade-title]')), 'export asks for Pro');
-    ok(await paid.$('[data-upgrade-qr] svg.qr') && /buy\.example\.com/.test(await text(paid, '[data-upgrade-url]')), 'buy link and QR code');
-    await snap(paid, 'upgrade');
+    ok(await text(paid, '[data-tablet-code]') === tabletCode && /Shock Tech/.test(await text(paid, '[data-upgrade-seller]')), 'the license screen shows the tablet code and the seller');
+    ok(/\$499 per kiosk, then \$149 a year/.test(await text(paid, '[data-upgrade-text]')), 'and the price');
+    ok(await paid.$('[data-upgrade-qr] svg.qr') && /buy\.example\.com/.test(await text(paid, '[data-upgrade-url]')) && /check/.test(await text(paid, '[data-upgrade-buy]')), 'a buy link, a QR code, and checks welcome');
+    await snap(paid, 'license');
+    await set(paid, 'input[name="license"]', elsewhere);
+    await paid.click('[data-upgrade-apply]');
+    await paid.waitForFunction(() => /is for tablet ZZZZ-ZZZZ/.test(document.querySelector('[data-upgrade-error]').textContent));
+    ok(true, "another tablet's key is refused");
     await set(paid, 'input[name="license"]', licenseKey.slice(0, -3) + 'AAA');
     await paid.click('[data-upgrade-apply]');
     await paid.waitForFunction(() => /isn't valid/.test(document.querySelector('[data-upgrade-error]').textContent));
-    ok(true, 'a wrong key is refused');
+    ok(true, 'a damaged key is refused');
     await set(paid, 'input[name="license"]', licenseKey);
     await paid.click('[data-upgrade-apply]');
     await paid.waitForSelector('[data-overlay="upgrade"][hidden]', { state: 'attached' });
-    ok(/Pro unlocked: licensed to Northwind Labs/.test(await text(paid, '[data-toast]')), 'the license unlocks Pro');
-    await paid.click('[data-admin-tab="settings"]');
-    await paid.waitForSelector('[data-plan-card]:not([hidden])');
-    ok(/Pro, licensed to Northwind Labs until \d{4}-/.test(await text(paid, '[data-plan-text]')), 'the plan card shows the license');
-    await paid.click('[data-admin-tab="expected"]');
-    await paid.waitForSelector('[data-expected-list] .empty');
-    ok(!/part of Visitor Sign-In Pro/.test(await text(paid, '[data-expected-list]')), 'Expected works again');
+    ok(/License added: Northwind Labs, paid until \d{4}-/.test(await text(paid, '[data-toast]')), 'the key is added');
+    await paid.waitForFunction(() => /Licensed to Northwind Labs, paid until/.test(document.querySelector('[data-plan-text]').textContent));
+    ok(true, 'the License card shows it');
+    await paid.click('[data-admin-exit]');
+    await waitView(paid, 'welcome');
+    ok(await paid.$eval('[data-paused]', (e) => e.hidden), 'the kiosk is back on');
+    await paid.click('[data-screen="welcome"] .welcome-title');
+    await waitView(paid, 'choice');
+    ok(true, 'visitors can sign in again');
+    await paid.click('[data-screen="choice"] [data-go="welcome"]');
+    await waitView(paid, 'welcome');
+
+    // A bounced check: switched off from the seller's side, then back on.
+    tool('switch.mjs', ['off', '--id', licenseId, '--note', 'check 1001 bounced']);
+    await recheck();
+    await paid.waitForSelector('[data-paused]:not([hidden])');
+    ok(/Switched off by the seller/.test(await text(paid, '[data-paused-staff]')), 'switching the license off pauses the kiosk');
+    tool('switch.mjs', ['on', '--id', licenseId]);
+    await recheck();
+    await paid.waitForSelector('[data-paused][hidden]', { state: 'attached' });
+    ok(true, 'and switching it on again restarts it');
+    fs.rmSync(keyDir, { recursive: true, force: true });
     ok(!paid.errors.length, `no page errors: ${paid.errors.join(' | ')}`);
     await paid.context().close();
 

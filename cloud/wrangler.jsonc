@@ -1,0 +1,45 @@
+// Cloudflare settings for the cloud service. Deploy with `npm run deploy` from
+// this folder (see cloud/README.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "visitor-sign-in",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  // One Durable Object per company (its records in its own SQLite database), and
+  // one for staff accounts. SQLite-backed objects are included in the Free plan.
+  "durable_objects": {
+    "bindings": [
+      { "name": "COMPANY", "class_name": "Company" },
+      { "name": "DIRECTORY", "class_name": "Directory" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Company"] },
+    { "tag": "v2", "new_sqlite_classes": ["Directory"] }
+  ],
+  // Photos, signatures and logos. Create it once: npx wrangler r2 bucket create visitor-sign-in-files
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "visitor-sign-in-files" }],
+  // The sender of sign-in codes (a domain verified in Resend). The Resend key is a
+  // secret: npx wrangler secret put RESEND_API_KEY
+  "vars": { "MAIL_FROM": "Visitor Sign-In <signin@example.com>" },
+  "observability": { "enabled": true },
+
+  "env": {
+    // For the tests and local development: emails are logged instead of sent,
+    // and kiosk-key companies (like a Google Sheet) are allowed.
+    "test": {
+      "durable_objects": {
+        "bindings": [
+          { "name": "COMPANY", "class_name": "Company" },
+          { "name": "DIRECTORY", "class_name": "Directory" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["Company"] },
+        { "tag": "v2", "new_sqlite_classes": ["Directory"] }
+      ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "visitor-sign-in-files-test" }],
+      "vars": { "MAIL_FROM": "Visitor Sign-In <signin@example.com>", "MAIL_MODE": "log", "ALLOW_KIOSK_KEY_COMPANIES": "1" }
+    }
+  }
+}

@@ -329,7 +329,7 @@ export function timeLabel(hhmm) {
 
 export async function hashPin(pin) {
   const bytes = new TextEncoder().encode('visitor-kiosk-pin:' + pin);
-  if (window.crypto?.subtle) {
+  if (globalThis.crypto?.subtle) {
     const buf = await crypto.subtle.digest('SHA-256', bytes);
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
