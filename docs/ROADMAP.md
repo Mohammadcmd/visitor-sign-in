@@ -15,7 +15,7 @@ This file is the plan and the progress. Each work session updates the checklists
 | Domain | Cloudflare Registrar (sold at cost) | About $10 a year for a .com |
 | Payments | Checks (no fee), or a Stripe Payment Link for cards | Stripe: about 2.9% + 30¢ per card payment, and no monthly fee |
 | Customer records | On their tablet, or in their own Google Sheet (their Google account) | Nothing to you |
-| Terms of service, license agreement, privacy policy | Drafted here; a lawyer's review is worth paying for before launch | Review fee only |
+| License agreement, privacy policy | Drafted in [docs/legal/](legal/README.md); a lawyer's review is worth paying for before launch | Review fee only |
 
 **To launch: about $36**: $25 for Google's registration and about $11 for a domain.
 
@@ -66,7 +66,8 @@ This file is the plan and the progress. Each work session updates the checklists
 - [ ] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private)
 - [ ] Updates that install themselves overnight on tablets in locked kiosk mode (no one has to tap Install)
 - [ ] The website: what it does, the price, how to buy (check or card), the APK download, the license status folder
-- [ ] A license agreement shown at setup (per tablet, yearly fee, what happens if it isn't paid), plus terms and a privacy policy
+- [x] A license agreement shown at setup (per tablet, yearly fee, what happens if it isn't paid), plus a privacy policy for the website ([drafts](legal/README.md))
+- [ ] A lawyer's review of the drafts, then fill in `seller`, `supportEmail`, `supportPhone`, `price` and `law` in `PAYWALL`
 
 ### Phase 3: less work for you
 - [ ] A renewal invoice to email or print, with "make checks payable to" and your mailing address

@@ -35,6 +35,7 @@ The kiosk ships with per-tablet licensing that is **switched off**: with it off,
      trialDays: 30, graceDays: 14, warnDays: 30,
      seller: 'Shock Tech', supportEmail: 'sales@yourcompany.com', supportPhone: '555-0100',
      price: '$499 per kiosk, then $149 a year',
+     law: 'the State of Ohio',                              // the license agreement's governing law
      buyUrl: 'https://buy.stripe.com/your-payment-link',   // optional; checks are welcome either way
      statusUrl: 'https://licenses.yourcompany.com/',        // where you publish license-status/
      publicKey: { kty: 'EC', crv: 'P-256', x: '…', y: '…' },  // printed by keygen
@@ -42,6 +43,12 @@ The kiosk ships with per-tablet licensing that is **switched off**: with it off,
    ```
 
 3. Run the tests (`npm test` checks licenses end to end), then release a new version (push a `v*` tag).
+
+## The license agreement
+
+With licensing on, setup asks each business to accept the license agreement ([docs/legal/license-agreement.md](legal/license-agreement.md)), with the name of the person accepting it. The kiosk fills in `seller`, `supportEmail`, `supportPhone`, `price`, `law` and the trial and grace periods above. Who accepted it, the version and the date are kept with the kiosk's settings and shown in **Admin → Settings → License**.
+
+It's a draft: have a lawyer review it first ([docs/legal/README.md](legal/README.md)). After changing it, update its `Version:` line, run `node scripts/sync-agreement.mjs` and release. Kiosks then ask their admin to accept the new version; sign-ins carry on meanwhile.
 
 ## Selling a kiosk
 

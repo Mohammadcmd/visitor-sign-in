@@ -848,6 +848,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(/License added: Northwind Labs, paid until \d{4}-/.test(await text(paid, '[data-toast]')), 'the key is added');
     await paid.waitForFunction(() => /Licensed to Northwind Labs, paid until/.test(document.querySelector('[data-plan-text]').textContent));
     ok(true, 'the License card shows it');
+    // The license agreement: not accepted on this kiosk yet, so the admin reads and accepts it.
+    ok(/hasn't been accepted on this kiosk yet/.test(await text(paid, '[data-plan-text]')), 'the License card says the agreement is not accepted yet');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    const agText = await text(paid, '[data-ag-text]');
+    ok(/Shock Tech/.test(agText) && /Northwind Labs/.test(agText) && /14-day grace/.test(agText) && /sales@shocktech\.example/.test(agText), "the agreement names the seller and the business, with the kiosk's real grace period");
+    ok(!/\{\w+\}/.test(agText), 'no blanks left in braces');
+    ok(/state where Shock Tech is based/.test(agText), 'with no governing law set, it says where the seller is based');
+    await snap(paid, 'agreement-admin');
+    await paid.click('[data-ag-agree]');
+    ok(/Type your name/.test(await text(paid, '[data-ag-error]')), 'accepting needs a name');
+    await set(paid, 'input[name="ag-name"]', 'Jordan Lee');
+    await paid.click('[data-ag-agree]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
+    await paid.waitForFunction(() => /accepted by Jordan Lee/.test(document.querySelector('[data-plan-text]').textContent));
+    ok(true, 'the License card shows who accepted it');
+    ok(await paid.evaluate(async () => (await import('./js/settings.js')).settings().agreement.by) === 'Jordan Lee', 'and it is kept with the settings');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    ok(await paid.$eval('[data-ag-agree]', (e) => e.hidden) && /accepted by Jordan Lee/.test(await text(paid, '[data-ag-status]')), 'opened again, it is just to read');
+    await paid.click('[data-ag-close]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
     await paid.click('[data-admin-exit]');
     await waitView(paid, 'welcome');
     ok(await paid.$eval('[data-paused]', (e) => e.hidden), 'the kiosk is back on');
@@ -897,6 +919,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await preset.waitForFunction(() => document.querySelector('input[name="s-org"]').value === 'Shock Tech');
     ok(await preset.$eval('[data-preview-logo]', (e) => e.src.startsWith('data:image/png')), 'preset logo loaded');
     await snap(preset, 'preset');
+    // With licensing on, setup asks the business to accept the license agreement after its name.
+    await preset.evaluate(async () => {
+      const plans = await import('./js/plans.js');
+      Object.assign(plans.PAYWALL, { enabled: true, seller: 'Shock Tech', supportEmail: 'sales@shocktech.example', law: 'Michigan' });
+      document.dispatchEvent(new Event('kiosk-license-changed'));
+    });
+    await preset.waitForTimeout(400);
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="agreement"].active');
+    const setupAg = await text(preset, '[data-agreement-text]');
+    ok(/Shock Tech/.test(setupAg) && /laws of Michigan/.test(setupAg), 'setup shows the agreement with the seller and the governing law');
+    ok(/Shock Tech/.test(await text(preset, '[data-sstep="agreement"] .hint')), 'for the business being set up');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Type your name/.test(await text(preset, '[data-setup-error]')), 'it needs a name');
+    await set(preset, 'input[name="s-agree-name"]', 'Jordan Lee');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Tick "I agree"/.test(await text(preset, '[data-setup-error]')), 'and "I agree"');
+    await preset.click('[data-agree-toggle]');
+    await snap(preset, 'setup-agreement');
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="admin"].active');
+    ok(true, 'then on to the admin login');
     ok(!preset.errors.length, `no page errors: ${preset.errors.join(' | ')}`);
     console.log(`kiosk e2e passed (${checks} checks)`);
   } finally {

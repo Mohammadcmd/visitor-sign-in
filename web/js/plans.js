@@ -36,6 +36,8 @@ export const PAYWALL = {
   supportPhone: '',
   // Shown on the license screen, such as '$499 per kiosk, then $149 a year'.
   price: '',
+  // The law the license agreement is under, such as 'the State of Ohio' (docs/legal/license-agreement.md).
+  law: '',
   // Your checkout page (a Stripe Payment Link…). Shown as a link and a QR code. Checks are welcome too.
   buyUrl: '',
   // Where the license status files are (tools/license/status.mjs), such as 'https://licenses.example.com/'.

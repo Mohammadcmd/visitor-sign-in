@@ -207,6 +207,15 @@ Asked for next: at the end of signing in, tell visitors which visitor pass to gr
 - Signing out frees the pass, and the screen asks for it back.
 - Tests: 14 backend checks, 5 engine checks, and the end-to-end Google Sheets company now runs on three passes. Milton gets V1 and gives it back, then Peter's phone gets V1.
 
+## A license agreement, and legal drafts
+
+Next on the list before selling: an agreement each business accepts, and a privacy policy.
+
+- `docs/legal/license-agreement.md` is written to match what the kiosk does: one license per tablet or QR code, not transferable, a yearly fee, a pause after the grace period that never deletes records, and records that stay with the business. `docs/legal/privacy-policy.md` is the seller's own policy. Both are drafts for a lawyer.
+- `scripts/sync-agreement.mjs` turns the Markdown into HTML in `web/js/agreement-text.js`, so setup can show it offline. Words in braces (`{seller}`, `{graceDays}` and so on) are filled in from `PAYWALL` (`web/js/agreement.js`).
+- With licensing on, setup has a License agreement step after the company name. It needs a name and "I agree", and saves `settings.agreement` (version, by, at). Admin → Settings → License shows it and asks for the current version to be accepted when it's missing or older. It never pauses sign-ins: that's left to the license itself.
+- Tests: the end-to-end run accepts it in admin (a name is needed) and in setup (a name and "I agree"), and checks no blanks in braces are left.
+
 ## Where things are
 
 | Thing | Location |
@@ -218,6 +227,7 @@ Asked for next: at the end of signing in, tell visitors which visitor pass to gr
 | Cloud service | `cloud/` (guide: `cloud/README.md`) |
 | Roadmap | `docs/ROADMAP.md` |
 | Licenses: kiosk side, seller tools, guide | `web/js/plans.js`, `tools/license/`, `docs/PAYWALL.md` |
+| License agreement and privacy policy (drafts) | `docs/legal/`, shown in the kiosk by `web/js/agreement.js` |
 | Shock Tech preset | `docs/presets/` |
 | Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |

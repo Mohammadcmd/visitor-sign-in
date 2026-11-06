@@ -14,6 +14,7 @@ import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
 import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense, isPaused, tabletCode, saveKey, checkStatus, usePoint } from './plans.js';
 import { SignaturePad } from './signature.js';
+import { AGREEMENT_VERSION, AGREEMENT_TITLE, agreementHtml, agreementAccepted } from './agreement.js';
 // QR codes are only drawn in the admin screen, so their code loads when first needed.
 let qrModule = null;
 const qrSvg = async (text, opts) => (await (qrModule ||= import('./qr.js'))).qrSvg(text, opts);
@@ -1424,6 +1425,7 @@ function exitAdmin() {
   state.adminMode = null;
   $('[data-overlay="rollcall"]').hidden = true;
   $('[data-overlay="signed"]').hidden = true;
+  $('[data-overlay="agreement"]').hidden = true;
   $('[data-expected-form]').hidden = true;
   show('welcome');
 }
@@ -2125,12 +2127,14 @@ async function phoneLinkAction(args) {
   renderPhoneCard();
 }
 
-async function savePhoneSettings(phone) {
-  const next = { ...settings(), phone };
+const savePhoneSettings = (phone) => saveSettingsAsAdmin({ ...settings(), phone });
+
+/** Saves changed settings from the admin screen (the logo stays as it is). */
+async function saveSettingsAsAdmin(next) {
   const toSave = JSON.parse(JSON.stringify(next));
   toSave.org.logo = '';
   const res = await adminApi('adminSaveSettings', { settings: toSave });
-  if (res.ok) useSettings(next, { cache: true });
+  if (res.ok) useSettings(next, { cache: MODE === 'cloud' });
   return res;
 }
 
@@ -2210,6 +2214,7 @@ function licenseNotice() {
   if (!PAYWALL.enabled) return '';
   if (e.status === 'paused') return `${planLine()}. Signing out, the roll call and exports still work. Settings → License to renew.`;
   if (e.status === 'grace') return `${planLine()}. Settings → License.`;
+  if (!agreementAccepted(settings())) return 'Please read and accept the license agreement: Settings → License → License agreement.';
   if (e.status === 'licensed' && e.renewSoon) return `This kiosk's license is due for renewal on ${e.license.expires} (${plural(e.daysLeft, 'day')}). Settings → License.`;
   if (e.status === 'trial' && e.daysLeft <= 7) return `The trial ends in ${plural(e.daysLeft, 'day')}. Settings → License.`;
   return '';
@@ -2245,8 +2250,46 @@ function renderPlanCard() {
   const e = entitlement();
   $('[data-plan-text]').innerHTML = `<strong>${esc(planLine())}</strong>${e.error ? `<br><span class="warn">${esc(e.error)}</span>` : ''}`
     + `<br>Tablet code: <strong>${esc(tabletCode())}</strong>${sellerLine() ? `<br>${esc(sellerLine())}` : ''}`
-    + '<br>Signing out, records, exports and the roll call always keep working, even without a license.';
+    + '<br>Signing out, records, exports and the roll call always keep working, even without a license.'
+    + `<br>${esc(agreementLine())}`;
+  $('[data-agreement-open]').textContent = agreementAccepted(settings()) ? 'License agreement' : 'Read and accept the license agreement';
 }
+
+function agreementLine() {
+  const ag = settings().agreement;
+  if (agreementAccepted(settings())) return `License agreement (version ${ag.version}) accepted by ${ag.by} on ${new Date(ag.at).toLocaleDateString()}.`;
+  return ag.by ? `An updated license agreement (version ${AGREEMENT_VERSION}) needs accepting.` : "The license agreement hasn't been accepted on this kiosk yet.";
+}
+
+/** The license agreement: to read, and to accept when this kiosk hasn't accepted the current version. */
+function openAgreement() {
+  const s = settings();
+  const need = PAYWALL.enabled && !agreementAccepted(s);
+  $('[data-ag-title]').textContent = AGREEMENT_TITLE;
+  $('[data-ag-version]').textContent = AGREEMENT_VERSION;
+  $('[data-ag-status]').textContent = agreementAccepted(s) ? ` · accepted by ${s.agreement.by} on ${new Date(s.agreement.at).toLocaleDateString()}` : '';
+  $('[data-ag-text]').innerHTML = agreementHtml(s.org.name);
+  $('[data-ag-company]').textContent = s.org.name || 'your business';
+  $('[data-ag-accept]').hidden = !need;
+  $('[data-ag-agree]').hidden = !need;
+  $('input[name="ag-name"]').value = '';
+  $('[data-ag-error]').textContent = '';
+  $('[data-overlay="agreement"]').hidden = false;
+}
+$('[data-agreement-open]').addEventListener('click', openAgreement);
+$('[data-ag-close]').addEventListener('click', () => { kb.close(); $('[data-overlay="agreement"]').hidden = true; });
+$('[data-ag-agree]').addEventListener('click', async () => {
+  const who = $('input[name="ag-name"]').value.trim();
+  if (!who) { $('[data-ag-error]').textContent = 'Type your name to accept it.'; return; }
+  busy(true, 'Saving…');
+  const res = await saveSettingsAsAdmin({ ...settings(), agreement: { version: AGREEMENT_VERSION, by: who, at: new Date().toISOString() } });
+  busy(false);
+  if (!res.ok) { $('[data-ag-error]').textContent = errorText(res); return; }
+  kb.close();
+  $('[data-overlay="agreement"]').hidden = true;
+  toast('License agreement accepted.');
+  renderPlanCard();
+});
 
 /** Has the feature, or shows what Pro adds and how to get it. */
 function requirePro(feature) {

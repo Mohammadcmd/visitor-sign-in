@@ -89,6 +89,18 @@
             <label class="link">Import a settings file<input type="file" accept=".json,application/json" data-setup-import hidden></label></p>
         </div>
 
+        <div class="step" data-sstep="agreement">
+          <h2>License agreement</h2>
+          <p class="hint">Please read the license agreement for <strong data-agreement-company></strong> (version <span data-agreement-version></span>). You can read it again any time in Admin → Settings → License.</p>
+          <div class="agreement-text" data-agreement-text tabindex="0"></div>
+          <label class="field"><span>Your name</span>
+            <input readonly inputmode="none" name="s-agree-name" data-cap="words" maxlength="80" autocomplete="off" placeholder="e.g. Jordan Lee"></label>
+          <button type="button" class="agree toggle" data-agree-toggle role="switch" aria-checked="false">
+            <span class="agree-box" aria-hidden="true">✓</span>
+            <span><strong>I agree to the license agreement on behalf of <span data-agreement-company></span></strong><br><span class="small">And I'm allowed to accept it for this business.</span></span>
+          </button>
+        </div>
+
         <div class="step" data-sstep="admin">
           <h2>Create your admin login</h2>
           <p class="hint">Admins see who is inside, review declined visitors, manage badges and change these settings. To open the admin screen, press and hold the logo on the welcome screen for 2.5 seconds.</p>
@@ -790,7 +802,8 @@
           <div class="set-card" data-plan-card hidden>
             <h3>License</h3>
             <p class="set-text" data-plan-text></p>
-            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>License and renewal</button></div>
+            <div class="row-actions"><button type="button" class="btn-primary" data-plan-open>License and renewal</button>
+              <button type="button" class="btn-secondary" data-agreement-open>License agreement</button></div>
           </div>
           <div class="set-card">
             <h3>Backup and reset</h3>
@@ -899,6 +912,25 @@
       <div class="quick-actions">
         <button type="button" class="btn-secondary btn-lg" data-upgrade-close>Not now</button>
         <button type="button" class="btn-primary btn-lg" data-upgrade-apply>Use this key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The license agreement (licensing on): read it, and accept a new version -->
+  <div class="overlay with-kb" data-overlay="agreement" hidden>
+    <div class="center-card agreement-card">
+      <p class="eyebrow">License agreement</p>
+      <h2 data-ag-title></h2>
+      <p class="hint">Version <span data-ag-version></span><span data-ag-status></span></p>
+      <div class="agreement-text" data-ag-text tabindex="0"></div>
+      <div data-ag-accept>
+        <label class="field"><span>Your name</span>
+          <input readonly inputmode="none" name="ag-name" data-cap="words" maxlength="80" autocomplete="off" placeholder="e.g. Jordan Lee"></label>
+        <p class="form-error" data-ag-error role="alert"></p>
+      </div>
+      <div class="quick-actions">
+        <button type="button" class="btn-secondary btn-lg" data-ag-close>Close</button>
+        <button type="button" class="btn-primary btn-lg" data-ag-agree>I agree on behalf of <span data-ag-company></span></button>
       </div>
     </div>
   </div>

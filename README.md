@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: selling the kiosk](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: licenses per kiosk](docs/PAYWALL.md)
+**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: selling the kiosk](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: licenses per kiosk](docs/PAYWALL.md) · [License agreement and privacy policy (drafts)](docs/legal/README.md)
 
 | | | |
 |---|---|---|
@@ -23,7 +23,7 @@ android/       the Android app that wraps web/ (guide: android/README.md)
 apps-script/   the Google Sheets backend (Apps Script), used when records go to Google Sheets
 scripts/       build-android.mjs builds the APK; sync-backend.mjs bundles the backend into the wizard
 tests/         backend tests, file checks, and an end-to-end browser test
-docs/          launch checklist, privacy notice template, presets, screenshots, project history
+docs/          launch checklist, privacy notice template, legal drafts, presets, screenshots, project history
 media/         product demo videos; downloads/ an earlier demo build of the app
 tools/         icon rendering (tools/icons/) and the demo video kit (tools/demo-video/)
 ```
@@ -174,6 +174,7 @@ The kiosk includes per-tablet licensing, **switched off** until you turn it on. 
 - **Nothing is lost while paused:** signing out, the roll call, the admin screen and exports keep working, and records are never deleted.
 - **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check) through small signed status files on your website.
 - **Tools on your computer:** issue, renew, switch off and on, list what's due, and keep a payments ledger with checks included (`npm run license:*`).
+- **A license agreement in setup:** the business accepts it with a name, and the kiosk keeps who and when. Drafts of the agreement and a privacy policy, for a lawyer to review, are in [docs/legal/](docs/legal/README.md).
 
 See [docs/PAYWALL.md](docs/PAYWALL.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 

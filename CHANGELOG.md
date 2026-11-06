@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**A license agreement in setup (when licensing is on)**
+- Setup asks the business to read and accept the license agreement, with a name and "I agree", right after the company name. Who accepted it, which version and when are kept with the settings.
+- Admin → Settings → License shows whether it has been accepted and opens it to read. A kiosk set up before, or one with an older version accepted, asks the admin to accept the current one. Sign-ins aren't blocked by it.
+- The agreement fills in the seller, support email, price, governing law and the kiosk's real trial and grace periods. `PAYWALL` has a new `law` field.
+- Drafts for a lawyer to review in [docs/legal/](docs/legal/README.md): the license and maintenance agreement, and a privacy policy for the seller's website. The visitor privacy notice now covers signatures, phone sign-in and passes.
+- `scripts/sync-agreement.mjs` copies the agreement into the kiosk, and `npm test` checks it's up to date.
+
 **Numbered visitor passes (no reader)**
 - A third choice in setup next to NFC/RFID badges and no badges: numbered passes (V1, V2, …). At the end of signing in, the kiosk or the visitor's phone says which pass to take: the lowest-numbered free one, or the same one when signing in again.
 - Signing out frees the pass and asks for it back. With every pass out, the visitor is still signed in and asked to get one at the front desk.
