@@ -1,0 +1,38 @@
+name: Publish the website (Cloudflare)
+
+# Publishes the website (site/README.md) from main without a new release:
+# the install page, the browser kiosk and the pages made from docs/. The
+# Android app already on the website is kept. Releases (release.yml) publish
+# the website by themselves, with the new app.
+#
+# Needs the repository secret CLOUDFLARE_API_TOKEN (a Cloudflare API token made
+# from the "Edit Cloudflare Workers" template).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Publish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::error::Add the CLOUDFLARE_API_TOKEN secret first (site/README.md)."; exit 1; fi
+          npm run site:build
+          npx --yes wrangler@4.157.0 deploy --config site/wrangler.jsonc

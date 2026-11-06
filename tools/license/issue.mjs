@@ -12,7 +12,7 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { TABLET_RE, addYears, fail, flag, isDate, makeKey, money, newId, opt, readLedger, recordPayment, today, writeLedger, writeStatus } from './lib.mjs';
+import { TABLET_RE, addYears, fail, flag, isDate, makeKey, money, newId, opt, publishStatus, readLedger, recordPayment, today, writeLedger, writeStatus } from './lib.mjs';
 
 const customer = opt('customer').trim();
 if (!customer) fail('Usage: npm run license:issue -- --customer "Company name" --tablet K7M2-9XQ4 [--until 2027-11-05 | --days 365 | --forever] [--paid check --amount 499 --ref 1234]');
@@ -45,4 +45,5 @@ if (qrFile) {
 }
 console.error(`\n${customer}: tablet ${lic.tablet || 'any'}, ${lic.until ? `paid until ${lic.until}` : 'no end date'} (license ${lic.id})`);
 if (paid) console.error(`Payment recorded: ${money(paid.amount)} by ${paid.method}${paid.ref ? ` (${paid.ref})` : ''}.`);
-console.error(`Saved in licenses.json; status file ${statusFile} (publish the license-status folder to your website).`);
+console.error(`Saved in licenses.json; status file ${statusFile}.`);
+console.error(await publishStatus(lic.id));

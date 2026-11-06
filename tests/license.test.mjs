@@ -129,6 +129,8 @@ try {
   const site = (text, date = new Date()) => async () => ({ ok: !!text, status: text ? 200 : 404, headers: { get: (h) => (h === 'Date' ? date.toUTCString() : null) }, text: async () => text || '' });
   st = await refresh({ trialStarted: ago(400) });
   eq(st.status, 'paused');
+  ok(/^https:\/\/.+\/license-status\/$/.test(PAYWALL.statusUrl), `kiosks read status files from the website: ${PAYWALL.statusUrl}`);
+  PAYWALL.statusUrl = '';
   st = await checkStatus(site(statusText(lapsed.id)));
   ok(st.status === 'paused', 'no status URL set: nothing is fetched');
   PAYWALL.statusUrl = 'https://licenses.example.com/';

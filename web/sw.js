@@ -17,7 +17,7 @@ const MODELS = 'kiosk-models-1';
 
 const FILES = [
   './', 'index.html', 'styles.css', 'config.js', 'kiosk-connection.js', 'manifest.webmanifest', 'assets/icon-512.png',
-  'js/api.js', 'js/app.js', 'js/backend-code.js', 'js/checks.js', 'js/engine.js', 'js/face.js', 'js/files.js', 'js/i18n.js', 'js/keyboard.js',
+  'js/agreement.js', 'js/signed.js', 'js/agreement-text.js', 'js/api.js', 'js/app.js', 'js/backend-code.js', 'js/checks.js', 'js/engine.js', 'js/face.js', 'js/files.js', 'js/i18n.js', 'js/keyboard.js',
   'js/match.js', 'js/nfc.js', 'js/plans.js', 'js/qr.js', 'js/settings.js', 'js/setup.js', 'js/signature.js', 'js/transitions.js',
   'vendor/face-api/face-api.js', 'vendor/qrcode/qrcode.js',
 ];

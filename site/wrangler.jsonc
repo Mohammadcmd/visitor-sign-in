@@ -1,0 +1,21 @@
+// The Visitor Sign-In website (site/README.md). Publish with: npm run site:deploy
+{
+  "$schema": "../cloud/node_modules/wrangler/config-schema.json",
+  "name": "visitor-sign-in",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "account_id": "f97da0bedab140f2a00775f5ad55d5a4",
+  "workers_dev": true,
+  "assets": {
+    // Made by scripts/build-site.mjs
+    "directory": "../dist/site",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    // Everything else is served as a file, without running the Worker.
+    "run_worker_first": ["/license-status/*", "/latest.json"]
+  },
+  "kv_namespaces": [
+    // License status files, sent by the seller's license tools (checked against the seller's key).
+    { "binding": "LICENSES", "id": "c6d35dcad7434556945a3c17c75e14b1" }
+  ]
+}

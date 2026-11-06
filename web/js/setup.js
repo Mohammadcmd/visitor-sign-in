@@ -12,7 +12,8 @@ import * as fx from './transitions.js';
 import { saveFile } from './files.js';
 import { builtIn, LANGS } from './i18n.js';
 import { runChecks, stopChecks, readerTapped } from './checks.js';
-import { can, FREE_LIMITS } from './plans.js';
+import { can, FREE_LIMITS, PAYWALL } from './plans.js';
+import { AGREEMENT_VERSION, agreementHtml } from './agreement.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -28,6 +29,7 @@ const DECLINE_PRESETS = [
 const STEPS = {
   device: { title: 'This tablet', hint: 'Camera, reader, internet' },
   company: { title: 'Company', hint: 'Name and brand color' },
+  agreement: { title: 'License agreement', hint: 'Read and accept' },
   admin: { title: 'Admin login', hint: 'Name and PIN' },
   logo: { title: 'Logo', hint: 'Optional' },
   badges: { title: 'Visitor badges', hint: 'NFC or RFID' },
@@ -42,6 +44,7 @@ const STEPS = {
 const TIPS = {
   device: ['Use the tablet where it will stand, with the badge reader plugged in.', 'In the Android app, Android asks for the camera once: tap Allow.', 'You can run this check again any time: Admin → Settings → Diagnostics.'],
   company: ['Everything here can be changed later: hold the logo on the welcome screen, then Settings.', 'Setting up another tablet? Import a settings file, or connect it to the same Google Sheet.'],
+  agreement: ['Your visitor records stay on this tablet or in your own Google account. The seller never receives them.', 'Questions about the agreement? Ask the seller before you accept.'],
   admin: ['The PIN is only stored as a one-way code, never as the digits themselves.', 'After 10 wrong tries the PIN pad locks for 10 minutes.', 'The admin screen closes itself after 3 minutes without a touch.'],
   logo: ['Most design tools (Canva, Figma, Illustrator, Photoshop) can export a PNG with a transparent background.', 'Large files are fine: the kiosk shrinks them.', 'No logo? The kiosk shows your company name in your brand color instead.'],
   badges: ['Generic USB or Bluetooth NFC/RFID readers that "type" the card number work without drivers.', 'The kiosk tells a card tap apart from typing by its speed.', 'A badge is released when its visitor taps it on the way out.'],
@@ -100,9 +103,17 @@ export function openSetup(opts = {}) {
   render({ instant: true });
 }
 
+function renderAgreement() {
+  $('[data-agreement-text]').innerHTML = agreementHtml(draft.org.name);
+  $$('[data-agreement-company]').forEach((e) => { e.textContent = draft.org.name || 'your business'; });
+  $('[data-agreement-version]').textContent = AGREEMENT_VERSION;
+  $('[data-agree-toggle]').setAttribute('aria-checked', String(!!extra.agreed));
+}
+
 function buildFlow() {
   if (extra?.joining) return ['connect'];
-  const f = ['device', 'company', 'admin', 'logo', 'badges', 'storage'];
+  // With licensing on, the business accepts the license agreement after giving its name.
+  const f = ['device', 'company', ...(PAYWALL.enabled ? ['agreement'] : []), 'admin', 'logo', 'badges', 'storage'];
   if (draft.storage === 'cloud') f.push('connect');
   f.push('screening', 'hosts', 'touches', 'ready');
   return f;
@@ -197,6 +208,7 @@ function render({ instant = false, back = false } = {}) {
   next.hidden = name === 'connect' && extra.joining && !extra.cloud;
 
   if (name === 'connect') autoConnect();
+  if (name === 'agreement') renderAgreement();
   if (name === 'ready') renderReady();
   // The tablet check runs while its step is showing (it uses the camera).
   if (name === 'device' && !extra.checking) { extra.checking = true; runChecks(); }
@@ -227,6 +239,12 @@ function validate(name) {
     if (!/^\d{6,8}$/.test(p)) return error('The admin PIN must be 6 to 8 digits.', field('s-pin'));
     if (easyPin(p)) return error('That PIN is too easy to guess. Avoid repeated or sequential digits.', field('s-pin'));
     if (p !== p2) return error("The two PINs don't match.", field('s-pin2'));
+  }
+  if (name === 'agreement') {
+    const who = val('s-agree-name');
+    if (!who) return error('Type your name to accept the license agreement.', field('s-agree-name'));
+    if (!extra.agreed) return error('Tick "I agree" to accept the license agreement. Questions? Ask the seller first.');
+    draft.agreement = { version: AGREEMENT_VERSION, by: who, at: new Date().toISOString() };
   }
   if (name === 'badges' && draft.passes && !edit) {
     const n = Number(val('s-passes') || 10);
@@ -789,6 +807,7 @@ function renderReady() {
     ['Company', `<span class="dot" style="background:${esc(s.org.accent)}"></span>${esc(s.org.name)}`, s.org.tagline],
     ['Admin', esc(s.admin.name), 'PIN set. Hold the logo on the welcome screen for 2.5 seconds to open the admin screen.'],
     ['Logo', s.org.logo ? 'Your logo' : 'Text logo with your company name', ''],
+    ...(PAYWALL.enabled ? [['License agreement', s.agreement.by ? `Accepted by ${s.agreement.by}` : 'Not accepted yet', `Version ${s.agreement.version || AGREEMENT_VERSION}. Read it again in Admin → Settings → License.`]] : []),
     ['Visitor badges', s.badges ? `Yes${extra.badges.length ? `: ${extra.badges.length} registered` : ''}` : s.passes ? `Numbered passes${extra.passCount ? `: V1 to V${extra.passCount}` : ''}` : 'No badges',
       s.badges ? 'Visitors tap a badge to finish signing in, and again to sign out.' : s.passes ? 'The kiosk tells each visitor which pass to take, and asks for it back when they sign out.' : 'Visitors sign in and out on the screen.'],
     ['Records', s.storage === 'cloud' ? `Google Sheets: "${esc(extra.cloud?.sheetName || 'your sheet')}"` : 'On this tablet', s.storage === 'cloud' ? 'Photos go to your Google Drive.' : 'Kept privately on this tablet.'],
@@ -902,6 +921,20 @@ function wire() {
   $('[data-logo-input]').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; chooseLogo(f); });
   $('[data-logo-replace]').addEventListener('click', () => $('[data-logo-input]').click());
   $('[data-logo-remove]').addEventListener('click', () => { draft.org.logo = ''; extra.logoNote = null; renderLogo(); });
+
+  $('[data-agree-toggle]').addEventListener('click', (e) => {
+    extra.agreed = !extra.agreed;
+    e.currentTarget.setAttribute('aria-checked', String(extra.agreed));
+    if (extra.agreed) $('[data-setup-error]').textContent = '';
+  });
+  // Licensing switched on or off while setup is open: the agreement step comes or goes.
+  document.addEventListener('kiosk-license-changed', () => {
+    if (!draft || edit || extra?.joining) return;
+    const at = flow[idx];
+    flow = buildFlow();
+    idx = Math.max(0, flow.indexOf(at));
+    render({ instant: true });
+  });
 
   $('[data-badges-choice]').addEventListener('click', (e) => {
     const o = e.target.closest('.option');

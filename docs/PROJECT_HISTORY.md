@@ -207,6 +207,25 @@ Asked for next: at the end of signing in, tell visitors which visitor pass to gr
 - Signing out frees the pass, and the screen asks for it back.
 - Tests: 14 backend checks, 5 engine checks, and the end-to-end Google Sheets company now runs on three passes. Milton gets V1 and gives it back, then Peter's phone gets V1.
 
+## A license agreement, and legal drafts
+
+Next on the list before selling: an agreement each business accepts, and a privacy policy.
+
+- `docs/legal/license-agreement.md` is written to match what the kiosk does: one license per tablet or QR code, not transferable, a yearly fee, a pause after the grace period that never deletes records, and records that stay with the business. `docs/legal/privacy-policy.md` is the seller's own policy. Both are drafts for a lawyer.
+- `scripts/sync-agreement.mjs` turns the Markdown into HTML in `web/js/agreement-text.js`, so setup can show it offline. Words in braces (`{seller}`, `{graceDays}` and so on) are filled in from `PAYWALL` (`web/js/agreement.js`).
+- With licensing on, setup has a License agreement step after the company name. It needs a name and "I agree", and saves `settings.agreement` (version, by, at). Admin → Settings → License shows it and asks for the current version to be accepted when it's missing or older. It never pauses sign-ins: that's left to the license itself.
+- Tests: the end-to-end run accepts it in admin (a name is needed) and in setup (a name and "I agree"), and checks no blanks in braces are left.
+
+## Your own website, on Cloudflare
+
+Asked for next: "I connected Cloudflare, so do what you need to do with that." The roadmap's next step was a website of your own, so nothing depends on the GitHub repository being public.
+
+- `site/worker.js` is a Cloudflare Worker serving files made by `scripts/build-site.mjs`: the install page, the browser kiosk, downloads, `latest.json`, and pages made from docs/. Its address is `visitor-sign-in.mohammadjalbibi.workers.dev` until there's a domain.
+- License status files live in Workers KV. Instead of giving the seller's computer a Cloudflare password, the license tools send each file to the website, which checks it against the seller's public key (`license-public-key.json`, built from `PAYWALL.publicKey`). It refuses anything older than what it has, so an old "active" can't be replayed after a switch-off. The signature check is shared with the kiosk (`web/js/signed.js`).
+- Kiosks ask the website for updates first. The Android app uses the website's kiosk address for phone sign-in QR codes.
+- Releases publish the website with the new APK once `CLOUDFLARE_API_TOKEN` is a repository secret.
+- Tests: 58 site checks (uploads refused without the key, with a stranger's key, for another license, in the future, or older; the tools sending through a local copy of the Worker; the build). The end-to-end run checks the install page on the website.
+
 ## Where things are
 
 | Thing | Location |
@@ -218,6 +237,8 @@ Asked for next: at the end of signing in, tell visitors which visitor pass to gr
 | Cloud service | `cloud/` (guide: `cloud/README.md`) |
 | Roadmap | `docs/ROADMAP.md` |
 | Licenses: kiosk side, seller tools, guide | `web/js/plans.js`, `tools/license/`, `docs/PAYWALL.md` |
+| License agreement and privacy policy (drafts) | `docs/legal/`, shown in the kiosk by `web/js/agreement.js` |
+| The website (Cloudflare) | `site/` (guide: `site/README.md`), built by `scripts/build-site.mjs` |
 | Shock Tech preset | `docs/presets/` |
 | Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |

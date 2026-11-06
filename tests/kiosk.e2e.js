@@ -17,6 +17,7 @@ const os = require('os');
 const WEB = path.join(__dirname, '..');
 const APP_VERSION = JSON.parse(fs.readFileSync(path.join(WEB, 'package.json'), 'utf8')).version;
 const SHOTS = process.env.SHOTS || '';
+const SITE_URL = /^\s*SITE_URL: '([^']*)'/m.exec(fs.readFileSync(path.join(__dirname, '../web/config.js'), 'utf8'))[1];
 const PIN = '482916';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const EXEC = 'https://script.google.com/macros/s/TEST-deployment_1/exec';
@@ -49,6 +50,10 @@ async function open(browser, url, backend, { offline = false, device = null } = 
       assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://github.com/example/visitor-sign-in/releases/download/v9.9.9/visitor-sign-in-9.9.9.apk' }],
     }),
   }));
+  // The seller's website (CONFIG.SITE_URL): a newer version to offer, and nothing else from the real site.
+  await ctx.route(`${SITE_URL}**`, (route) => (new URL(route.request().url()).pathname === '/latest.json'
+    ? route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ version: '9.9.9', page: SITE_URL, apk: { version: '9.9.9', name: 'visitor-sign-in-9.9.9.apk', size: 12e6, url: `${SITE_URL}downloads/visitor-sign-in-9.9.9.apk` } }) })
+    : route.fulfill({ status: 404, body: '' })));
   // Only the backend address is faked: the tablet check's reachability test goes to the real network
   // (an intercepted reply can't answer a no-cors request).
   await ctx.route('https://script.google.com/macros/**', async (route) => {
@@ -848,6 +853,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(/License added: Northwind Labs, paid until \d{4}-/.test(await text(paid, '[data-toast]')), 'the key is added');
     await paid.waitForFunction(() => /Licensed to Northwind Labs, paid until/.test(document.querySelector('[data-plan-text]').textContent));
     ok(true, 'the License card shows it');
+    // The license agreement: not accepted on this kiosk yet, so the admin reads and accepts it.
+    ok(/hasn't been accepted on this kiosk yet/.test(await text(paid, '[data-plan-text]')), 'the License card says the agreement is not accepted yet');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    const agText = await text(paid, '[data-ag-text]');
+    ok(/Shock Tech/.test(agText) && /Northwind Labs/.test(agText) && /14-day grace/.test(agText) && /sales@shocktech\.example/.test(agText), "the agreement names the seller and the business, with the kiosk's real grace period");
+    ok(!/\{\w+\}/.test(agText), 'no blanks left in braces');
+    ok(/state where Shock Tech is based/.test(agText), 'with no governing law set, it says where the seller is based');
+    await snap(paid, 'agreement-admin');
+    await paid.click('[data-ag-agree]');
+    ok(/Type your name/.test(await text(paid, '[data-ag-error]')), 'accepting needs a name');
+    await set(paid, 'input[name="ag-name"]', 'Jordan Lee');
+    await paid.click('[data-ag-agree]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
+    await paid.waitForFunction(() => /accepted by Jordan Lee/.test(document.querySelector('[data-plan-text]').textContent));
+    ok(true, 'the License card shows who accepted it');
+    ok(await paid.evaluate(async () => (await import('./js/settings.js')).settings().agreement.by) === 'Jordan Lee', 'and it is kept with the settings');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    ok(await paid.$eval('[data-ag-agree]', (e) => e.hidden) && /accepted by Jordan Lee/.test(await text(paid, '[data-ag-status]')), 'opened again, it is just to read');
+    await paid.click('[data-ag-close]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
     await paid.click('[data-admin-exit]');
     await waitView(paid, 'welcome');
     ok(await paid.$eval('[data-paused]', (e) => e.hidden), 'the kiosk is back on');
@@ -888,6 +915,19 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
     await snap(dpage, 'install-android');
     await droid.close();
+    // On the seller's website, the install page offers the app from latest.json, not GitHub.
+    const own = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
+    let askedGithub = false;
+    await own.route('https://api.github.com/**', (route) => { askedGithub = true; return route.abort(); });
+    await own.route(`${site}latest.json`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: '9.9.10', apk: { version: '9.9.10', name: 'visitor-sign-in-9.9.10.apk', size: 13e6, url: `${site}downloads/visitor-sign-in-9.9.10.apk` } }) }));
+    const opage = await own.newPage();
+    await opage.goto(site);
+    await opage.waitForFunction(() => /Version 9\.9\.10, 13 MB/.test(document.querySelector('[data-apk-note]').textContent));
+    ok(await opage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === `${site}downloads/visitor-sign-in-9.9.10.apk`, 'on the website, the app comes from its own downloads');
+    ok(await opage.$eval('[data-link="releases"]', (a) => a.getAttribute('href')) === 'downloads.html' && await opage.$eval('[data-link="privacy"]', (a) => a.getAttribute('href')) === 'privacy-notice.html', "and the footer links to the website's own pages");
+    ok(!askedGithub, 'without asking GitHub');
+    ok(await opage.$eval('[data-buy]', (e) => e.hidden), 'no "Buy" section while licensing is off');
+    await own.close();
 
     // ================================================================ 3. the Shock Tech preset
     const preset = await open(browser, base);
@@ -897,6 +937,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await preset.waitForFunction(() => document.querySelector('input[name="s-org"]').value === 'Shock Tech');
     ok(await preset.$eval('[data-preview-logo]', (e) => e.src.startsWith('data:image/png')), 'preset logo loaded');
     await snap(preset, 'preset');
+    // With licensing on, setup asks the business to accept the license agreement after its name.
+    await preset.evaluate(async () => {
+      const plans = await import('./js/plans.js');
+      Object.assign(plans.PAYWALL, { enabled: true, seller: 'Shock Tech', supportEmail: 'sales@shocktech.example', law: 'Michigan' });
+      document.dispatchEvent(new Event('kiosk-license-changed'));
+    });
+    await preset.waitForTimeout(400);
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="agreement"].active');
+    const setupAg = await text(preset, '[data-agreement-text]');
+    ok(/Shock Tech/.test(setupAg) && /laws of Michigan/.test(setupAg), 'setup shows the agreement with the seller and the governing law');
+    ok(/Shock Tech/.test(await text(preset, '[data-sstep="agreement"] .hint')), 'for the business being set up');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Type your name/.test(await text(preset, '[data-setup-error]')), 'it needs a name');
+    await set(preset, 'input[name="s-agree-name"]', 'Jordan Lee');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Tick "I agree"/.test(await text(preset, '[data-setup-error]')), 'and "I agree"');
+    await preset.click('[data-agree-toggle]');
+    await snap(preset, 'setup-agreement');
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="admin"].active');
+    ok(true, 'then on to the admin login');
     ok(!preset.errors.length, `no page errors: ${preset.errors.join(' | ')}`);
     console.log(`kiosk e2e passed (${checks} checks)`);
   } finally {

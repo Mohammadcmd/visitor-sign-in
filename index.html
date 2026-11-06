@@ -47,6 +47,7 @@
     footer { text-align: center; padding: 8px 20px 40px; color: var(--soft); font-size: 15px; }
     footer a { color: var(--blue); }
     [hidden] { display: none !important; }
+    .card.buy { margin-top: 18px; }
     @media (max-width: 760px) { .grid, .what { grid-template-columns: 1fr; } .card { padding: 24px; } }
   </style>
 </head>
@@ -104,6 +105,15 @@
       </div>
     </section>
 
+    <!-- Buying: shown once licensing is switched on (PAYWALL in web/js/plans.js) -->
+    <section class="card buy" data-buy hidden>
+      <h2>Buy Visitor Sign-In</h2>
+      <p class="lead" data-buy-price></p>
+      <p>Try it free for <span data-buy-trial></span> days first. Each tablet (or phone sign-in QR code) has its own license, with updates and support included for the first year.</p>
+      <div class="actions"><a class="btn btn-primary" data-buy-link href="#" hidden>Buy online</a></div>
+      <p class="small" data-buy-contact></p>
+    </section>
+
     <div class="grid">
       <div class="tile"><h3>1. Install</h3><p class="small">The Android app, or the browser kiosk on an iPad or any tablet.</p></div>
       <div class="tile"><h3>2. Check the tablet</h3><p class="small">Camera, badge reader, internet, clock and storage are tested first, with fixes in plain words.</p></div>
@@ -127,14 +137,17 @@
   <script type="module">
     import { qrSvg } from './web/js/qr.js';
 
+    import { PAYWALL } from './web/js/plans.js';
+
     // The GitHub repository this page is published from (owner.github.io/repository/), or the original project.
     const m = /^([\w-]+)\.github\.io$/i.exec(location.hostname);
     const seg = location.pathname.split('/').filter(Boolean)[0];
     const repo = m && seg ? `${m[1]}/${seg}` : 'Mohammadcmd/visitor-sign-in';
     const gh = `https://github.com/${repo}`;
-    document.querySelector('[data-link="launch"]').href = `${gh}/blob/main/docs/LAUNCH.md`;
-    document.querySelector('[data-link="releases"]').href = `${gh}/releases`;
-    document.querySelector('[data-link="privacy"]').href = `${gh}/blob/main/docs/privacy-notice.md`;
+    const link = (name, href) => { document.querySelector(`[data-link="${name}"]`).href = href; };
+    link('launch', `${gh}/blob/main/docs/LAUNCH.md`);
+    link('releases', `${gh}/releases`);
+    link('privacy', `${gh}/blob/main/docs/privacy-notice.md`);
 
     const ua = navigator.userAgent;
     const kind = /Android/i.test(ua) ? 'android'
@@ -146,23 +159,50 @@
     document.querySelector('[data-page-qr]').innerHTML = qrSvg(page, { size: 190, label: 'This page' });
     document.querySelector('[data-page-url]').textContent = page;
 
-    // The newest Android app from the latest release.
+    // Buying, once licensing is switched on.
+    if (PAYWALL.enabled && PAYWALL.price) {
+      document.querySelector('[data-buy]').hidden = false;
+      document.querySelector('[data-buy-price]').textContent = PAYWALL.price;
+      document.querySelector('[data-buy-trial]').textContent = PAYWALL.trialDays;
+      if (PAYWALL.buyUrl) Object.assign(document.querySelector('[data-buy-link]'), { href: PAYWALL.buyUrl, hidden: false });
+      const who = [PAYWALL.supportEmail, PAYWALL.supportPhone].filter(Boolean).join(' or ');
+      document.querySelector('[data-buy-contact]').textContent = `${PAYWALL.buyUrl ? 'Rather pay by check? Contact' : 'To buy, or to pay by check, contact'} ${PAYWALL.seller || 'us'}${who ? ` at ${who}` : ''}. Install the app first: the tablet's code is in Admin → Settings → License.`;
+    }
+
+    // The newest Android app: from this website (latest.json, see site/README.md), or else GitHub's latest release.
     const apkLinks = [...document.querySelectorAll('[data-apk]')];
     const note = document.querySelector('[data-apk-note]');
-    apkLinks.forEach((a) => { a.href = `${gh}/releases/latest`; });
+    const offer = (url, version, size) => {
+      apkLinks.forEach((a) => { a.href = url; });
+      note.textContent = `Version ${version}, ${Math.round(size / 1e6)} MB.`;
+    };
+    let site = null;
     try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(String(res.status));
-      const rel = await res.json();
-      const apk = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
-      if (apk) {
-        apkLinks.forEach((a) => { a.href = apk.browser_download_url; });
-        note.textContent = `Version ${String(rel.tag_name || '').replace(/^v/, '')}, ${Math.round(apk.size / 1e6)} MB.`;
-      } else {
+      const res = await fetch('latest.json', { cache: 'no-store' });
+      if (res.ok && /json/.test(res.headers.get('Content-Type') || '')) site = await res.json();
+    } catch { /* not on the website */ }
+    if (site?.version) {
+      link('launch', 'launch.html');
+      link('releases', 'downloads.html');
+      link('privacy', 'privacy-notice.html');
+      if (site.apk) offer(site.apk.url, site.apk.version || site.version, site.apk.size);
+      else {
+        apkLinks.forEach((a) => { a.href = 'downloads.html'; });
+        note.textContent = 'The Android app is coming soon. Meanwhile, the browser kiosk works on this tablet too.';
+        document.querySelector('[data-for="desktop"] [data-apk]').hidden = true;
+      }
+    } else {
+      apkLinks.forEach((a) => { a.href = `${gh}/releases/latest`; });
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const rel = await res.json();
+        const apk = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
+        if (apk) offer(apk.browser_download_url, String(rel.tag_name || '').replace(/^v/, ''), apk.size);
+        else note.textContent = 'Opens the downloads page: pick the file ending in .apk.';
+      } catch {
         note.textContent = 'Opens the downloads page: pick the file ending in .apk.';
       }
-    } catch {
-      note.textContent = 'Opens the downloads page: pick the file ending in .apk.';
     }
   </script>
 </body>
