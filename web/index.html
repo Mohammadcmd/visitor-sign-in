@@ -17,7 +17,9 @@
   <script>
     // The kiosk is laid out for at least 1180 x 820. On smaller tablets, widen the
     // layout viewport so the browser scales the whole kiosk down to fit the screen.
+    // A visitor's phone (the QR code by the door, ?visit=…) keeps its own width.
     (function () {
+      if (/[?&]visit=/.test(location.search)) return;
       var w = Math.max(screen.width, screen.height), h = Math.min(screen.width, screen.height);
       if (!w || !h || (w >= 1180 && h >= 820)) return;
       var width = Math.max(1180, Math.ceil(820 * w / h));
@@ -762,6 +764,18 @@
               <button type="button" class="btn-secondary" data-run-checks>Check this tablet</button>
             </div>
           </div>
+          <div class="set-card" data-phone-card hidden>
+            <h3>Phone sign-in (QR code)</h3>
+            <p class="set-text" data-phone-text></p>
+            <div class="phone-qr" data-phone-qr hidden></div>
+            <div class="row-actions" data-phone-actions></div>
+            <div class="phone-license" data-phone-license hidden>
+              <label class="field"><span>License key for this QR code</span>
+                <input readonly inputmode="none" name="phone-license" data-kb="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="VSI1.…"></label>
+              <div class="row-actions"><button type="button" class="btn-secondary" data-phone-license-apply>Use this key</button></div>
+              <p class="form-error" data-phone-license-error role="alert"></p>
+            </div>
+          </div>
           <div class="set-card" data-plan-card hidden>
             <h3>License</h3>
             <p class="set-text" data-plan-text></p>
@@ -874,6 +888,24 @@
       <div class="quick-actions">
         <button type="button" class="btn-secondary btn-lg" data-upgrade-close>Not now</button>
         <button type="button" class="btn-primary btn-lg" data-upgrade-apply>Use this key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The poster for the door: visitors scan it and sign in on their phone -->
+  <div class="overlay" data-overlay="poster" hidden>
+    <div class="center-card poster-card">
+      <div class="poster" data-poster>
+        <img class="poster-logo" data-org-logo alt="">
+        <h2 class="poster-title">Visitor sign-in</h2>
+        <p class="poster-org" data-org-name data-no-i18n></p>
+        <div class="poster-qr" data-poster-qr></div>
+        <p class="poster-how">Open your phone's camera and point it at the code.<br>Iniciar sesión: escanee el código con la cámara.</p>
+      </div>
+      <div class="quick-actions poster-actions">
+        <button type="button" class="btn-secondary btn-lg" data-poster-close>Close</button>
+        <button type="button" class="btn-secondary btn-lg" data-poster-save>Save as an image</button>
+        <button type="button" class="btn-primary btn-lg" data-poster-print>Print</button>
       </div>
     </div>
   </div>

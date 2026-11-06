@@ -56,6 +56,12 @@ This file is the plan and the progress. Each work session updates the checklists
 - [x] Seller tools: issue, renew, switch off/on, list what's due, payments (checks included) to CSV
 - [ ] Switch it on: your public key, seller details and price in `PAYWALL` (`web/js/plans.js`), then a release
 
+### Phase 1b: phone sign-in (built)
+- [x] A QR code by the door instead of a tablet (Google Sheets): visitors sign in and out on their own phone
+- [x] A phone key with limited rights, per-visitor tokens on the phone, a sign-in limit, a printable poster, changing the code
+- [x] A QR code is licensed like a kiosk (its own code in Admin → Settings → Phone sign-in)
+- [ ] Decide the price of a QR code (the same as a kiosk, or less: there's no tablet)
+
 ### Phase 2: selling without Google Play
 - [ ] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private)
 - [ ] Updates that install themselves overnight on tablets in locked kiosk mode (no one has to tap Install)

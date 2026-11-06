@@ -102,6 +102,7 @@ export const DEFAULTS = Object.freeze({
   translations: {},            // { es: { "English text": "texto" } } for the business's own text
   signature: { mode: 'off', emailCopy: false }, // visitors sign the rules: 'off' (tick box), 'new' visitors, 'every' visit
   license: '',                 // a license key from the vendor (see js/plans.js)
+  phone: { code: '', license: '' }, // phone sign-in by QR code (Google Sheets): the QR code's license code and key
   trialStarted: '',            // when setup was first finished: the Pro trial runs from here
 });
 
@@ -221,6 +222,10 @@ export function normalize(input) {
       emailCopy: (s.signature || {}).emailCopy === true,
     },
     license: typeof s.license === 'string' ? s.license.trim().slice(0, 2000) : '',
+    phone: {
+      code: /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test((s.phone || {}).code || '') ? s.phone.code : '',
+      license: typeof (s.phone || {}).license === 'string' ? s.phone.license.trim().slice(0, 2000) : '',
+    },
     trialStarted: typeof s.trialStarted === 'string' && !Number.isNaN(new Date(s.trialStarted).getTime()) ? s.trialStarted : '',
   };
   // Quick entry recognizes faces, so it needs a photo of every new visitor.

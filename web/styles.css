@@ -901,6 +901,68 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; p
 .sign-clear { position: absolute; right: 10px; top: 8px; }
 .sign-box .field { margin-top: 14px; }
 .signed-card { text-align: left; width: min(760px, calc(100% - 48px)); max-height: calc(100% - 48px); overflow-y: auto; }
+/* ================================================================ phone sign-in */
+.phone-qr { display: flex; gap: 16px; align-items: center; margin: 12px 0; font-size: 13px; word-break: break-all; }
+.phone-qr[hidden] { display: none; }
+.phone-qr svg { flex: none; border-radius: 10px; border: 1px solid var(--line); }
+.phone-license { margin-top: 14px; }
+.phone-license[hidden] { display: none; }
+.poster-card { width: min(640px, calc(100% - 40px)); max-height: calc(100% - 40px); overflow-y: auto; }
+.poster { text-align: center; padding: 10px 0; }
+.poster-logo { max-width: 260px; max-height: 90px; object-fit: contain; }
+.poster-title { font-size: 40px; margin: 14px 0 0; }
+.poster-org { font-size: 20px; color: var(--ink-soft); margin: 4px 0 14px; }
+.poster-qr svg { width: min(340px, 70vw); height: auto; }
+.poster-how { font-size: 17px; margin-top: 12px; }
+@media print {
+  body.printing-poster > *:not([data-overlay="poster"]) { display: none !important; }
+  body.printing-poster [data-overlay="poster"] { position: static; display: block; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; animation: none; }
+  body.printing-poster .poster-card { box-shadow: none; width: 100%; max-height: none; overflow: visible; }
+  body.printing-poster .poster-actions { display: none; }
+  body.printing-poster .poster-title { font-size: 54px; }
+  body.printing-poster .poster-qr svg { width: 5in; }
+}
+
+/* A visitor's own phone (?visit=…): the visitor screens in portrait, the phone's own keyboard. */
+body.phone [data-keyboard] { display: none !important; }
+body.phone .screen { overflow-x: hidden; }
+@media (max-width: 700px) {
+  body.phone .welcome-title { font-size: 34px; line-height: 1.15; margin-top: 18px; padding: 0 16px; }
+  body.phone .welcome-sub { font-size: 17px; padding: 0 16px; }
+  body.phone .logo-card { padding: 14px 22px; max-width: 78vw; }
+  body.phone .logo-card img { max-height: 64px; max-width: 64vw; }
+  body.phone .tap-cta { margin-top: 26px; font-size: 18px; padding: 14px 22px; }
+  body.phone .welcome-foot { padding: 0 16px max(16px, env(safe-area-inset-bottom)); }
+  body.phone .leave-btn { width: 100%; font-size: 18px; }
+  body.phone .clock { font-size: 14px; }
+  body.phone .paused-card { margin: 22px 16px 0; padding: 18px; }
+  body.phone .paused-card strong { font-size: 22px; }
+  body.phone .paused-card p { font-size: 17px; }
+  body.phone .bar { padding-left: 10px; padding-right: 10px; }
+  body.phone .bar-logo { max-width: 34vw; }
+  body.phone .choice-wrap h2 { font-size: 24px; padding: 0 12px; }
+  body.phone .choice-grid { grid-template-columns: 1fr; gap: 12px; padding: 0 14px; }
+  body.phone .choice-card { min-height: 0; padding: 18px; }
+  body.phone .choice-icon { display: none; }
+  body.phone .choice-title { font-size: 20px; }
+  body.phone .choice-text { font-size: 15px; }
+  body.phone .form-body { padding: 16px 16px 120px; }
+  body.phone .step h2, body.phone .step-title { font-size: 24px; }
+  body.phone .field input { font-size: 17px; }
+  body.phone .options, body.phone .option-grid { grid-template-columns: 1fr; }
+  body.phone .option { font-size: 17px; padding: 14px 16px; }
+  body.phone .form-foot { padding: 10px 14px max(10px, env(safe-area-inset-bottom)); }
+  body.phone .form-foot .btn-primary { min-width: 0; flex: 1; }
+  body.phone .rules li { font-size: 16px; padding: 12px 14px 12px 52px; }
+  body.phone .rules li::before { left: 12px; top: 12px; width: 28px; height: 28px; font-size: 14px; }
+  body.phone .sign-area { height: 150px; }
+  body.phone .photo-frame, body.phone .cam-frame { width: 100%; max-width: 360px; }
+  body.phone .done-wrap { padding: 0 18px; }
+  body.phone .done-wrap h2 { font-size: 28px; }
+  body.phone .done-text { font-size: 17px; }
+  body.phone .center-card { width: calc(100% - 28px); padding: 22px 18px; }
+}
+
 /* A kiosk whose license has ended: visitors are asked to see the front desk; signing out still works. */
 .paused-card { margin-top: 28px; padding: 22px 30px; border-radius: 20px; background: rgba(255,255,255,0.92); color: var(--ink); text-align: center; max-width: 520px; box-shadow: var(--shadow-lg, 0 10px 40px rgba(0,0,0,0.18)); }
 .paused-card[hidden] { display: none; }

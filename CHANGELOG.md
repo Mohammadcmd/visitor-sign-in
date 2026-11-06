@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Phone sign-in: a QR code instead of a tablet (Google Sheets)**
+- A printable poster with a QR code: visitors sign in on their own phone, with the same questions, rules, signature, photo, Spanish and declines, plus host emails and staff alerts.
+- The phone remembers its visitor: "Leaving?" signs them out, and "Sign in as …" brings them back next time.
+- Phones get their own key that can only sign visitors in and out and record declines. They can't look anyone up, see staff names or face data, or use any admin action. There's a limit of 60 phone sign-ins in 10 minutes, and changing the QR code makes old posters stop working.
+- Apps Script version 6. Copy the new script and deploy a new version (Diagnostics says so).
+- Fix: a flagged new visitor sent staff the same alert email twice. Now it's once.
+
 **Selling the kiosk per tablet**
 - Licenses are per tablet. Each tablet has a code, and a key names one tablet and the date it's paid until.
 - Reminders start 30 days before the paid-until date, and a 14-day grace period follows it. Then new sign-ins pause: visitors are asked to see the front desk.

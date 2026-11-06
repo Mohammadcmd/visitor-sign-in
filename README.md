@@ -90,6 +90,16 @@ Visitors sign with a finger in the box under the rules, with **Clear** to start 
 
 Electronic signatures are generally accepted for agreements like these (in the U.S., under the ESIGN Act and UETA), but check what your policies and industry require. This isn't legal advice.
 
+### Phone sign-in: a QR code instead of a tablet
+
+With Google Sheets, a business with no tablet by the door can put up a QR code instead. Visitors scan it with their phone's camera and sign in on their own phone: the same questions, rules, finger signature, photo, Spanish and polite declines, with host emails and staff alerts as usual.
+
+- **Switching it on:** Admin → Settings → **Phone sign-in (QR code)** → **Switch on**. Then **Print the poster**, or save it as an image to print elsewhere. Set up and run the admin screen on any tablet or computer browser.
+- **Signing out:** the visitor's phone remembers them. "Leaving?" signs them out, and next time "Sign in as Ana Lopez" signs them back in with one tap. Staff can also sign them out on the admin screen, and End of day still applies.
+- **Kept safe:** phones get their own key, and it only signs visitors in and out and records declines. A phone never sees other visitors, the staff list, face data or the admin screen, and it can only sign out the visitor it signed in. To limit a photographed poster, the script accepts at most 60 phone sign-ins in 10 minutes, and **Change the QR code** makes old posters stop working.
+- **Left out on phones:** badges, staff overrides, face recognition and expected-visitor greetings. Staff can still let a declined visitor in from Needs attention.
+- **Where the poster points:** the QR code points at this kiosk on the web. For the Android app, set `PUBLIC_URL` in `web/config.js` to where the browser kiosk is hosted.
+
 ### Languages
 
 Turn on **Offer Español** in setup (Finishing touches) and visitors can choose Spanish on the welcome screen, or switch on the next screen. Each visitor starts again in English.
@@ -122,7 +132,7 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 
 | Tab | Contents |
 |---|---|
-| **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, a link to the visitor's Drive folder (photos and signed copies), their email (only if they asked for a signed copy), and links to their signature and signed copy. |
+| **Visitors** | Name, company, who they visit, purpose, one column per screening question, the visitor acknowledgment, quick entry, visit count, a link to the visitor's Drive folder (photos and signed copies), their email (only if they asked for a signed copy), links to their signature and signed copy, and for visitors who signed in on their phone, a "Phone key" (a hash of their phone's token, never the token itself). |
 | **Visits** | One row per sign-in or decline: time, name, company, visiting, purpose, kind (Visitor, a flag such as "Needs induction", "Visitor (override)" or Declined), badge, screening result, photo, which host was emailed, time out and by whom (including "End of day"), review notes, and links to the signature and signed copy for that visit. |
 | **Badges** | Badge number, NFC tag, status (available / in use / not returned / retired) and holder. |
 | **Expected** | Visitors staff are expecting: Date, First Name, Last Name, Company, Host, Purpose, Note, then Arrived (filled in by the kiosk), Added by and an id. Type rows in here, or add them from the kiosk. |
