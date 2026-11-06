@@ -21,9 +21,11 @@
 //
 // Switching a license off early (a bounced check) or renewing it without
 // anyone typing a key: when online, the kiosk reads its license's status file
-// from PAYWALL.statusUrl a few times a day. tools/license/status.mjs writes
-// those files; put the folder on any website.
+// from PAYWALL.statusUrl a few times a day. The license tools write those
+// files and send them to the website (site/worker.js), which only accepts
+// files signed with your key.
 import { settings } from './settings.js';
+import { b64url, verifySigned } from './signed.js';
 
 export const PAYWALL = {
   enabled: false,
@@ -40,8 +42,8 @@ export const PAYWALL = {
   law: '',
   // Your checkout page (a Stripe Payment Link…). Shown as a link and a QR code. Checks are welcome too.
   buyUrl: '',
-  // Where the license status files are (tools/license/status.mjs), such as 'https://licenses.example.com/'.
-  statusUrl: '',
+  // Where kiosks read their license status file: the website's license-status folder (site/README.md).
+  statusUrl: 'https://visitor-sign-in.mohammadjalbibi.workers.dev/license-status/',
   // The public half of your signing key, from tools/license/keygen.mjs: { kty: 'EC', crv: 'P-256', x: '…', y: '…' }
   publicKey: null,
 };
@@ -105,19 +107,6 @@ function trustedNow() {
 }
 
 // ------------------------------------------------------------------ keys and status files
-
-const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const unb64url = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
-
-async function verifySigned(prefix, text, publicKey) {
-  const m = new RegExp(`^${prefix}\\.([A-Za-z0-9_-]+)\\.([A-Za-z0-9_-]+)$`).exec(String(text || '').trim().replace(/\s+/g, ''));
-  if (!m) return { error: 'format' };
-  if (!publicKey || !crypto?.subtle) return { error: 'no_key' };
-  const pub = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-  const good = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, unb64url(m[2]), new TextEncoder().encode(`${prefix}.${m[1]}`));
-  if (!good) return { error: 'signature' };
-  try { return { data: JSON.parse(new TextDecoder().decode(unb64url(m[1]))) }; } catch { return { error: 'signature' }; }
-}
 
 /**
  * Checks a license key. Resolves with its details ({ id, customer, tablet,

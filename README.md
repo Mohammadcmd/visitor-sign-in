@@ -33,7 +33,7 @@ How it was designed, and why, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTO
 ## Getting started
 
 1. **Try it:** `npm start`, then open `http://localhost:8080/web/?demo` (sample company, a panel that simulates badge taps, admin PIN `123456`, nothing saved).
-2. **Install it:** open the kiosk's address on the tablet (with GitHub Pages, `https://<owner>.github.io/<repository>/`). The install page recognizes the device: an Android tablet gets the latest app to download, an iPad gets the kiosk and the Add to Home Screen steps, and a computer shows a QR code to scan with the tablet.
+2. **Install it:** open the website on the tablet (`https://visitor-sign-in.mohammadjalbibi.workers.dev/`, see [site/README.md](site/README.md); or with GitHub Pages, `https://<owner>.github.io/<repository>/`). The install page recognizes the device: an Android tablet gets the latest app to download, an iPad gets the kiosk and the Add to Home Screen steps, and a computer shows a QR code to scan with the tablet.
 3. **Set it up:** the first setup step checks the tablet (camera, face recognition, badge reader, internet, clock, storage, screen and software) and says how to fix anything. Then a few questions, and you're ready. The [launch checklist](docs/LAUNCH.md) has every step.
 
 ## Setup: the first start
@@ -161,6 +161,7 @@ The first kiosk to connect becomes the sheet's owner: its random kiosk key is sa
 | **Tests** | On every push: backend tests, file checks, and the end-to-end test in Chromium. Screenshots are attached to each run. |
 | **Build Android app** | On every change to the app: an APK to download (`visitor-sign-in`). |
 | **Release** | Push a tag like `v1.0.0` (matching `package.json`): a GitHub Release with the APK, the browser kiosk as a zip, and `Code.gs`, with notes from the changelog. |
+| **Publish the website (Cloudflare)** | Publishes the website ([site/README.md](site/README.md)): install page, browser kiosk, downloads, update check and license status files. Releases do it by themselves once the `CLOUDFLARE_API_TOKEN` secret is added. |
 | **Publish the kiosk (GitHub Pages)** | Hosts the browser kiosk at `https://<owner>.github.io/<repository>/`. Turn on Pages once (Settings → Pages → Source: GitHub Actions) and run it; add the repository variable `KIOSK_PAGES` = `on` to publish on every change. |
 
 The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests check they match); the Android version code is worked out from it, so each release installs as an update.
@@ -172,7 +173,7 @@ The kiosk includes per-tablet licensing, **switched off** until you turn it on. 
 - **Keys for one tablet:** each key names a tablet (by its code) and the date it's paid until. You sign them with your own key, and the kiosk checks them offline.
 - **Reminders, a grace period, then a pause:** the admin screen reminds staff before the date and allows a grace period after it. Then new sign-ins pause until the license is renewed.
 - **Nothing is lost while paused:** signing out, the roll call, the admin screen and exports keep working, and records are never deleted.
-- **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check) through small signed status files on your website.
+- **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check). The tools send a small signed status file to your website ([site/](site/README.md)), which accepts only files signed with your key.
 - **Tools on your computer:** issue, renew, switch off and on, list what's due, and keep a payments ledger with checks included (`npm run license:*`).
 - **A license agreement in setup:** the business accepts it with a name, and the kiosk keeps who and when. Drafts of the agreement and a privacy policy, for a lawyer to review, are in [docs/legal/](docs/legal/README.md).
 

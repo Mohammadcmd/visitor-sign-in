@@ -21,7 +21,7 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 
 ## 3. The kiosk on a tablet
 
-**The easy way:** publish the kiosk with GitHub Pages (below), then open `https://<owner>.github.io/<repository>/` on the tablet. The install page offers the Android app on an Android tablet and the browser kiosk on an iPad; on a computer it shows a QR code to scan with the tablet.
+**The easy way:** open the website on the tablet: `https://visitor-sign-in.mohammadjalbibi.workers.dev/` (or your own address, see `site/README.md`). The install page offers the Android app on an Android tablet and the browser kiosk on an iPad; on a computer it shows a QR code to scan with the tablet.
 
 **Android tablet (recommended)**
 - [ ] Get the APK: from the install page, the latest **Release** (`visitor-sign-in-<version>.apk`), or **Actions → Build Android app → visitor-sign-in**.
@@ -29,7 +29,7 @@ The setup wizard walks through this on the tablet; doing it on a computer first 
 - [ ] Install, allow the camera, accept app pinning, and choose it as the **Home app** so it returns after a reboot ([android/README.md](../android/README.md)).
 
 **iPad or any tablet with a browser**
-- [ ] Host the kiosk over HTTPS. Easiest: **Settings → Pages → Source: GitHub Actions**, then **Actions → Publish the kiosk (GitHub Pages) → Run workflow**. The address is `https://<owner>.github.io/<repository>/`. Or put the `visitor-sign-in-web-<version>.zip` from a Release on any static host.
+- [ ] Host the kiosk over HTTPS. Easiest: use the website's kiosk, `https://visitor-sign-in.mohammadjalbibi.workers.dev/web/`. Or put the browser kiosk zip (on the website's Downloads page) on any static host.
 - [ ] Open the address once while online (it then opens even without Wi-Fi), allow the camera, and **Add to Home Screen**.
 - [ ] iPad: **Auto-Lock → Never**, and **Guided Access** on (Settings → Accessibility) to lock the iPad to the kiosk.
 

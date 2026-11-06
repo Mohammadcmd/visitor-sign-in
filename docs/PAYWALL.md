@@ -37,7 +37,7 @@ The kiosk ships with per-tablet licensing that is **switched off**: with it off,
      price: '$499 per kiosk, then $149 a year',
      law: 'the State of Ohio',                              // the license agreement's governing law
      buyUrl: 'https://buy.stripe.com/your-payment-link',   // optional; checks are welcome either way
-     statusUrl: 'https://licenses.yourcompany.com/',        // where you publish license-status/
+     statusUrl: 'https://visitor-sign-in.mohammadjalbibi.workers.dev/license-status/',  // your website (site/README.md)
      publicKey: { kty: 'EC', crv: 'P-256', x: '…', y: '…' },  // printed by keygen
    };
    ```
@@ -63,11 +63,9 @@ It's a draft: have a lawyer review it first ([docs/legal/README.md](legal/README
    This:
    - Prints the key (`VSI1.…`), paid for a year from today. Use `--until 2027-12-31` for another date.
    - Records the license and the payment in `licenses.json`.
-   - Writes the license's status file in `license-status/`.
+   - Writes the license's status file in `license-status/` and sends it to your website.
    - Adds `--link https://your-kiosk-address/` for a license link and `--qr acme.svg` for a QR code.
 3. Send the customer the key. They add it in **Admin → Settings → License** (type, paste or scan the QR code), or by opening the link on the tablet once (it asks for the admin PIN).
-4. Publish the `license-status` folder (below).
-
 `--any-tablet` instead of `--tablet` makes a key that works on any tablet, for your own kiosks.
 
 ## Renewals
@@ -77,7 +75,7 @@ npm run license:list -- --due 30            # licenses ending in the next 30 day
 npm run license:renew -- --id 3f9a1c2b7d4e5f60 --paid check --amount 149 --ref 1002
 ```
 
-Renewing adds a year from the current paid-until date, or from today if it ended long ago. `--until` or `--years 2` set something else. Publish the `license-status` folder afterwards, and the kiosk renews itself the next time it's online. The new key is printed too, for a kiosk that's kept offline.
+Renewing adds a year from the current paid-until date, or from today if it ended long ago. `--until` or `--years 2` set something else. The status file goes to your website, and the kiosk renews itself the next time it's online. The new key is printed too, for a kiosk that's kept offline.
 
 ## When a customer doesn't pay
 
@@ -89,7 +87,7 @@ Renewing adds a year from the current paid-until date, or from today if it ended
   npm run license:on  -- --id 3f9a1c2b7d4e5f60     # when it's sorted out
   ```
 
-  Then publish the `license-status` folder. The kiosk pauses at its next check (within a few hours when online).
+  The status file goes to your website, and the kiosk pauses at its next check (within a few hours when online).
 
 ## Payments and your records
 
@@ -97,15 +95,15 @@ Renewing adds a year from the current paid-until date, or from today if it ended
 - `npm run license:payments -- --csv payments.csv` saves every payment as a spreadsheet for your accountant.
 - **Checks:** deposit them with your bank's mobile app. Keep a W-9 ready, since businesses often ask for one before paying a vendor. Sales tax on software depends on the state, so ask your accountant.
 
-## Publishing the status folder
+## Status files on your website
 
-`license-status/` holds one small signed file per license, named by the license id, plus a `_headers` file that lets kiosks read them. Put the folder on any static website. For example, with a free Cloudflare account:
+`license-status/` holds one small signed file per license, named by the license id. The license tools send each one to your website ([site/README.md](../site/README.md)) when they change it. The website keeps a file only if it's signed with your key and newer than the one it has, so nobody else can switch a kiosk off or on.
 
-```bash
-npx wrangler pages deploy license-status --project-name visitor-sign-in-licenses
-```
+- No internet when you issued or renewed? Run `npm run license:publish` later. It sends them all again, and the ones already there are left as they are.
+- Nothing is sent until licensing is switched on in `web/js/plans.js` with your public key, and the website has been published with it.
+- `--no-publish` skips sending, and `--publish <address>` sends to another website.
 
-Then use that address (or your own domain pointed at it) as `PAYWALL.statusUrl`. The files hold nothing secret, and the ids are random, so nobody can list your customers. Each file holds that license's key, which includes the customer's name.
+The files hold nothing secret, and the ids are random, so nobody can list your customers. Each file holds that license's key, which includes the customer's name.
 
 ## Limits to know about
 

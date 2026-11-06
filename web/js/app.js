@@ -2032,17 +2032,32 @@ const newer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
   return false;
 };
-/** Asks GitHub for the latest release, once per session, and offers it in Diagnostics. */
+/** The newest version from the website (latest.json), in the shape of a GitHub release; null if unavailable. */
+async function siteRelease() {
+  if (!CONFIG.SITE_URL) return null;
+  try {
+    const res = await fetch(`${CONFIG.SITE_URL.replace(/\/?$/, '/')}latest.json`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const l = await res.json();
+    if (!l?.version) return null;
+    // The Android app updates to the newest app on the website; a browser kiosk to the newest kiosk.
+    const version = Kiosk ? (l.apk ? l.apk.version || l.version : '0') : l.version;
+    return { tag_name: `v${version}`, html_url: l.page || CONFIG.SITE_URL, assets: l.apk ? [{ name: l.apk.name, size: l.apk.size, browser_download_url: l.apk.url }] : [] };
+  } catch { return null; }
+}
+/** Asks the website (or GitHub) for the newest version, once per session, and offers it in Diagnostics. */
 async function checkForUpdate() {
   const box = $('[data-update-box]');
-  if (!CONFIG.UPDATES_FROM) return;
-  if (!latest) {
+  if (!CONFIG.SITE_URL && !CONFIG.UPDATES_FROM) return;
+  if (!latest) latest = await siteRelease();
+  if (!latest && CONFIG.UPDATES_FROM) {
     try {
       const res = await fetch(`https://api.github.com/repos/${CONFIG.UPDATES_FROM}/releases/latest`, { cache: 'no-store' });
       if (!res.ok) return;
       latest = await res.json();
     } catch { return; }
   }
+  if (!latest) return;
   if (!latest?.tag_name || !newer(latest.tag_name, APP_VERSION)) { box.hidden = true; return; }
   const version = latest.tag_name.replace(/^v/, '');
   const apk = (latest.assets || []).find((a) => /\.apk$/i.test(a.name));
@@ -2061,10 +2076,10 @@ const newPointCode = () => {
   const c = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => POINT_ALPHABET[x % 32]).join('');
   return `${c.slice(0, 4)}-${c.slice(4)}`;
 };
-/** Where this kiosk is on the web, for the QR code. The Android app needs CONFIG.PUBLIC_URL. */
+/** Where this kiosk is on the web, for the QR code: PUBLIC_URL, the address it's open at, or (the Android app) the website's kiosk. */
 function kioskWebAddress() {
   if (CONFIG.PUBLIC_URL) return CONFIG.PUBLIC_URL.replace(/\/?$/, '/');
-  if (Kiosk || !/^https?:$/.test(location.protocol)) return '';
+  if (Kiosk || !/^https?:$/.test(location.protocol)) return CONFIG.SITE_URL ? `${CONFIG.SITE_URL.replace(/\/?$/, '/')}web/` : '';
   return `${location.origin}${location.pathname.replace(/[^/]*$/, '')}`;
 }
 const phoneLink = (key) => `${kioskWebAddress()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(CONFIG.API_URL)}`;

@@ -17,6 +17,7 @@ const os = require('os');
 const WEB = path.join(__dirname, '..');
 const APP_VERSION = JSON.parse(fs.readFileSync(path.join(WEB, 'package.json'), 'utf8')).version;
 const SHOTS = process.env.SHOTS || '';
+const SITE_URL = /^\s*SITE_URL: '([^']*)'/m.exec(fs.readFileSync(path.join(__dirname, '../web/config.js'), 'utf8'))[1];
 const PIN = '482916';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const EXEC = 'https://script.google.com/macros/s/TEST-deployment_1/exec';
@@ -49,6 +50,10 @@ async function open(browser, url, backend, { offline = false, device = null } = 
       assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://github.com/example/visitor-sign-in/releases/download/v9.9.9/visitor-sign-in-9.9.9.apk' }],
     }),
   }));
+  // The seller's website (CONFIG.SITE_URL): a newer version to offer, and nothing else from the real site.
+  await ctx.route(`${SITE_URL}**`, (route) => (new URL(route.request().url()).pathname === '/latest.json'
+    ? route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ version: '9.9.9', page: SITE_URL, apk: { version: '9.9.9', name: 'visitor-sign-in-9.9.9.apk', size: 12e6, url: `${SITE_URL}downloads/visitor-sign-in-9.9.9.apk` } }) })
+    : route.fulfill({ status: 404, body: '' })));
   // Only the backend address is faked: the tablet check's reachability test goes to the real network
   // (an intercepted reply can't answer a no-cors request).
   await ctx.route('https://script.google.com/macros/**', async (route) => {
@@ -910,6 +915,19 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
     await snap(dpage, 'install-android');
     await droid.close();
+    // On the seller's website, the install page offers the app from latest.json, not GitHub.
+    const own = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
+    let askedGithub = false;
+    await own.route('https://api.github.com/**', (route) => { askedGithub = true; return route.abort(); });
+    await own.route(`${site}latest.json`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: '9.9.10', apk: { version: '9.9.10', name: 'visitor-sign-in-9.9.10.apk', size: 13e6, url: `${site}downloads/visitor-sign-in-9.9.10.apk` } }) }));
+    const opage = await own.newPage();
+    await opage.goto(site);
+    await opage.waitForFunction(() => /Version 9\.9\.10, 13 MB/.test(document.querySelector('[data-apk-note]').textContent));
+    ok(await opage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === `${site}downloads/visitor-sign-in-9.9.10.apk`, 'on the website, the app comes from its own downloads');
+    ok(await opage.$eval('[data-link="releases"]', (a) => a.getAttribute('href')) === 'downloads.html' && await opage.$eval('[data-link="privacy"]', (a) => a.getAttribute('href')) === 'privacy-notice.html', "and the footer links to the website's own pages");
+    ok(!askedGithub, 'without asking GitHub');
+    ok(await opage.$eval('[data-buy]', (e) => e.hidden), 'no "Buy" section while licensing is off');
+    await own.close();
 
     // ================================================================ 3. the Shock Tech preset
     const preset = await open(browser, base);

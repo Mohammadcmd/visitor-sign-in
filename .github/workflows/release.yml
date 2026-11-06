@@ -5,6 +5,8 @@ name: Release
 #   visitor-sign-in-<version>.apk      the Android app
 #   visitor-sign-in-web-<version>.zip  the browser kiosk, to host anywhere over HTTPS
 #   Code.gs                            the Google Sheets backend script
+# and, with the CLOUDFLARE_API_TOKEN secret, publishes the website (site/README.md):
+# the new app to download, the update check, and the browser kiosk.
 # The release notes come from CHANGELOG.md. With the KIOSK_KEYSTORE_* secrets
 # (see android/README.md) the APK is release-signed, so it installs as an update.
 on:
@@ -67,3 +69,10 @@ jobs:
             "dist/visitor-sign-in-web-$VERSION.zip" \
             dist/Code.gs \
             --title "Visitor Sign-In $VERSION" --notes-file dist/notes.md
+      - name: Publish the website (Cloudflare)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::notice::No CLOUDFLARE_API_TOKEN secret: the website wasn't published (site/README.md)."; exit 0; fi
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-site.mjs --apk "dist/visitor-sign-in-$VERSION.apk" --web-zip "dist/visitor-sign-in-web-$VERSION.zip"
+          npx --yes wrangler@4.157.0 deploy --config site/wrangler.jsonc
