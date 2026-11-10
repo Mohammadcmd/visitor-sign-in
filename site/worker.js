@@ -5,6 +5,10 @@
 //   /latest.json            the newest version, which kiosks check for updates
 //   /license-status/<id>.txt  each license's signed status file, which kiosks read
 //                           to pick up renewals and switch-offs
+//   /box/<id>               a Raspberry Pi or PC with a business's records
+//                           (server/): phones and the admin screen send it
+//                           requests here, and it answers over the connection
+//                           it keeps open (/box/<id>/connect)
 //
 // Everything is static files (made by scripts/build-site.mjs), except the
 // license status files. Those live in Workers KV and are sent by the seller's
@@ -78,11 +82,107 @@ async function licenseStatus(request, env, id) {
   return reply(200, `License ${id}: published (${data.status}).\n`);
 }
 
+// ------------------------------------------------------------------ the relay to a Raspberry Pi or PC
+
+const BOX = /^\/box\/([a-z0-9]{20})(\/connect)?$/;
+const MAX_REQUEST = 4 * 1024 * 1024;
+const BOX_WAIT_MS = 25 * 1000;
+const CHUNK = 256 * 1024;
+const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { ...OPEN, 'Content-Type': 'application/json' } });
+async function sha256(text) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * One box (a Raspberry Pi or PC running server/visitor-server.mjs). It keeps a
+ * WebSocket open to this object; each request from a phone or the admin screen
+ * is passed to it and its answer passed back. Nothing is stored here except the
+ * hash of the box's secret: the first box to connect with an id sets it.
+ */
+export class Box {
+  constructor(state) {
+    this.state = state;
+    this.pending = new Map();
+    // Keep-alive pings are answered without waking the object up.
+    state.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
+
+  /** The box's open connection, once it has proved its secret. */
+  socket() {
+    return this.state.getWebSockets().filter((ws) => ws.deserializeAttachment()?.ready).at(-1) || null;
+  }
+
+  async fetch(request) {
+    if (new URL(request.url).pathname.endsWith('/connect')) {
+      if (request.headers.get('Upgrade') !== 'websocket') return reply(426, 'Connect with a WebSocket.\n');
+      const pair = new WebSocketPair();
+      this.state.acceptWebSocket(pair[1]);
+      pair[1].serializeAttachment({ ready: false });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    if (request.method === 'OPTIONS') return reply(204, null, { 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' });
+    if (request.method !== 'POST') return json(405, { ok: false, error: 'post' });
+    const body = await request.text();
+    if (body.length > MAX_REQUEST) return json(413, { ok: false, error: 'too_large' });
+    const ws = this.socket();
+    if (!ws) return json(503, { ok: false, error: 'box_offline' });
+    const id = crypto.randomUUID();
+    const answer = new Promise((resolve) => {
+      const timer = setTimeout(() => { this.pending.delete(id); resolve(null); }, BOX_WAIT_MS);
+      this.pending.set(id, { resolve, timer, parts: [] });
+    });
+    const parts = Math.max(1, Math.ceil(body.length / CHUNK));
+    try {
+      for (let i = 0; i < parts; i++) ws.send(JSON.stringify({ type: 'req', id, part: i, parts, data: body.slice(i * CHUNK, (i + 1) * CHUNK) }));
+    } catch {
+      clearTimeout(this.pending.get(id)?.timer);
+      this.pending.delete(id);
+      return json(503, { ok: false, error: 'box_offline' });
+    }
+    const out = await answer;
+    if (out === null) return json(504, { ok: false, error: 'box_timeout' });
+    return new Response(out, { headers: { ...OPEN, 'Content-Type': 'application/json' } });
+  }
+
+  async webSocketMessage(ws, message) {
+    if (typeof message !== 'string') return;
+    let msg;
+    try { msg = JSON.parse(message); } catch { return; }
+    if (msg.type === 'hello') {
+      if (typeof msg.secret !== 'string' || msg.secret.length < 32 || msg.secret.length > 200) { ws.send(JSON.stringify({ type: 'refused', error: 'secret' })); ws.close(4003, 'secret'); return; }
+      const have = await sha256(msg.secret);
+      const want = await this.state.storage.get('secret');
+      if (want && want !== have) { ws.send(JSON.stringify({ type: 'refused', error: 'secret' })); ws.close(4003, 'secret'); return; }
+      if (!want) await this.state.storage.put('secret', have);
+      // A box that reconnects replaces its old connection.
+      for (const old of this.state.getWebSockets()) if (old !== ws && old.deserializeAttachment()?.ready) { try { old.close(4000, 'replaced'); } catch { /* gone */ } }
+      ws.serializeAttachment({ ready: true, since: Date.now() });
+      ws.send(JSON.stringify({ type: 'ready' }));
+      return;
+    }
+    if (msg.type === 'res' && ws.deserializeAttachment()?.ready) {
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+      p.parts[msg.part] = msg.data;
+      if (p.parts.filter((x) => x !== undefined).length < msg.parts) return;
+      clearTimeout(p.timer);
+      this.pending.delete(msg.id);
+      p.resolve(p.parts.join(''));
+    }
+  }
+
+  async webSocketClose(ws) { try { ws.close(); } catch { /* closed */ } }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const m = STATUS.exec(url.pathname);
     if (m) return licenseStatus(request, env, m[1]);
+    const b = BOX.exec(url.pathname);
+    if (b) return env.BOXES.get(env.BOXES.idFromName(b[1])).fetch(request);
+    if (url.pathname.startsWith('/box/')) return json(404, { ok: false, error: 'box_unknown' });
     if (url.pathname.startsWith('/license-status/')) return reply(404, 'Not found.\n');
     const res = await env.ASSETS.fetch(request);
     if (url.pathname === '/latest.json') {

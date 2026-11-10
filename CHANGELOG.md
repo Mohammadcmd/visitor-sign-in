@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+**Screenless sign-in on a Raspberry Pi or PC**
+- No tablet by the door, and no Google account: a Raspberry Pi or a PC in the building keeps the records, and visitors sign in on their own phones with the QR code (`server/`).
+- One command installs it on a Pi and makes it start by itself. On Windows or Mac, double-click the start file.
+- It prints a setup link: open it on any computer or tablet for setup and the admin screen.
+- The Pi stays connected to the website, so phones reach it over HTTPS with no router setup or domain. The website passes requests along and checks the box's secret.
+- Records are files in one folder, with a daily backup copy. It signs everyone out at the end of the day and deletes old records, as a tablet would. No emails yet.
+- The kiosk says "Raspberry Pi or PC" instead of "Google Sheet" when it's connected to one, and hides the email options.
+- Phone sign-in is now in the shared engine as well as the Google Sheets script.
+- The install page offers Android tablets and screenless sign-in. iPads aren't offered for now.
+- Every kiosk, server and website script is checked to parse in `npm test`.
+
 **Your own website, on Cloudflare**
 - The install page, the browser kiosk, the Android app download, the update check (`latest.json`) and the license status files, at https://visitor-sign-in.mohammadjalbibi.workers.dev/ (`site/`). It keeps everything working once the GitHub repository is private.
 - Kiosks check the website for updates, falling back to GitHub. The Android app compares its own version with the app on the website.

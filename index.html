@@ -47,7 +47,7 @@
     footer { text-align: center; padding: 8px 20px 40px; color: var(--soft); font-size: 15px; }
     footer a { color: var(--blue); }
     [hidden] { display: none !important; }
-    .card.buy { margin-top: 18px; }
+    .card.buy, .card.screenless { margin-top: 18px; }
     @media (max-width: 760px) { .grid, .what { grid-template-columns: 1fr; } .card { padding: 24px; } }
   </style>
 </head>
@@ -75,17 +75,15 @@
       </ol>
     </section>
 
-    <!-- iPad / iPhone -->
+    <!-- iPad / iPhone: not offered for now (Android tablets, or screenless) -->
     <section class="card" data-for="ios" hidden>
-      <h2>Set up this iPad</h2>
-      <p class="lead">The kiosk runs in Safari, full screen from your Home Screen, and opens even without Wi-Fi once it's added.</p>
-      <div class="actions"><a class="btn btn-primary" href="web/">Open the kiosk</a></div>
-      <ol class="steps">
-        <li><strong>Add it to the Home Screen</strong>Open the kiosk, tap the Share button, then <em>Add to Home Screen</em>. Open it from there.</li>
-        <li><strong>Allow the camera</strong>The kiosk checks the camera, the badge reader and the internet first, and says how to fix anything.</li>
-        <li><strong>Answer the setup questions</strong>About five minutes.</li>
-        <li><strong>Lock the iPad to the kiosk</strong>Settings → Display &amp; Brightness → Auto-Lock → Never. Settings → Accessibility → Guided Access → On, then triple-click the side button in the kiosk.</li>
-      </ol>
+      <h2>Visitor Sign-In runs on Android tablets</h2>
+      <p class="lead">For the front door, use an Android tablet, or go screenless: a QR code by the door, and visitors sign in on their own phones.</p>
+      <div class="actions">
+        <a class="btn btn-primary" data-screenless-link href="#">Screenless sign-in</a>
+        <a class="btn btn-secondary" href="web/?demo">Try the demo</a>
+      </div>
+      <p class="small">Screenless sign-in keeps the records on a Raspberry Pi or a PC in your building.</p>
     </section>
 
     <!-- Computer -->
@@ -114,8 +112,15 @@
       <p class="small" data-buy-contact></p>
     </section>
 
+    <!-- Screenless: a QR code by the door, records on a Raspberry Pi or PC (server/README.md) -->
+    <section class="card screenless" data-screenless>
+      <h2>No tablet by the door? Go screenless</h2>
+      <p class="lead">Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and signature, and which visitor pass to take. A Raspberry Pi or a PC in your building keeps the records.</p>
+      <div class="actions"><a class="btn btn-secondary" data-screenless-link href="#">How to set it up</a></div>
+    </section>
+
     <div class="grid">
-      <div class="tile"><h3>1. Install</h3><p class="small">The Android app, or the browser kiosk on an iPad or any tablet.</p></div>
+      <div class="tile"><h3>1. Install</h3><p class="small">The Android app on an Android tablet, or screenless with a Raspberry Pi or PC.</p></div>
       <div class="tile"><h3>2. Check the tablet</h3><p class="small">Camera, badge reader, internet, clock and storage are tested first, with fixes in plain words.</p></div>
       <div class="tile"><h3>3. Set up</h3><p class="small">Company, admin PIN, logo, badges, records on the tablet or in Google Sheets, and optional questions.</p></div>
     </div>
@@ -127,6 +132,7 @@
       <li>Hosts told when their visitor arrives</li>
       <li>Expected visitors, emergency roll call, history</li>
       <li>English and Spanish</li>
+      <li>Screenless: visitors sign in on their own phones</li>
     </ul>
   </main>
 
@@ -148,6 +154,8 @@
     link('launch', `${gh}/blob/main/docs/LAUNCH.md`);
     link('releases', `${gh}/releases`);
     link('privacy', `${gh}/blob/main/docs/privacy-notice.md`);
+    const screenless = (href) => document.querySelectorAll('[data-screenless-link]').forEach((a) => { a.href = href; });
+    screenless(`${gh}/blob/main/server/README.md`);
 
     const ua = navigator.userAgent;
     const kind = /Android/i.test(ua) ? 'android'
@@ -185,6 +193,7 @@
       link('launch', 'launch.html');
       link('releases', 'downloads.html');
       link('privacy', 'privacy-notice.html');
+      screenless('downloads.html#screenless');
       if (site.apk) offer(site.apk.url, site.apk.version || site.version, site.apk.size);
       else {
         apkLinks.forEach((a) => { a.href = 'downloads.html'; });

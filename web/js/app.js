@@ -570,7 +570,7 @@ function renderStep({ instant = false, back = false } = {}) {
     const signing = signMode() !== 'off';
     $('[data-agree]').hidden = signing;
     $('[data-sign-box]').hidden = !signing;
-    $('[data-sign-email]').hidden = !(signing && (MODE === 'cloud' || PHONE) && settings().signature.emailCopy);
+    $('[data-sign-email]').hidden = !(signing && (MODE === 'cloud' || PHONE) && !CONFIG.BOX && settings().signature.emailCopy);
     $('[data-screen="form"] .step[data-step="rules"]').classList.toggle('signing', signing);
     if (signing) setTimeout(() => pad.resize(), 450); // after the step transition
   }
@@ -1552,7 +1552,7 @@ async function loadExpected() {
   const list = $('[data-expected-list]');
   $('[data-expected-new]').hidden = !can('expected');
   if (!can('expected')) { list.innerHTML = upsell('expected'); return; }
-  $('[data-expected-hint]').textContent = MODE === 'cloud'
+  $('[data-expected-hint]').textContent = MODE === 'cloud' && !CONFIG.BOX
     ? 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them. Staff can also type rows straight into the Expected tab of your Google Sheet: a date, a first and last name, and anything else.'
     : 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them.';
   list.innerHTML = '<div class="empty">Loading…</div>';
@@ -1663,7 +1663,7 @@ async function loadHistory() {
   const n = res.visits.length;
   note.textContent = `${n ? n.toLocaleString() : 'No'} visit${n === 1 ? '' : 's'} ${span}${hist.q ? ` matching "${hist.q}"` : ''}.`
     + (n > HISTORY_SHOWN ? ` Showing the latest ${HISTORY_SHOWN}; the export has them all.` : '')
-    + (MODE === 'cloud' ? ' Your Google Sheet keeps every visit.' : '');
+    + (MODE === 'cloud' ? ` ${CONFIG.BOX ? 'The Raspberry Pi or PC' : 'Your Google Sheet'} keeps every visit.` : '');
   if (!n) { list.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
   list.innerHTML = res.visits.slice(0, HISTORY_SHOWN).map((v) => {
     const declined = /^declined/i.test(v.kind || '') || /^declined/i.test(v.screening || '');
@@ -1933,9 +1933,9 @@ const SETTING_ROWS = [
     return qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}: ${qs.map((q) => q.label).join(', ')}` : 'No extra questions';
   }],
   ['hosts', 'Hosts', (s) => (s.hosts.length
-    ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
+    ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && !CONFIG.BOX && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
     : 'Nobody listed: visitors type any name')],
-  ['touches', 'Photos, reasons, rules, records, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
+  ['touches', 'Photos, reasons, rules, records, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && !CONFIG.BOX && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
 ];
 
 function loadSettingsPane() {
@@ -1952,7 +1952,14 @@ function loadSettingsPane() {
   $('[data-connect-qr]').hidden = true;
   renderPlanCard();
   renderPhoneCard();
-  if (MODE === 'cloud') {
+  if (MODE === 'cloud' && CONFIG.BOX) {
+    info.textContent = `Every sign-in, photo and badge is kept on your Raspberry Pi or PC${state.lastPing?.sheetName ? ` ("${state.lastPing.sheetName}")` : ''}, which phones and this screen reach through your website. Keep it switched on and connected to the internet.`;
+    actions.innerHTML = '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>';
+    $('[data-connect-another]', actions)?.addEventListener('click', (e) => { const btn = e.currentTarget; confirmTap(btn, 'Tap again to show the private link', async () => {
+      secret.hidden = false;
+      secret.innerHTML = `Open this link on the other tablet or computer: it connects to the same Raspberry Pi or PC.<br><code>${esc(location.origin + location.pathname)}?api=${esc(encodeURIComponent(CONFIG.API_URL))}&amp;key=${esc(encodeURIComponent(CONFIG.KIOSK_KEY))}</code>`;
+    }); });
+  } else if (MODE === 'cloud') {
     info.textContent = `Every sign-in goes to your Google Sheet${CONFIG.BUILT_IN ? ' (built into this app)' : ''}. Visitor photos are in your Google Drive.`
       + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
     actions.innerHTML = `${CONFIG.BUILT_IN ? '' : '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>'}
@@ -1996,10 +2003,11 @@ async function renderDiagnostics() {
   if (MODE === 'cloud') {
     await refreshAttention();
     const p = state.lastPing;
-    add('Records', p?.sheetName ? `Google Sheets: "${p.sheetName}"` : 'Google Sheets');
-    add('Connection', p && Date.now() - p.at < 60000 ? `Connected · checked ${ago(p.at)}` : "Can't reach the Google Sheet right now", !(p && Date.now() - p.at < 60000));
+    const where = CONFIG.BOX ? 'Raspberry Pi or PC' : 'Google Sheets';
+    add('Records', p?.sheetName ? `${where}: "${p.sheetName}"` : where);
+    add('Connection', p && Date.now() - p.at < 60000 ? `Connected · checked ${ago(p.at)}` : `Can't reach the ${CONFIG.BOX ? 'Raspberry Pi or PC (is it on, and online?)' : 'Google Sheet'} right now`, !(p && Date.now() - p.at < 60000));
     const v = p?.version || 1;
-    add('Apps Script version', v < BACKEND_VERSION ? `${v} · update needed (copy the latest code, deploy a new version)` : `${v} · up to date`, v < BACKEND_VERSION);
+    add(CONFIG.BOX ? 'Server version' : 'Apps Script version', v < BACKEND_VERSION ? `${v} · update needed (copy the latest code, deploy a new version)` : `${v} · up to date`, v < BACKEND_VERSION);
     const waiting = pendingCount();
     add('Waiting to send', waiting ? `${waiting} item${waiting > 1 ? 's' : ''} (sent automatically when the connection is back)` : 'Nothing', waiting > 10);
   } else {
@@ -2095,7 +2103,7 @@ async function renderPhoneCard() {
   $('[data-phone-license]').hidden = true;
   if (!res.ok) { text.textContent = errorText(res); actions.innerHTML = ''; return; }
   if (!res.key) {
-    text.textContent = 'No tablet by the door? Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and photo, and the sign-ins go to your Google Sheet. '
+    text.textContent = `No tablet by the door? Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and photo, and the sign-ins go to ${CONFIG.BOX ? 'your Raspberry Pi or PC' : 'your Google Sheet'}. `
       + 'Phones can only sign visitors in and out: they never see other visitors, your staff list or anything on this admin screen.';
     actions.innerHTML = '<button type="button" class="btn-primary" data-phone-on>Switch on phone sign-in</button>';
     $('[data-phone-on]', actions).addEventListener('click', () => phoneLinkAction({}));

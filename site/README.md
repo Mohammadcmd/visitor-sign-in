@@ -4,12 +4,14 @@ Your own website for Visitor Sign-In, on Cloudflare's free plan. It keeps everyt
 
 | Address | What it is |
 |---|---|
-| `/` | The install page: the Android app on an Android tablet, the browser kiosk on an iPad, a QR code on a computer, and "Buy" once licensing is on |
+| `/` | The install page: the Android app on an Android tablet, screenless sign-in (a Raspberry Pi or PC), a QR code on a computer, and "Buy" once licensing is on |
 | `/web/` | The browser kiosk. Phone sign-in QR codes point here, from the Android app too |
 | `/downloads.html`, `/downloads/…` | The Android app and the browser kiosk zip |
 | `/latest.json` | The newest version: kiosks check it and offer the update in Admin → Settings → Diagnostics |
 | `/license-status/<id>.txt` | Each license's signed status file. Kiosks read theirs to pick up renewals and switch-offs |
 | `/launch.html`, `/privacy-notice.html` | The launch checklist and the visitor privacy notice template |
+| `/box/<id>` | A Raspberry Pi or PC with a business's records ([server/README.md](../server/README.md)): phones and the admin screen send requests here, and the Pi answers over the connection it keeps open |
+| `/downloads/install-pi.sh`, `/downloads/visitor-sign-in-server.zip` | The Pi installer, and the program for a PC |
 
 Address for now: **https://visitor-sign-in.mohammadjalbibi.workers.dev/** (`SITE_URL` in `web/config.js`).
 
@@ -18,7 +20,8 @@ Address for now: **https://visitor-sign-in.mohammadjalbibi.workers.dev/** (`SITE
 - `site/worker.js` is a Cloudflare Worker. Everything is a static file made by `scripts/build-site.mjs`, except the license status files.
 - License status files are kept in Workers KV (`LICENSES` in `site/wrangler.jsonc`). Your license tools send them when they issue, renew or switch a license (`npm run license:publish` sends them all again).
 - The website keeps a status file only if it's signed with your license key and newer than the one it has. So no one else can switch a kiosk off or back on, even though anyone can send one. It checks against `license-public-key.json`, which the build makes from `PAYWALL.publicKey`.
-- Free plan limits: 100,000 requests a day, plus 1,000 status file changes a day. A kiosk checks its license a few times a day.
+- Each Raspberry Pi or PC has a Durable Object (`Box`) that passes requests to it. It stores only the hash of the box's secret.
+- Free plan limits: 100,000 requests a day, plus 1,000 status file changes a day. A kiosk checks its license a few times a day. A phone sign-in is about 5 requests.
 
 ## Publishing
 

@@ -4,6 +4,8 @@
 //    sign-in, a declined visitor, a staff override, the admin screen and a sign-out.
 // 2. Setup with Google Sheets (the real apps-script/Code.gs, running on the fakes
 //    in tests/fake-google.js) and no badges, then a second tablet joining by link.
+// 4. Screenless: a Raspberry Pi or PC (the real server/box.mjs) set up from its
+//    setup link, then a visitor signing in and out on their own phone.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -36,7 +38,7 @@ function serve() {
   });
 }
 
-async function open(browser, url, backend, { offline = false, device = null } = {}) {
+async function open(browser, url, backend, { offline = false, device = null, box = null } = {}) {
   // The offline cache stays out of the way except in the test made for it.
   const ctx = await browser.newContext({ ...(device || { viewport: { width: 1280, height: 800 } }), permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
   const page = await ctx.newPage();
@@ -61,6 +63,15 @@ async function open(browser, url, backend, { offline = false, device = null } = 
     const out = backend.handle(JSON.parse(route.request().postData()));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
+  // A Raspberry Pi or PC (server/box.mjs), answering what the website would pass on to it.
+  if (box) {
+    await ctx.route(`${SITE_URL}box/${box.config.boxId}`, async (route) => {
+      const headers = { 'Access-Control-Allow-Origin': '*' };
+      if (route.request().method() !== 'POST') { await route.fulfill({ status: 204, headers }); return; }
+      const out = await box.handle(JSON.parse(route.request().postData() || '{}'));
+      await route.fulfill({ status: 200, contentType: 'application/json', headers, body: JSON.stringify(out) });
+    });
+  }
   await page.goto(url);
   return page;
 }
@@ -897,6 +908,116 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(!paid.errors.length, `no page errors: ${paid.errors.join(' | ')}`);
     await paid.context().close();
 
+    // ================================================================ 4. screenless: a Raspberry Pi or PC
+    const { openBox } = await import('../server/box.mjs');
+    const boxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-box-'));
+    const pi = openBox({ dataDir: boxDir, name: 'Lobby Pi' });
+    const piLinks = pi.links(SITE_URL);
+    ok(piLinks.setup.startsWith(`${SITE_URL}web/?api=`), 'the box prints a setup link to the website\'s kiosk');
+    // The same link, opened on this test's copy of the kiosk.
+    const piAdmin = await open(browser, `${base}${piLinks.setup.slice(piLinks.setup.indexOf('?'))}`, null, { box: pi });
+    await waitView(piAdmin, 'setup');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await set(piAdmin, 'input[name="s-org"]', 'Initrode');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await set(piAdmin, 'input[name="s-admin"]', 'Dana Ruiz');
+    await set(piAdmin, 'input[name="s-pin"]', PIN);
+    await set(piAdmin, 'input[name="s-pin2"]', PIN);
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-setup-skip]'); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-badges-choice] .option[data-value="passes"]');
+    await set(piAdmin, 'input[name="s-passes"]', '2');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(/Raspberry Pi or PC/.test(await text(piAdmin, '[data-storage-builtin]')), 'records are kept on the Raspberry Pi or PC');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(/Connect to your Raspberry Pi or PC/.test(await text(piAdmin, '[data-sstep="connect"] h2')), 'the connect step names it');
+    await piAdmin.waitForSelector('[data-connect-status].ok');
+    ok(/Connected to "Lobby Pi"/.test(await text(piAdmin, '[data-connect-status]')), 'connected by the setup link, nothing to paste');
+    await snap(piAdmin, 'box-connected');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(await piAdmin.$eval('[data-alert-field]', (e) => e.hidden), 'no alert emails (it sends none yet)');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(await piAdmin.$eval('[data-notify-toggle]', (e) => e.hidden), 'no host emails');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-photos-choice] [data-value="off"]');
+    await piAdmin.click('[data-sign-choice] [data-value="new"]');
+    ok(await piAdmin.$eval('[data-sign-email-toggle]', (e) => e.hidden), 'no emailed signed copy');
+    await piAdmin.click('[data-eod-choice] [data-value="23:59"]');
+    ok(await piAdmin.$eval('[data-summary-box]', (e) => e.hidden), 'no daily summary email');
+    await next(piAdmin);
+    await piAdmin.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
+    ok(/Raspberry Pi or PC: "Lobby Pi"/.test(await text(piAdmin, '[data-sstep="ready"]')), 'the summary says where records are');
+    await snap(piAdmin, 'box-ready');
+    await next(piAdmin);
+    await waitView(piAdmin, 'welcome');
+    ok(JSON.parse(fs.readFileSync(path.join(boxDir, 'settings.json'), 'utf8')).org.name === 'Initrode', 'the settings are kept on the box');
+
+    // The admin switches on the QR code for the door.
+    await holdLogo(piAdmin);
+    await piAdmin.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(piAdmin, PIN);
+    await waitView(piAdmin, 'admin');
+    await piAdmin.click('[data-admin-tab="settings"]');
+    await piAdmin.waitForSelector('[data-phone-card]:not([hidden]) [data-phone-on]');
+    ok(/go to your Raspberry Pi or PC/.test(await text(piAdmin, '[data-phone-text]')), 'phone sign-in, to the box');
+    await piAdmin.click('[data-phone-on]');
+    await piAdmin.waitForSelector('[data-phone-qr]:not([hidden]) svg.qr');
+    const piPhoneUrl = await text(piAdmin, '[data-phone-qr] code');
+    ok(piPhoneUrl.includes(encodeURIComponent(piLinks.api)), `the QR code points phones to the box through the website: ${piPhoneUrl}`);
+    await piAdmin.click('[data-admin-exit]');
+    await waitView(piAdmin, 'welcome');
+
+    // A visitor scans it with their phone.
+    const piPhone = await open(browser, piPhoneUrl, null, { device: devices['iPhone 13'], box: pi });
+    await waitView(piPhone, 'welcome');
+    ok(await piPhone.$eval('[data-org-name]', (e) => e.textContent) === 'Initrode', 'the phone shows the company');
+    await piPhone.tap('[data-screen="welcome"] .welcome-title');
+    await waitView(piPhone, 'form');
+    await formNext(piPhone);
+    await piPhone.tap('input[name="first"]');
+    await piPhone.fill('input[name="first"]', 'Milton');
+    await piPhone.fill('input[name="last"]', 'Waddams');
+    await formNext(piPhone);
+    for (const [name, value] of [['company', 'Initech'], ['visiting', 'Bill Lumbergh'], ['purpose', 'My stapler']]) {
+      await piPhone.tap(`input[name="${name}"]`);
+      await piPhone.fill(`input[name="${name}"]`, value);
+    }
+    await formNext(piPhone);
+    ok(await step(piPhone) === 'rules', 'the rules, to sign');
+    ok(await piPhone.$eval('[data-sign-email]', (e) => e.hidden), 'no offer to email a copy');
+    await sign(piPhone);
+    await formNext(piPhone);
+    await waitView(piPhone, 'done');
+    ok(/You're all set, Milton/.test(await text(piPhone, '[data-done-title]')), 'signed in on the phone');
+    ok(await text(piPhone, '[data-done-pass]') === 'Please take visitor pass V1.', 'with a pass to take');
+    await snap(piPhone, 'box-phone-done');
+    const records = JSON.parse(fs.readFileSync(path.join(boxDir, 'records.json'), 'utf8'));
+    const miltonVisit = records.visits.find((v) => v.first === 'Milton');
+    ok(miltonVisit && miltonVisit.method === 'phone' && !miltonVisit.signedOut && miltonVisit.badge === 'V1', 'the visit is in the records on the box');
+    ok(fs.readdirSync(path.join(boxDir, 'files')).some((f) => f.startsWith('signature-') && f.endsWith('.png')), 'and the signature, as a picture file');
+    await piPhone.tap('[data-screen="done"] [data-go="welcome"]');
+    await waitView(piPhone, 'welcome');
+    await piPhone.tap('[data-leave-open]');
+    await piPhone.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Milton/.test(await text(piPhone, '[data-signout-title]')) && /give visitor pass V1 back/.test(await text(piPhone, '[data-signout-text]')), 'signed out on the phone, and asked for the pass back');
+    ok(!piPhone.errors.length, `no page errors on the phone: ${piPhone.errors.join(' | ')}`);
+    await piPhone.context().close();
+
+    // The admin screen sees it, and says where the records are.
+    await holdLogo(piAdmin);
+    await piAdmin.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(piAdmin, PIN);
+    await waitView(piAdmin, 'admin');
+    await piAdmin.click('[data-admin-tab="history"]');
+    await piAdmin.waitForSelector('[data-history-list] .admin-row');
+    ok(/Milton/.test(await text(piAdmin, '[data-history-list]')), 'the visit is in History');
+    await piAdmin.click('[data-admin-tab="settings"]');
+    await piAdmin.waitForFunction(() => /kept on your Raspberry Pi or PC/.test(document.querySelector('[data-storage-info]')?.textContent || ''));
+    ok(true, 'Settings says the records are on the Raspberry Pi or PC');
+    ok(!piAdmin.errors.length, `no page errors: ${piAdmin.errors.join(' | ')}`);
+    await piAdmin.context().close();
+    fs.rmSync(boxDir, { recursive: true, force: true });
+
     // ================================================================ the install page
     const home = await open(browser, site);
     await home.waitForSelector('[data-for="desktop"]:not([hidden]) [data-page-qr] svg.qr');
@@ -915,6 +1036,13 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
     await snap(dpage, 'install-android');
     await droid.close();
+    // An iPad is pointed to Android tablets or screenless sign-in (iPads aren't offered for now).
+    const ipad = await browser.newContext({ ...devices['iPad Pro 11'] });
+    const ipage = await ipad.newPage();
+    await ipage.goto(site);
+    await ipage.waitForSelector('[data-for="ios"]:not([hidden])');
+    ok(/runs on Android tablets/.test(await ipage.$eval('[data-for="ios"]', (e) => e.textContent)), 'an iPad is told it runs on Android tablets, or screenless');
+    await ipad.close();
     // On the seller's website, the install page offers the app from latest.json, not GitHub.
     const own = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
     let askedGithub = false;
@@ -926,6 +1054,8 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await opage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === `${site}downloads/visitor-sign-in-9.9.10.apk`, 'on the website, the app comes from its own downloads');
     ok(await opage.$eval('[data-link="releases"]', (a) => a.getAttribute('href')) === 'downloads.html' && await opage.$eval('[data-link="privacy"]', (a) => a.getAttribute('href')) === 'privacy-notice.html', "and the footer links to the website's own pages");
     ok(!askedGithub, 'without asking GitHub');
+    ok(await opage.$eval('[data-screenless] [data-screenless-link]', (a) => a.getAttribute('href')) === 'downloads.html#screenless', 'screenless sign-in links to the Raspberry Pi / PC downloads');
+    await opage.setViewportSize({ width: 1280, height: 800 });
     ok(await opage.$eval('[data-buy]', (e) => e.hidden), 'no "Buy" section while licensing is off');
     await own.close();
 

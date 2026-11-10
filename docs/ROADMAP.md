@@ -62,6 +62,14 @@ This file is the plan and the progress. Each work session updates the checklists
 - [x] A QR code is licensed like a kiosk (its own code in Admin → Settings → Phone sign-in)
 - [ ] Decide the price of a QR code (the same as a kiosk, or less: there's no tablet)
 
+### Phase 1c: screenless with a Raspberry Pi or PC (built)
+- [x] The records on a Raspberry Pi or PC in the building (`server/`), with the kiosk's own engine, a daily backup, the end of day and retention
+- [x] Reached through the website (a Durable Object relay), so there's no router setup or domain, and phones get HTTPS
+- [x] A one-command Pi installer that starts it by itself, and double-click start files for Windows and Mac
+- [x] Selling: Android tablets, or screenless (iPads aren't offered for now)
+- [ ] Emails from the Pi (host notifications, alerts, the daily summary)
+- [ ] Try it on a real Raspberry Pi
+
 ### Phase 2: selling without Google Play
 - [x] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private): [site/](../site/README.md), at visitor-sign-in.mohammadjalbibi.workers.dev
 - [x] License status files on the website, sent by the license tools and accepted only with your signature

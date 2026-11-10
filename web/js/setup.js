@@ -34,7 +34,7 @@ const STEPS = {
   logo: { title: 'Logo', hint: 'Optional' },
   badges: { title: 'Visitor badges', hint: 'NFC or RFID' },
   storage: { title: 'Records', hint: 'This tablet or Google Sheets' },
-  connect: { title: 'Connect Google Sheets', hint: 'About 5 minutes' },
+  connect: CONFIG.BOX ? { title: 'Connect', hint: 'Your Raspberry Pi or PC' } : { title: 'Connect Google Sheets', hint: 'About 5 minutes' },
   screening: { title: 'Screening questions', hint: 'Decline or alert' },
   hosts: { title: 'Hosts', hint: 'Optional' },
   touches: { title: 'Finishing touches', hint: 'Optional' },
@@ -49,7 +49,9 @@ const TIPS = {
   logo: ['Most design tools (Canva, Figma, Illustrator, Photoshop) can export a PNG with a transparent background.', 'Large files are fine: the kiosk shrinks them.', 'No logo? The kiosk shows your company name in your brand color instead.'],
   badges: ['Generic USB or Bluetooth NFC/RFID readers that "type" the card number work without drivers.', 'The kiosk tells a card tap apart from typing by its speed.', 'A badge is released when its visitor taps it on the way out.'],
   storage: ['Both options are free.', 'With Google Sheets, the tablet keeps working through Wi-Fi drops and sends everything when it\'s back.', 'Switching later means starting setup again on this tablet.'],
-  connect: ['Records go straight from the tablet to your own sheet. There are no servers in between.', 'The first tablet to connect becomes the owner. To add more, use Admin → Settings → Connect another tablet.', 'Free Google accounts can send about 100 alert emails a day.'],
+  connect: CONFIG.BOX
+    ? ['Records stay on your Raspberry Pi or PC. The website only passes requests along.', 'To add a tablet or another computer, use Admin → Settings → Connect another tablet.', "It doesn't send emails yet: alerts show in the admin screen (Needs attention)."]
+    : ['Records go straight from the tablet to your own sheet. There are no servers in between.', 'The first tablet to connect becomes the owner. To add more, use Admin → Settings → Connect another tablet.', 'Free Google accounts can send about 100 alert emails a day.'],
   screening: ['Questions asked once are saved with the visitor. Mark a question "Every visit" to ask returning visitors again.', 'Declined visitors only see your general message. Admins see the answers.', 'Every override records the admin\'s name and reason.'],
   hosts: ['You can add people later in the admin screen → Settings → Hosts.', 'Hosts without an email address are still suggested to visitors.', 'A visitor who types a name that isn\'t on the list can still sign in.'],
   touches: ['Quick entry needs a photo of every new visitor.', 'Quick entry is opt-in for each visitor, and they can ask the front desk to delete it.'],
@@ -155,6 +157,7 @@ function fillForm() {
   $('[data-notify-toggle]').classList.toggle('pro-locked', !can('hostEmails'));
   $('[data-summary-toggle]').classList.toggle('pro-locked', !can('dailySummary'));
   $('[data-storage-builtin]').hidden = !connected();
+  if (CONFIG.BOX) $('[data-storage-builtin]').textContent = 'This kiosk is connected to your Raspberry Pi or PC, so records are kept there.';
   renderConnect();
   renderChoice('[data-screening-choice]', extra.screeningOn ? 'yes' : 'no');
   renderBuilder();
@@ -525,6 +528,10 @@ const URL_RE = /^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+|macros)\/s\/
 
 function renderConnect() {
   const builtIn = connected();
+  if (CONFIG.BOX) {
+    $('[data-sstep="connect"] h2').textContent = 'Connect to your Raspberry Pi or PC';
+    $('[data-sstep="connect"] > .hint').textContent = 'It keeps the records. Visitors\' phones and this screen reach it through your website.';
+  }
   const guide = $('[data-sstep="connect"] .guide');
   guide.hidden = builtIn;
   field('s-url').closest('.field').hidden = builtIn;
@@ -550,7 +557,7 @@ async function autoConnect() {
 
 async function connect(api, key) {
   extra.connecting = true;
-  status({ html: '<strong>Connecting…</strong>Talking to your Google Sheet.' });
+  status({ html: `<strong>Connecting…</strong>Talking to your ${CONFIG.BOX ? 'Raspberry Pi or PC' : 'Google Sheet'}.` });
   let res;
   try {
     res = await callBackend(api, key, 'claim');
@@ -568,7 +575,11 @@ async function connect(api, key) {
   }
   extra.connecting = false;
   if (!res.ok) {
-    if (res.error === 'claimed') {
+    if (res.error === 'claimed' && CONFIG.BOX) {
+      status({ kind: 'err', html: "<strong>This link's key doesn't match your Raspberry Pi or PC</strong>Open the setup link it shows (in its window, or setup-link.html in its records folder) on this tablet or computer." });
+    } else if (res.error === 'box_offline' || res.error === 'box_timeout') {
+      status({ kind: 'err', html: "<strong>Your Raspberry Pi or PC isn't answering</strong>Check it's switched on, connected to the internet, and running Visitor Sign-In, then tap Continue again." });
+    } else if (res.error === 'claimed') {
       extra.needKey = true;
       renderConnect();
       status({ kind: 'err', html: '<strong>This sheet is already connected to another tablet</strong>Enter that tablet\'s kiosk key below and tap Connect again. On the first tablet: admin screen → Settings → Connect another tablet.' });
@@ -582,6 +593,18 @@ async function connect(api, key) {
   extra.cloud = { api, key, ...res };
   $('[data-setup-error]').textContent = '';
   const already = res.setupComplete && !edit;
+  if (res.backend === 'box') {
+    status({
+      kind: 'ok',
+      html: `<strong>Connected to "${esc(res.sheetName || 'your Raspberry Pi or PC')}"</strong>${already
+        ? 'It is already set up. Use its settings here, or carry on to replace them with this setup.'
+        : 'Visitors, visits, badges and photos are kept on it, and visitors\' phones reach it through your website.'}`
+        + (already ? '<div class="row-actions"><button type="button" class="btn-primary" data-use-sheet>Use the settings saved on it</button></div>' : ''),
+    });
+    $('[data-use-sheet]')?.addEventListener('click', join);
+    if (extra.joining) { $('[data-setup-next]').hidden = false; $('[data-setup-next]').textContent = res.setupComplete ? 'Use these settings' : 'Continue'; }
+    return;
+  }
   status({
     kind: 'ok',
     html: `<strong>Connected to "${esc(res.sheetName || 'your sheet')}"</strong>${already
@@ -622,7 +645,7 @@ function renderBuilder() {
   $('[data-qlist]').innerHTML = qs.map((q, i) => questionCard(q, i, qs.length)).join('');
   $('[data-decline-message]').textContent = fill(draft.screening.declineMessage, draft);
   $('[data-decline-presets]').innerHTML = DECLINE_PRESETS.map((m, i) => `<button type="button" class="chip${m === draft.screening.declineMessage ? ' on' : ''}" data-decline-preset="${i}">${['Standard', 'Please wait for staff', 'Speak with the front desk'][i]}</button>`).join('');
-  const cloud = draft.storage === 'cloud';
+  const cloud = draft.storage === 'cloud' && !CONFIG.BOX; // emails need Google Sheets
   $('[data-alert-field]').hidden = !cloud;
   $('[data-alert-local]').hidden = cloud;
 }
@@ -677,7 +700,7 @@ function renderHosts() {
       <span class="who"><strong>${esc(h.name)}</strong><small>${h.email ? esc(h.email) : 'No email: suggested to visitors only'}</small></span>
       <button type="button" data-unhost="${i}" aria-label="Remove ${esc(h.name)}">×</button></li>`).join('')
     || '<li class="empty hint small">Nobody added yet. Visitors can still type any name.</li>';
-  const cloud = draft.storage === 'cloud';
+  const cloud = draft.storage === 'cloud' && !CONFIG.BOX; // emails need Google Sheets
   const t = $('[data-notify-toggle]');
   t.hidden = !cloud;
   t.setAttribute('aria-checked', String(!!draft.notifyHosts));
@@ -733,14 +756,14 @@ function renderTouches() {
   });
   $('[data-sign-choice]').classList.toggle('pro-locked', !can('signatures'));
   const emailToggle = $('[data-sign-email-toggle]');
-  emailToggle.hidden = draft.storage !== 'cloud' || draft.signature.mode === 'off';
+  emailToggle.hidden = draft.storage !== 'cloud' || CONFIG.BOX || draft.signature.mode === 'off';
   emailToggle.setAttribute('aria-checked', String(!!draft.signature.emailCopy));
   $$('[data-retention-choice] button').forEach((b) => {
     const on = Number(b.dataset.value) === (draft.retentionDays || 0);
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   });
-  $('[data-summary-box]').hidden = !(draft.storage === 'cloud' && draft.endOfDay);
+  $('[data-summary-box]').hidden = !(draft.storage === 'cloud' && !CONFIG.BOX && draft.endOfDay);
   $('[data-summary-toggle]').setAttribute('aria-checked', String(!!draft.dailySummary));
   $('[data-summary-to]').hidden = !draft.dailySummary;
   renderLanguages();
@@ -810,18 +833,19 @@ function renderReady() {
     ...(PAYWALL.enabled ? [['License agreement', s.agreement.by ? `Accepted by ${s.agreement.by}` : 'Not accepted yet', `Version ${s.agreement.version || AGREEMENT_VERSION}. Read it again in Admin → Settings → License.`]] : []),
     ['Visitor badges', s.badges ? `Yes${extra.badges.length ? `: ${extra.badges.length} registered` : ''}` : s.passes ? `Numbered passes${extra.passCount ? `: V1 to V${extra.passCount}` : ''}` : 'No badges',
       s.badges ? 'Visitors tap a badge to finish signing in, and again to sign out.' : s.passes ? 'The kiosk tells each visitor which pass to take, and asks for it back when they sign out.' : 'Visitors sign in and out on the screen.'],
-    ['Records', s.storage === 'cloud' ? `Google Sheets: "${esc(extra.cloud?.sheetName || 'your sheet')}"` : 'On this tablet', s.storage === 'cloud' ? 'Photos go to your Google Drive.' : 'Kept privately on this tablet.'],
+    CONFIG.BOX ? ['Records', `Raspberry Pi or PC: "${esc(extra.cloud?.sheetName || 'yours')}"`, 'Photos are kept on it too. Keep it switched on and online.']
+      : ['Records', s.storage === 'cloud' ? `Google Sheets: "${esc(extra.cloud?.sheetName || 'your sheet')}"` : 'On this tablet', s.storage === 'cloud' ? 'Photos go to your Google Drive.' : 'Kept privately on this tablet.'],
     ['Screening', qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}` : 'No extra questions',
-      qs.length ? [declines && `${declines} can decline`, flags && `${flags} alert staff`, s.screening.alertEmails && `emails to ${s.screening.alertEmails}`].filter(Boolean).join(' · ') : ''],
+      qs.length ? [declines && `${declines} can decline`, flags && `${flags} alert staff`, !CONFIG.BOX && s.screening.alertEmails && `emails to ${s.screening.alertEmails}`].filter(Boolean).join(' · ') : ''],
     ['Hosts', s.hosts.length ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}` : 'None listed',
-      s.hosts.length ? (s.storage === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
+      s.hosts.length ? (s.storage === 'cloud' && !CONFIG.BOX && s.notifyHosts && s.hosts.some((h) => h.email) ? 'Suggested to visitors, and emailed when their visitor arrives.' : 'Suggested to visitors as they type.') : 'Visitors type the name of the person they\'re visiting.'],
     ['Photos', { all: 'Every new visitor', declined: 'Declined visitors only', off: 'No photos' }[s.photos], s.quickEntry && s.photos === 'all' ? 'Quick entry is on for returning visitors who opt in.' : ''],
     ['Signature', { off: 'Tick box only', new: 'New visitors sign the rules', every: 'Visitors sign the rules every visit' }[s.signature.mode],
-      s.signature.mode !== 'off' && s.storage === 'cloud' && s.signature.emailCopy ? 'Visitors can have the signed copy emailed to them.' : ''],
+      s.signature.mode !== 'off' && s.storage === 'cloud' && !CONFIG.BOX && s.signature.emailCopy ? 'Visitors can have the signed copy emailed to them.' : ''],
     ['Records kept', s.retentionDays ? `${{ 30: '30 days', 90: '90 days', 180: '6 months', 365: '1 year', 730: '2 years' }[s.retentionDays]}, then deleted` : 'Until you delete them', ''],
     ['Languages', s.languages.map((c) => LANGS[c]).join(', '), s.languages.length > 1 ? 'Visitors choose on the welcome screen.' : ''],
     ['End of day', s.endOfDay ? `Everyone is signed out at ${esc(timeLabel(s.endOfDay))}` : 'Visitors stay signed in until they sign out',
-      s.endOfDay && s.storage === 'cloud' && s.dailySummary ? `A daily summary is emailed to ${s.screening.alertEmails}.` : ''],
+      s.endOfDay && s.storage === 'cloud' && !CONFIG.BOX && s.dailySummary ? `A daily summary is emailed to ${s.screening.alertEmails}.` : ''],
   ];
   $('[data-summary]').innerHTML = rows.map(([k, v, sub]) => `<li><span class="k">${esc(k)}</span><span class="v">${v}${sub ? `<small>${esc(sub)}</small>` : ''}</span></li>`).join('');
   const steps = [
@@ -829,8 +853,10 @@ function renderReady() {
     ['Try it once yourself', 'Tap the welcome screen and sign in as a visitor, so you see exactly what your visitors see.'],
   ];
   if (s.badges) steps.push(['Keep the badges by the reader', 'Visitors pick one up, tap it to finish signing in, and tap it again when they leave.']);
-  if (declines) steps.push(['Know what happens when someone is declined', `They see your polite message${s.photos !== 'off' ? ' after a quick photo' : ''}. ${s.storage === 'cloud' && s.screening.alertEmails ? `An email goes to ${s.screening.alertEmails}. ` : ''}It shows in the admin screen under Needs attention, where you can let them in, or use "Staff override" on the kiosk.`]);
-  steps.push(s.storage === 'cloud'
+  if (declines) steps.push(['Know what happens when someone is declined', `They see your polite message${s.photos !== 'off' ? ' after a quick photo' : ''}. ${s.storage === 'cloud' && !CONFIG.BOX && s.screening.alertEmails ? `An email goes to ${s.screening.alertEmails}. ` : ''}It shows in the admin screen under Needs attention, where you can let them in, or use "Staff override" on the kiosk.`]);
+  steps.push(CONFIG.BOX
+    ? ['Keep your Raspberry Pi or PC switched on', 'It keeps the records and answers visitors\' phones. To open the admin screen from another computer, open its setup link there.']
+    : s.storage === 'cloud'
     ? ['Bookmark your Google Sheet', 'The Visits tab fills in live. Share the sheet with colleagues who need to see who\'s on site.']
     : ['Remember where the records are', 'Everything is on this tablet. The admin screen shows who\'s inside and lets you export the settings as a backup.']);
   $('[data-next-steps]').innerHTML = steps.map(([t, d]) => `<li><strong>${esc(t)}</strong>${esc(d)}</li>`).join('');

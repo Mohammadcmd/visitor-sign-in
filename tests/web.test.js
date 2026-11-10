@@ -39,6 +39,18 @@ for (const [, , en, , es] of pairs) {
 // The backend copy the setup wizard hands out matches the script.
 const { render } = { render: (code) => `export const BACKEND_CODE = ${JSON.stringify(code)};` };
 ok(read('web/js/backend-code.js').includes(render(read('apps-script/Code.gs'))), 'web/js/backend-code.js matches apps-script/Code.gs (run node scripts/sync-backend.mjs)');
+// Every script parses (a typo in one stops the whole kiosk from starting).
+{
+  const { execFileSync } = require('child_process');
+  const scripts = [...fs.readdirSync(path.join(root, 'web/js')).filter((f) => f.endsWith('.js')).map((f) => `web/js/${f}`), 'web/config.js', 'web/sw.js',
+    ...fs.readdirSync(path.join(root, 'server')).filter((f) => f.endsWith('.mjs')).map((f) => `server/${f}`), 'site/worker.js'];
+  for (const f of scripts) {
+    let error = '';
+    try { execFileSync(process.execPath, ['--input-type=module', '--check'], { input: fs.readFileSync(path.join(root, f)), stdio: ['pipe', 'ignore', 'pipe'] }); } catch (err) { error = String(err.stderr).split('\n').slice(0, 4).join(' '); }
+    ok(!error, `${f} parses${error ? `: ${error}` : ''}`);
+  }
+}
+
 // Every blank in the license agreement ({seller}, {graceDays}…) is one the kiosk fills in.
 const agreementSrc = read('web/js/agreement.js');
 const filled = new Set([...agreementSrc.slice(agreementSrc.indexOf('const values = {'), agreementSrc.indexOf('};', agreementSrc.indexOf('const values = {'))).matchAll(/^\s*(\w+)[,:]/gm)].map((m) => m[1]));

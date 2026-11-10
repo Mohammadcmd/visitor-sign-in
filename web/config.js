@@ -85,6 +85,8 @@ export const CONFIG = {
   DEMO: query.has('demo') && !saved.api,
   // ?visit=…&api=…: a visitor's phone, from the QR code by the door
   PHONE: /^ph[A-Z0-9]{30}$/.test(query.get('visit') || '') && /^https:\/\//.test(query.get('api') || '') ? { key: query.get('visit'), api: query.get('api') } : null,
+  // Records on a Raspberry Pi or PC (server/), reached through the website (…/box/<id>): no emails from it yet.
+  BOX: [saved.api, query.get('api')].some((u) => /^https?:\/\/[^/]+\/box\/[a-z0-9]{20}$/.test(u || '')),
   // Where this kiosk is on the web (such as 'https://yourcompany.com/web/'), for the phone sign-in QR code.
   // Empty: the address it's open at (browser kiosks), or the website's kiosk (SITE_URL + 'web/') in the Android app.
   PUBLIC_URL: '',

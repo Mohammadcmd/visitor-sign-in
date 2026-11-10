@@ -28,6 +28,8 @@ jobs:
         run: |
           npm ci
           npm test
+      - name: The website relay to a Raspberry Pi or PC (in Cloudflare's local runtime)
+        run: npm run test:relay
       - name: Install Chromium for the end-to-end test
         run: |
           npm install --no-save playwright@1.63.0

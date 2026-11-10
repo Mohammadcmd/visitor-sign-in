@@ -154,6 +154,16 @@ try {
   ok(existsSync(join(site, 'downloads', `visitor-sign-in-${version}.apk`)), 'the app is in downloads/');
   ok(readFileSync(join(site, 'downloads.html'), 'utf8').includes(`downloads/visitor-sign-in-${version}.apk`), 'the downloads page links to it');
   ok(!existsSync(join(site, 'license-public-key.json')), 'no public key file until PAYWALL.publicKey is set');
+  // Screenless sign-in: the Raspberry Pi / PC program, and the Pi installer.
+  const serverZip = join(site, 'downloads', 'visitor-sign-in-server.zip');
+  ok(existsSync(serverZip) && latest.server?.url === `${siteUrl}downloads/visitor-sign-in-server.zip`, 'the Raspberry Pi / PC program is a download');
+  const unzipped = join(out, 'server-app');
+  execFileSync('unzip', ['-q', serverZip, '-d', unzipped]);
+  const printed = execFileSync(process.execPath, [join(unzipped, 'server/visitor-server.mjs'), '--data', join(out, 'server-data'), '--print-link'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  ok(printed.startsWith(`${siteUrl}web/?api=${encodeURIComponent(`${siteUrl}box/`)}`), `the unzipped program runs on its own and prints its setup link: ${printed.trim().slice(0, 90)}…`);
+  const installer = readFileSync(join(site, 'downloads', 'install-pi.sh'), 'utf8');
+  ok(!installer.includes('@SITE@') && installer.includes(`SITE="\${VSI_SITE:-${siteUrl}}"`), 'the Pi installer knows the website');
+  ok(readFileSync(join(site, 'downloads.html'), 'utf8').includes('install-pi.sh | sudo bash'), 'the downloads page shows the one command for a Pi');
   const launch = readFileSync(join(site, 'launch.html'), 'utf8');
   ok(/<h1>Launch checklist<\/h1>/.test(launch) && /class="checklist"/.test(launch), 'the launch checklist is a page');
   ok(!/\]\(\.\.\//.test(launch) && !/href="\.\.\//.test(launch), 'with no links into the (private) repository');

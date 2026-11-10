@@ -226,6 +226,16 @@ Asked for next: "I connected Cloudflare, so do what you need to do with that." T
 - Releases publish the website with the new APK once `CLOUDFLARE_API_TOKEN` is a repository secret.
 - Tests: 58 site checks (uploads refused without the key, with a stranger's key, for another license, in the future, or older; the tools sending through a local copy of the Worker; the build). The end-to-end run checks the install page on the website.
 
+## Screenless sign-in on a Raspberry Pi or PC
+
+Asked for next: sell Android tablets for now, and for screenless sign-in (visitors on their phones), a Raspberry Pi or a PC.
+
+- A visitor's phone on mobile data can't reach a Pi inside the building, and phones only allow the camera on HTTPS pages. So the Pi keeps a WebSocket open to the website, and a Durable Object (`Box` in `site/worker.js`) passes each phone or admin request to it and the answer back, in parts when it's large. The first computer to connect with a box id sets its secret, and others are refused.
+- `server/box.mjs` answers the same requests as the Google Sheets script, with the shared engine. The kiosk key is made by the box and carried by the setup link. Phones get the same limits as with Google Sheets: phone actions only and 60 writes in 10 minutes. It also handles retried writes, files on disk with atomic writes, a daily backup, the end of day and retention.
+- The engine gained phone sign-in (`phoneStart`, `phoneRegister`, `phoneCheckIn`, `phoneSignOut`, `phoneDecline`, `adminPhoneLink`), ported from `apps-script/Code.gs`.
+- The kiosk recognizes a box by its address (`…/box/<id>`, `CONFIG.BOX`). It names it in setup and the admin screen, and hides the email options.
+- Tests: 17 more engine checks, 36 box checks, 29 relay checks with the real Worker in Cloudflare's local runtime, and a browser run that sets up from the setup link and signs a visitor in and out on a phone.
+
 ## Where things are
 
 | Thing | Location |
@@ -239,6 +249,7 @@ Asked for next: "I connected Cloudflare, so do what you need to do with that." T
 | Licenses: kiosk side, seller tools, guide | `web/js/plans.js`, `tools/license/`, `docs/PAYWALL.md` |
 | License agreement and privacy policy (drafts) | `docs/legal/`, shown in the kiosk by `web/js/agreement.js` |
 | The website (Cloudflare) | `site/` (guide: `site/README.md`), built by `scripts/build-site.mjs` |
+| Screenless sign-in on a Raspberry Pi or PC | `server/` (guide: `server/README.md`) |
 | Shock Tech preset | `docs/presets/` |
 | Launch checklist, privacy notice, screenshots | `docs/LAUNCH.md`, `docs/privacy-notice.md`, `docs/screenshots/` |
 | Demo videos | `media/` |

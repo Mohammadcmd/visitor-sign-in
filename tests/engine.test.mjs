@@ -71,6 +71,34 @@ eq((await act('assignPass', { visitorId: samir.visitor.id })).badge, 'V2');
 const third = await act('register', { first: 'Michael', last: 'Bolton', company: 'Initech', visiting: 'Bill', purpose: 'TPS reports', agreed: true });
 ok((await act('assignPass', { visitorId: third.visitor.id })).noPass, 'with every pass out, still signed in, without one');
 
+// Phone sign-in (a QR code by the door): a phone key from the admin, then visitors on their own phones.
+eq((await act('adminPhoneLink', { token: login.token, peek: true })).key, '', 'no phone key until it is switched on');
+const link = await act('adminPhoneLink', { token: login.token });
+ok(/^ph[A-Z0-9]{30}$/.test(link.key), `a phone key for the QR code: ${link.key}`);
+eq((await act('adminPhoneLink', { token: login.token })).key, link.key, 'asking again keeps the same QR code');
+ok((await act('adminPhoneLink', { token: login.token, change: true })).key !== link.key, 'a new QR code on request');
+eq((await act('adminPhoneLink', { token: link.key })).error, 'admin', 'the phone key is not an admin token');
+current = normalize({ ...current, badges: false, passes: true });
+await act('adminAddBadge', { token: login.token });
+const start = await act('phoneStart');
+ok(start.ok && start.settings.org.name === 'Initech' && start.settings.badges === false && start.settings.hosts.length === 0, 'a phone gets the visitor screens');
+ok(!('admin' in start.settings) && !('alertEmails' in start.settings.screening), 'and nothing staff-only');
+const phone = await act('phoneRegister', { first: 'Joanna', last: 'Smith', company: 'Chotchkies', visiting: 'Bill', purpose: 'Interview', agreed: true, quickEntry: true, override: { by: 'me' } });
+ok(phone.ok && phone.token.length === 32 && phone.badge === 'V3', `signed in on a phone, with the free pass: ${JSON.stringify({ ...phone, token: '…' })}`);
+const joanna = s.visitors.find((v) => v.id === phone.visitor.id);
+ok(joanna.phoneKey && joanna.phoneKey !== phone.token && !joanna.quickEntry, 'only the token\'s hash is kept, and a phone can\'t turn on quick entry');
+ok(!/override/i.test(joanna.screening), 'nor override screening');
+eq(s.visits.find((v) => v.id === phone.visitId).method, 'phone');
+eq((await act('phoneSignOut', { visitId: phone.visitId, token: 'x'.repeat(32) })).error, 'phone_visitor', 'another phone can\'t sign them out');
+const out = await act('phoneSignOut', { visitId: phone.visitId, token: phone.token });
+ok(out.ok && out.first === 'Joanna' && out.badge === 'V3', 'their own phone signs them out, and asks for the pass back');
+ok((await act('phoneSignOut', { visitId: phone.visitId, token: phone.token })).already, 'twice is fine');
+const back = await act('phoneCheckIn', { visitorId: phone.visitor.id, token: phone.token, visiting: 'Bill', purpose: 'Second interview' });
+ok(back.ok && back.first === 'Joanna' && back.badge === 'V3', 'the same phone signs them in again');
+eq((await act('phoneCheckIn', { visitorId: reg.visitor.id, token: phone.token })).error, 'phone_visitor', "a phone can't sign in someone else");
+const declined = await act('phoneDecline', { first: 'Lumbergh', last: 'Bill', reasons: [{ label: 'Badge', answer: 'No' }] });
+ok(declined.ok && declined.declineId && s.visits.at(-1).method === 'phone', 'a decline on a phone is recorded');
+
 // Two companies never share admin sessions.
 const other = createEngine({ version: 5, settings: () => current, saveSettings: () => {}, files: { put: async () => {}, get: async () => '', del: async () => {} } });
 eq((await other.act(emptyStore(), 'adminInside', { token: login.token })).error, 'admin', 'a token only works for its own company');

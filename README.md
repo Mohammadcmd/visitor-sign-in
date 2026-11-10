@@ -94,13 +94,23 @@ Electronic signatures are generally accepted for agreements like these (in the U
 
 ### Phone sign-in: a QR code instead of a tablet
 
-With Google Sheets, a business with no tablet by the door can put up a QR code instead. Visitors scan it with their phone's camera and sign in on their own phone: the same questions, rules, finger signature, photo, Spanish and polite declines, with host emails and staff alerts as usual.
+With Google Sheets, or screenless with a **Raspberry Pi or PC** (below), a business with no tablet by the door can put up a QR code instead. Visitors scan it with their phone's camera and sign in on their own phone: the same questions, rules, finger signature, photo, Spanish and polite declines, with host emails and staff alerts as usual.
 
 - **Switching it on:** Admin → Settings → **Phone sign-in (QR code)** → **Switch on**. Then **Print the poster**, or save it as an image to print elsewhere. Set up and run the admin screen on any tablet or computer browser.
 - **Signing out:** the visitor's phone remembers them. "Leaving?" signs them out, and next time "Sign in as Ana Lopez" signs them back in with one tap. Staff can also sign them out on the admin screen, and End of day still applies.
 - **Kept safe:** phones get their own key, and it only signs visitors in and out and records declines. A phone never sees other visitors, the staff list, face data or the admin screen, and it can only sign out the visitor it signed in. To limit a photographed poster, the script accepts at most 60 phone sign-ins in 10 minutes, and **Change the QR code** makes old posters stop working.
 - **Left out on phones:** badges, staff overrides, face recognition and expected-visitor greetings. Staff can still let a declined visitor in from Needs attention.
-- **Where the poster points:** the QR code points at this kiosk on the web. For the Android app, set `PUBLIC_URL` in `web/config.js` to where the browser kiosk is hosted.
+- **Where the poster points:** the QR code points at this kiosk on the web. From the Android app, it points at the kiosk on your website (`SITE_URL` in `web/config.js`), or at `PUBLIC_URL` if that's set.
+
+### Screenless: a Raspberry Pi or PC keeps the records
+
+For a door with no tablet and no Google account. A Raspberry Pi or a PC in the building keeps the records, and visitors sign in on their phones as above. See [server/README.md](server/README.md).
+
+- **On a Pi:** one command installs it and makes it start by itself: `curl -fsSL https://visitor-sign-in.mohammadjalbibi.workers.dev/downloads/install-pi.sh | sudo bash`. **On a PC:** install Node.js, unzip the download, and double-click the start file.
+- **It prints a setup link.** Open it on the computer or tablet you'll use for the admin screen, set up, and switch on phone sign-in for the poster.
+- **No router setup or domain:** the Pi keeps a connection open to your website (`site/`), and phones reach it through the website over HTTPS. The website only passes requests along. It checks the box's secret, and the records never leave the building.
+- **Records** are files in one folder (records, settings, photos and signatures as images), with a daily backup copy. The Pi also signs everyone out at the end of the day and deletes old records.
+- **Not yet:** emails (host notifications, alerts, daily summary).
 
 ### Languages
 
@@ -129,6 +139,8 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 ## Where records are kept
 
 **On this tablet:** visitors, visits, badges and photos stay in the browser's storage on that tablet, private and offline. The kiosk asks the browser to keep them permanently. Good for one tablet and simple needs; export from Admin → History now and then.
+
+**A Raspberry Pi or PC:** for screenless sign-in (above). Everything is in its records folder: `records.json`, `settings.json`, and photos and signatures as image files ([server/README.md](server/README.md)).
 
 **Google Sheets:** the script in `apps-script/Code.gs` runs in your own Google account. It makes these tabs (columns are found by header name, so you can reorder or add columns):
 

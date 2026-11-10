@@ -5,7 +5,8 @@
 //   node scripts/build-site.mjs [--apk app.apk] [--web-zip kiosk.zip] [--out dir]
 // Without --apk, the Android app already on the website is kept (from its
 // latest.json), so publishing the site between releases doesn't remove it.
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -69,11 +70,30 @@ if (opt('web-zip')) {
   webZip = file(name);
 }
 
+// Screenless sign-in on a Raspberry Pi or PC (server/): the program as a zip, and the Pi installer.
+let serverZip = null;
+{
+  const stage = mkdtempSync(join(tmpdir(), 'vsi-server-'));
+  try {
+    const files = ['server/box.mjs', 'server/relay.mjs', 'server/visitor-server.mjs', 'server/README.md', 'server/start-windows.cmd', 'server/start-mac.command',
+      'web/config.js', 'web/js/engine.js', 'web/js/match.js', 'web/js/settings.js', 'web/js/qr.js', 'web/vendor/qrcode/qrcode.js', 'LICENSE'];
+    for (const f of files) { mkdirSync(dirname(join(stage, f)), { recursive: true }); copyFileSync(join(root, f), join(stage, f)); }
+    // Node reads the kiosk's files as modules, without a warning.
+    writeFileSync(join(stage, 'web/package.json'), '{ "type": "module" }\n');
+    execFileSync('zip', ['-qr', join(out, 'downloads', 'visitor-sign-in-server.zip'), '.'], { cwd: stage });
+    serverZip = { version, ...file('visitor-sign-in-server.zip') };
+  } catch (err) {
+    if (err.syscall === 'spawnSync zip' || err.path === 'zip') console.log("The Raspberry Pi / PC download wasn't made: there's no zip command here.");
+    else throw err;
+  } finally { rmSync(stage, { recursive: true, force: true }); }
+  writeFileSync(join(out, 'downloads', 'install-pi.sh'), read('server/install-pi.sh').replaceAll('@SITE@', siteUrl));
+}
+
 // What's new in this version, from CHANGELOG.md.
 const changelog = read('CHANGELOG.md');
 const at = changelog.indexOf(`## ${version}`);
 const notes = at < 0 ? '' : changelog.slice(changelog.indexOf('\n', at) + 1, (changelog.indexOf('\n## ', at + 1) + 1 || changelog.length + 1) - 1).trim();
-writeFileSync(join(out, 'latest.json'), `${JSON.stringify({ version, build: `${version}-${sha}`, published: new Date().toISOString(), page: siteUrl, apk, web: webZip, notes }, null, 2)}\n`);
+writeFileSync(join(out, 'latest.json'), `${JSON.stringify({ version, build: `${version}-${sha}`, published: new Date().toISOString(), page: siteUrl, apk, web: webZip, server: serverZip, notes }, null, 2)}\n`);
 
 // ------------------------------------------------------------------ pages made from docs/
 
@@ -140,10 +160,15 @@ const mb = (n) => `${(n / 1e6).toFixed(1)} MB`;
 const rows = [
   apk && `<tr><td><a href="downloads/${esc(apk.name)}">${esc(apk.name)}</a></td><td>The Android app, version ${esc(apk.version)}</td><td>${mb(apk.size)}</td></tr>`,
   webZip && `<tr><td><a href="downloads/${esc(webZip.name)}">${esc(webZip.name)}</a></td><td>The browser kiosk, to host on your own website over HTTPS</td><td>${mb(webZip.size)}</td></tr>`,
+  serverZip && `<tr><td><a href="downloads/${esc(serverZip.name)}">${esc(serverZip.name)}</a></td><td>Screenless sign-in on a PC (Windows, Mac or Linux): unzip, then open server/start-windows.cmd or server/start-mac.command</td><td>${mb(serverZip.size)}</td></tr>`,
 ].filter(Boolean);
 writeFileSync(join(out, 'downloads.html'), page('Downloads', `<h1>Downloads</h1>
 <p>Version ${esc(version)}. <a href="web/">Open the browser kiosk</a> on an iPad or any tablet, or install the Android app.</p>
 ${rows.length ? `<table><tr><th>File</th><th>What it is</th><th>Size</th></tr>${rows.join('')}</table>` : '<p class="small">The Android app will be here with the next release.</p>'}
+<h2 id="screenless">Screenless sign-in on a Raspberry Pi</h2>
+<p>No tablet by the door: visitors scan a QR code and sign in on their own phone, and a Raspberry Pi (or a PC) keeps the records. On the Pi, with Raspberry Pi OS and an internet connection, open a terminal and run:</p>
+<p><code>curl -fsSL ${esc(siteUrl)}downloads/install-pi.sh | sudo bash</code></p>
+<p class="small">It installs Visitor Sign-In, starts it whenever the Pi is switched on, and prints the setup link to open on the computer or tablet you'll use for the admin screen. <a href="downloads/install-pi.sh">Read the installer</a> first if you like.</p>
 ${notes ? `<h2>What's new in ${esc(version)}</h2>\n${markdown(notes)}` : ''}`));
 writeFileSync(join(out, '404.html'), page('Not found', '<h1>Page not found</h1><p>That page isn\'t here. <a href="./">Go to the install page</a> or <a href="web/">open the kiosk</a>.</p>'));
 
