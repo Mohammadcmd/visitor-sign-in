@@ -102,15 +102,17 @@ With Google Sheets, or screenless with a **Raspberry Pi or PC** (below), a busin
 - **Left out on phones:** badges, staff overrides, face recognition and expected-visitor greetings. Staff can still let a declined visitor in from Needs attention.
 - **Where the poster points:** the QR code points at this kiosk on the web. From the Android app, it points at the kiosk on your website (`SITE_URL` in `web/config.js`), or at `PUBLIC_URL` if that's set.
 
-### Screenless: a Raspberry Pi or PC keeps the records
+### Screenless: a PC or Raspberry Pi on your Wi-Fi
 
-For a door with no tablet and no Google account. A Raspberry Pi or a PC in the building keeps the records, and visitors sign in on their phones as above. See [server/README.md](server/README.md).
+For a door with no tablet and no Google account. A PC or Raspberry Pi in the building keeps the records and shows the sign-in page on the building's Wi-Fi. Visitors sign in on their phones as above. There's no website, account or token, and it works without internet. See [server/README.md](server/README.md).
 
-- **On a Pi:** one command installs it and makes it start by itself: `curl -fsSL https://visitor-sign-in.mohammadjalbibi.workers.dev/downloads/install-pi.sh | sudo bash`. **On a PC:** install Node.js, unzip the download, and double-click the start file.
-- **It prints a setup link.** Open it on the computer or tablet you'll use for the admin screen, set up, and switch on phone sign-in for the poster.
-- **No router setup or domain:** the Pi keeps a connection open to your website (`site/`), and phones reach it through the website over HTTPS. The website only passes requests along. It checks the box's secret, and the records never leave the building.
-- **Records** are files in one folder (records, settings, photos and signatures as images), with a daily backup copy. The Pi also signs everyone out at the end of the day and deletes old records.
-- **Not yet:** emails (host notifications, alerts, daily summary).
+- **The file to send:** `npm run server:zip` makes `visitor-sign-in-server.zip`, with a START HERE note.
+  - **On a PC:** install Node.js, unzip, and double-click `server/start-windows.cmd` or `start-mac.command`.
+  - **On a Pi:** `sudo bash server/install-pi.sh`, which makes it start by itself.
+- **It prints a setup link.** Open it on any computer or tablet on the same Wi-Fi, set up, then switch on phone sign-in and type the guest Wi-Fi. The poster shows a code that joins the Wi-Fi, then the sign-in code.
+- **On the Wi-Fi, phones skip the visitor photo:** phones only allow the camera on https websites. Names, questions, rules, signatures and passes all work.
+- **Records** are files in one folder (records, settings and signatures as images), with a daily backup copy. It also signs everyone out at the end of the day and deletes old records.
+- **Not yet:** emails (host notifications, alerts, daily summary). Optionally, later, `--site` connects it to a website (`site/`) so phones on mobile data can reach it over https.
 
 ### Languages
 

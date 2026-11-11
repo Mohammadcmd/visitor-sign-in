@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-**Screenless sign-in on a Raspberry Pi or PC**
+**Screenless sign-in on a PC or Raspberry Pi, on your Wi-Fi**
+- The PC or Pi shows the sign-in page on the building's Wi-Fi itself (`http://<its address>:8080/`): no website, accounts or tokens, and no internet needed. `npm run server:zip` makes the file to send, with a START HERE note.
+- The poster can show a second QR code that joins the guest Wi-Fi (Admin → Settings → Phone sign-in: the Wi-Fi name and password).
+- Phones on the Wi-Fi page skip the visitor photo, since phones only allow the camera on https sites. Setup from a Wi-Fi page skips the tablet check.
+- The Pi installer works from the unzipped folder, with no download.
+- Fix: it kept retrying when a website couldn't be reached (Node reports only an error for a failed connection). Two harmless Node warnings are hidden.
 - No tablet by the door, and no Google account: a Raspberry Pi or a PC in the building keeps the records, and visitors sign in on their own phones with the QR code (`server/`).
 - One command installs it on a Pi and makes it start by itself. On Windows or Mac, double-click the start file.
 - It prints a setup link: open it on any computer or tablet for setup and the admin screen.
-- The Pi stays connected to the website, so phones reach it over HTTPS with no router setup or domain. The website passes requests along and checks the box's secret.
+- Optionally (`--site`), it stays connected to a website, so phones on mobile data reach it over https too. The website passes requests along and checks the box's secret.
 - Records are files in one folder, with a daily backup copy. It signs everyone out at the end of the day and deletes old records, as a tablet would. No emails yet.
 - The kiosk says "Raspberry Pi or PC" instead of "Google Sheet" when it's connected to one, and hides the email options.
 - Phone sign-in is now in the shared engine as well as the Google Sheets script.

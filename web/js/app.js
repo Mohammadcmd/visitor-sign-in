@@ -2090,7 +2090,18 @@ function kioskWebAddress() {
   if (Kiosk || !/^https?:$/.test(location.protocol)) return CONFIG.SITE_URL ? `${CONFIG.SITE_URL.replace(/\/?$/, '/')}web/` : '';
   return `${location.origin}${location.pathname.replace(/[^/]*$/, '')}`;
 }
-const phoneLink = (key) => `${kioskWebAddress()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(CONFIG.API_URL)}`;
+// A Raspberry Pi or PC on the local Wi-Fi says where phones find it (its own address, not "localhost").
+const boxOnWifi = () => CONFIG.BOX && /^http:/.test(CONFIG.API_URL) && !!state.lastPing?.web;
+const phoneWeb = () => (boxOnWifi() ? state.lastPing.web : kioskWebAddress());
+const phoneApi = () => (boxOnWifi() ? state.lastPing.api : CONFIG.API_URL);
+/** Phones reach this sign-in over the local Wi-Fi only (an http address): visitors must join it first. */
+const phoneOnWifi = () => /^http:/.test(phoneApi());
+const phoneLink = (key) => `${phoneWeb()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(phoneApi())}`;
+/** The QR code that joins a Wi-Fi network (the format phone cameras understand). */
+const wifiCode = (name, password) => {
+  const q = (v) => String(v).replace(/([\\;,:"])/g, '\\$1');
+  return password ? `WIFI:T:WPA;S:${q(name)};P:${q(password)};;` : `WIFI:T:nopass;S:${q(name)};;`;
+};
 
 /** Admin → Settings → Phone sign-in: switch it on, the QR code and poster, a new code, off. Google Sheets only. */
 async function renderPhoneCard() {
@@ -2121,8 +2132,9 @@ async function renderPhoneCard() {
       } catch (err) { licensed = err.message; }
     }
   }
-  const web = kioskWebAddress();
+  const web = phoneWeb();
   text.textContent = `Phone sign-in is on${PAYWALL.enabled ? ` · QR code ${s.phone.code} · ${licensed}` : ''}. `
+    + (phoneOnWifi() ? 'Visitors need to be on your Wi-Fi to use it: add the Wi-Fi below, and the poster shows a second code that connects them. ' : '')
     + (web ? 'Print the poster and put it by the door. Visitors who sign in on their phone sign out on it, or at the front desk.'
       : "To make its QR code, open this admin screen in the browser kiosk, or set the kiosk's web address (PUBLIC_URL in web/config.js).");
   actions.innerHTML = `${web ? '<button type="button" class="btn-primary" data-phone-poster>Print the poster</button>' : ''}
@@ -2133,6 +2145,20 @@ async function renderPhoneCard() {
     qr.hidden = false;
     qr.innerHTML = `${await qrSvg(link, { size: 170, label: 'Phone sign-in link' })}<code>${esc(link)}</code>`;
     $('[data-phone-poster]', actions).addEventListener('click', () => openPoster(link));
+  }
+  if (phoneOnWifi()) {
+    const wifi = document.createElement('div');
+    wifi.className = 'phone-wifi';
+    wifi.innerHTML = `<label class="field"><span>Wi-Fi name (for visitors)</span><input readonly inputmode="none" name="wifi-name" maxlength="32" autocomplete="off" value="${esc(s.phone.wifiName)}"></label>
+      <label class="field"><span>Wi-Fi password</span><input readonly inputmode="none" name="wifi-password" maxlength="63" autocomplete="off" value="${esc(s.phone.wifiPassword)}" placeholder="None"></label>
+      <button type="button" class="btn-secondary" data-wifi-save>Save the Wi-Fi</button>`;
+    actions.append(wifi);
+    $('[data-wifi-save]', wifi).addEventListener('click', async () => {
+      kb.close();
+      const next = { ...settings(), phone: { ...settings().phone, wifiName: $('input[name="wifi-name"]', wifi).value.trim(), wifiPassword: $('input[name="wifi-password"]', wifi).value } };
+      const res = await saveSettingsAsAdmin(next);
+      toast(res.ok ? (next.phone.wifiName ? 'Wi-Fi saved: the poster shows how to join it.' : 'Wi-Fi removed from the poster.') : errorText(res));
+    });
   }
   $('[data-phone-change]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again: printed posters stop working', () => phoneLinkAction({ change: true })));
   $('[data-phone-off]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to switch off', () => phoneLinkAction({ off: true })));
@@ -2179,7 +2205,16 @@ $('[data-phone-license-apply]').addEventListener('click', async () => {
 let posterLink = '';
 async function openPoster(link) {
   posterLink = link;
-  $('[data-poster-qr]').innerHTML = await qrSvg(link, { size: 340, label: 'Scan to sign in' });
+  const { wifiName, wifiPassword } = settings().phone;
+  const wifi = phoneOnWifi() && wifiName;
+  $('[data-poster]').classList.toggle('with-wifi', !!wifi);
+  $('[data-poster-wifi]').hidden = !wifi;
+  if (wifi) {
+    $('[data-poster-wifi-qr]').innerHTML = await qrSvg(wifiCode(wifiName, wifiPassword), { size: 220, label: 'Join the Wi-Fi' });
+    $('[data-poster-wifi-text]').textContent = `1. Join the Wi-Fi "${wifiName}"${wifiPassword ? ` (password: ${wifiPassword})` : ''}`;
+  }
+  $('[data-poster-step2]').hidden = !wifi;
+  $('[data-poster-qr]').innerHTML = await qrSvg(link, { size: wifi ? 260 : 340, label: 'Scan to sign in' });
   $('[data-overlay="poster"]').hidden = false;
 }
 $('[data-poster-close]').addEventListener('click', () => { $('[data-overlay="poster"]').hidden = true; });
@@ -2199,9 +2234,28 @@ $('[data-poster-save]').addEventListener('click', async () => {
 async function posterSvg(link) {
   const s = settings();
   const qr = await qrSvg(link, { size: 480, label: 'Scan to sign in' });
-  const qrData = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(qr)))}`;
+  const dataUrl = (svg) => `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  const qrData = dataUrl(qr);
   const logo = logoFor(s);
-  const text = (y, size, value, color = '#0d1b2a', weight = 400) => `<text x="425" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${esc(value)}</text>`;
+  const text = (y, size, value, color = '#0d1b2a', weight = 400, x = 425) => `<text x="${x}" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${esc(value)}</text>`;
+  if (phoneOnWifi() && s.phone.wifiName) {
+    // Two codes: join the Wi-Fi, then sign in.
+    const wifiData = dataUrl(await qrSvg(wifiCode(s.phone.wifiName, s.phone.wifiPassword), { size: 340, label: 'Join the Wi-Fi' }));
+    return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="850" height="1100" viewBox="0 0 850 1100">
+  <rect width="850" height="1100" fill="#ffffff"/>
+  <image href="${logo}" xlink:href="${logo}" x="225" y="60" width="400" height="120" preserveAspectRatio="xMidYMid meet"/>
+  ${text(255, 60, 'Visitor sign-in', '#0d1b2a', 700)}
+  ${text(305, 30, s.org.name, '#4a5a6b')}
+  ${text(390, 30, '1. Join the Wi-Fi', '#0d1b2a', 700, 220)}
+  <image href="${wifiData}" xlink:href="${wifiData}" x="60" y="420" width="320" height="320"/>
+  ${text(780, 24, s.phone.wifiName, '#0d1b2a', 700, 220)}
+  ${s.phone.wifiPassword ? text(815, 22, `Password: ${s.phone.wifiPassword}`, '#4a5a6b', 400, 220) : ''}
+  ${text(390, 30, '2. Scan to sign in', '#0d1b2a', 700, 630)}
+  <image href="${qrData}" xlink:href="${qrData}" x="470" y="420" width="320" height="320"/>
+  ${text(950, 28, "Open your phone's camera and point it at each code.")}
+  ${text(995, 24, '1. Conéctese al Wi-Fi.  2. Escanee el código para registrarse.', '#4a5a6b')}
+</svg>`;
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="850" height="1100" viewBox="0 0 850 1100">
   <rect width="850" height="1100" fill="#ffffff"/>
   <image href="${logo}" xlink:href="${logo}" x="225" y="70" width="400" height="140" preserveAspectRatio="xMidYMid meet"/>

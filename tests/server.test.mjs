@@ -75,6 +75,31 @@ try {
   ok((await box.handle({ phone: phoneKey, action: 'phoneStart' })).ok, 'and so is the phone key');
   ok(readdirSync(join(dir, 'backups')).some((f) => /^records-\d{4}-\d{2}-\d{2}\.json$/.test(f)), 'a daily backup copy is made');
 
+  // On the Wi-Fi: this computer serves the kiosk and answers it itself (local.mjs), no website needed.
+  {
+    const { serveLocal } = await import('../server/local.mjs');
+    const lan = await serveLocal({ box, webDir: join(root, 'web'), port: 0, host: '127.0.0.1', address: '127.0.0.1' });
+    try {
+      box.setLocal(lan.base);
+      const get = (p) => fetch(`${lan.base}${p}`, { redirect: 'manual' });
+      const page = await get('web/');
+      ok(page.status === 200 && /<title>/.test(await page.text()), 'the kiosk page is served on the Wi-Fi');
+      eq((await get('')).headers.get('location'), '/web/', 'the address on its own goes to the kiosk');
+      for (const p of ['web/%2e%2e/package.json', 'server/box.mjs', 'web/..%2F..%2Fpackage.json', 'records.json']) eq((await get(p)).status, 404, `nothing outside the kiosk's files: ${p}`);
+      const post = async (body, id = config.boxId) => (await fetch(`${lan.base}box/${id}`, { method: 'POST', body: JSON.stringify(body) })).json();
+      const ping = await post({ key: config.kioskKey, action: 'ping' });
+      ok(ping.ok && ping.web === `${lan.base}web/` && ping.api === `${lan.base}box/${config.boxId}`, 'it tells the admin screen where phones find it, for the QR code');
+      eq((await post({ key: config.kioskKey, action: 'ping' }, 'aaaaaaaaaaaaaaaaaaaa')).error, 'box_unknown', 'only its own box id');
+      // Phones on a Wi-Fi page can't use the camera: no photo is asked for, even with photos on.
+      const start = await post({ phone: phoneKey, action: 'phoneStart' });
+      eq(start.settings.photos, 'off', 'phones on the Wi-Fi skip the photo');
+      const lanReg = await post({ phone: phoneKey, action: 'phoneRegister', args: { first: 'Wifi', last: 'Visitor', company: 'Initech', visiting: 'Bill', purpose: 'Visit', agreed: true } });
+      ok(lanReg.ok, `and sign in without one: ${lanReg.error || ''}`);
+      eq((await box.handle({ phone: phoneKey, action: 'phoneRegister', args: { first: 'Https', last: 'Visitor', company: 'Initech', visiting: 'Bill', purpose: 'Visit', agreed: true } })).fields, ['photo'], 'over https (the website) the photo is still required');
+      ok((await post({ phone: phoneKey, action: 'phoneSignOut', args: { visitId: lanReg.visitId, token: lanReg.token } })).ok, 'and sign out');
+    } finally { lan.server.close(); box.setLocal(''); }
+  }
+
   // Anyone could photograph the poster: phones get a limited number of sign-ins.
   let refused = 0;
   for (let i = 0; i < PHONE_RATE.max + 3; i++) {

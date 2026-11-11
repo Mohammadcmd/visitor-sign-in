@@ -4,8 +4,8 @@
 //    sign-in, a declined visitor, a staff override, the admin screen and a sign-out.
 // 2. Setup with Google Sheets (the real apps-script/Code.gs, running on the fakes
 //    in tests/fake-google.js) and no badges, then a second tablet joining by link.
-// 4. Screenless: a Raspberry Pi or PC (the real server/box.mjs) set up from its
-//    setup link, then a visitor signing in and out on their own phone.
+// 4. Screenless: a Raspberry Pi or PC (the real server/) serving the kiosk on the
+//    Wi-Fi, set up from its setup link, then a visitor on their own phone.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +38,7 @@ function serve() {
   });
 }
 
-async function open(browser, url, backend, { offline = false, device = null, box = null } = {}) {
+async function open(browser, url, backend, { offline = false, device = null } = {}) {
   // The offline cache stays out of the way except in the test made for it.
   const ctx = await browser.newContext({ ...(device || { viewport: { width: 1280, height: 800 } }), permissions: ['camera', 'clipboard-read', 'clipboard-write'], serviceWorkers: offline ? 'allow' : 'block' });
   const page = await ctx.newPage();
@@ -63,15 +63,6 @@ async function open(browser, url, backend, { offline = false, device = null, box
     const out = backend.handle(JSON.parse(route.request().postData()));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
-  // A Raspberry Pi or PC (server/box.mjs), answering what the website would pass on to it.
-  if (box) {
-    await ctx.route(`${SITE_URL}box/${box.config.boxId}`, async (route) => {
-      const headers = { 'Access-Control-Allow-Origin': '*' };
-      if (route.request().method() !== 'POST') { await route.fulfill({ status: 204, headers }); return; }
-      const out = await box.handle(JSON.parse(route.request().postData() || '{}'));
-      await route.fulfill({ status: 200, contentType: 'application/json', headers, body: JSON.stringify(out) });
-    });
-  }
   await page.goto(url);
   return page;
 }
@@ -910,14 +901,18 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
 
     // ================================================================ 4. screenless: a Raspberry Pi or PC
     const { openBox } = await import('../server/box.mjs');
+    const { serveLocal, lanAddress } = await import('../server/local.mjs');
     const boxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-box-'));
     const pi = openBox({ dataDir: boxDir, name: 'Lobby Pi' });
-    const piLinks = pi.links(SITE_URL);
-    ok(piLinks.setup.startsWith(`${SITE_URL}web/?api=`), 'the box prints a setup link to the website\'s kiosk');
-    // The same link, opened on this test's copy of the kiosk.
-    const piAdmin = await open(browser, `${base}${piLinks.setup.slice(piLinks.setup.indexOf('?'))}`, null, { box: pi });
+    // The Pi serves the kiosk on the Wi-Fi itself, at this computer's network address (not https, like a real one).
+    const lan = await serveLocal({ box: pi, webDir: path.join(__dirname, '../web'), port: 0, address: lanAddress() });
+    pi.setLocal(lan.base);
+    const piLinks = pi.links(lan.base);
+    ok(piLinks.setup.startsWith(`${lan.base}web/?api=`) && /^http:\/\//.test(lan.base), `the box prints a setup link on the Wi-Fi: ${lan.base}`);
+    const piAdmin = await open(browser, piLinks.setup);
     await waitView(piAdmin, 'setup');
-    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(await piAdmin.evaluate(() => !window.isSecureContext), 'a Wi-Fi address, not https');
+    ok(await piAdmin.$eval('[data-sstep="company"]', (e) => e.classList.contains('active')), "setup skips the tablet check: this isn't the kiosk tablet");
     await set(piAdmin, 'input[name="s-org"]', 'Initrode');
     await next(piAdmin); await piAdmin.waitForTimeout(600);
     await set(piAdmin, 'input[name="s-admin"]', 'Dana Ruiz');
@@ -939,7 +934,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await next(piAdmin); await piAdmin.waitForTimeout(600);
     ok(await piAdmin.$eval('[data-notify-toggle]', (e) => e.hidden), 'no host emails');
     await next(piAdmin); await piAdmin.waitForTimeout(600);
-    await piAdmin.click('[data-photos-choice] [data-value="off"]');
+    await piAdmin.click('[data-photos-choice] [data-value="all"]');
     await piAdmin.click('[data-sign-choice] [data-value="new"]');
     ok(await piAdmin.$eval('[data-sign-email-toggle]', (e) => e.hidden), 'no emailed signed copy');
     await piAdmin.click('[data-eod-choice] [data-value="23:59"]');
@@ -963,14 +958,27 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await piAdmin.click('[data-phone-on]');
     await piAdmin.waitForSelector('[data-phone-qr]:not([hidden]) svg.qr');
     const piPhoneUrl = await text(piAdmin, '[data-phone-qr] code');
-    ok(piPhoneUrl.includes(encodeURIComponent(piLinks.api)), `the QR code points phones to the box through the website: ${piPhoneUrl}`);
+    ok(piPhoneUrl.startsWith(`${lan.base}web/?visit=`) && piPhoneUrl.includes(encodeURIComponent(piLinks.api)), `the QR code points phones to the box on the Wi-Fi: ${piPhoneUrl}`);
+    ok(/need to be on your Wi-Fi/.test(await text(piAdmin, '[data-phone-text]')), 'the admin is told visitors need the Wi-Fi');
+    // The guest Wi-Fi goes on the poster, as a second code that connects phones.
+    await set(piAdmin, 'input[name="wifi-name"]', 'Initrode Guest');
+    await set(piAdmin, 'input[name="wifi-password"]', 'welcome;123');
+    await piAdmin.click('[data-wifi-save]');
+    await piAdmin.waitForFunction(() => /Wi-Fi saved/.test(document.querySelector('[data-toast]').textContent));
+    ok(JSON.parse(fs.readFileSync(path.join(boxDir, 'settings.json'), 'utf8')).phone.wifiName === 'Initrode Guest', 'the Wi-Fi is kept with the settings');
+    await piAdmin.click('[data-phone-poster]');
+    await piAdmin.waitForSelector('[data-overlay="poster"]:not([hidden]) [data-poster-wifi]:not([hidden]) svg.qr');
+    ok(/1\. Join the Wi-Fi "Initrode Guest" \(password: welcome;123\)/.test(await text(piAdmin, '[data-poster-wifi-text]')) && !(await piAdmin.$eval('[data-poster-step2]', (e) => e.hidden)), 'the poster: join the Wi-Fi, then scan to sign in');
+    await snap(piAdmin, 'box-poster-wifi');
+    await piAdmin.click('[data-poster-close]');
     await piAdmin.click('[data-admin-exit]');
     await waitView(piAdmin, 'welcome');
 
-    // A visitor scans it with their phone.
-    const piPhone = await open(browser, piPhoneUrl, null, { device: devices['iPhone 13'], box: pi });
+    // A visitor scans it with their phone, on the Wi-Fi.
+    const piPhone = await open(browser, piPhoneUrl, null, { device: devices['iPhone 13'] });
     await waitView(piPhone, 'welcome');
     ok(await piPhone.$eval('[data-org-name]', (e) => e.textContent) === 'Initrode', 'the phone shows the company');
+    ok(await piPhone.evaluate(() => !window.isSecureContext), 'from the Wi-Fi address, not https');
     await piPhone.tap('[data-screen="welcome"] .welcome-title');
     await waitView(piPhone, 'form');
     await formNext(piPhone);
@@ -995,6 +1003,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     const miltonVisit = records.visits.find((v) => v.first === 'Milton');
     ok(miltonVisit && miltonVisit.method === 'phone' && !miltonVisit.signedOut && miltonVisit.badge === 'V1', 'the visit is in the records on the box');
     ok(fs.readdirSync(path.join(boxDir, 'files')).some((f) => f.startsWith('signature-') && f.endsWith('.png')), 'and the signature, as a picture file');
+    ok(!fs.readdirSync(path.join(boxDir, 'files')).some((f) => f.startsWith('visitor-')), 'no photo was asked for on the Wi-Fi (phones need https for the camera)');
     await piPhone.tap('[data-screen="done"] [data-go="welcome"]');
     await waitView(piPhone, 'welcome');
     await piPhone.tap('[data-leave-open]');
@@ -1016,6 +1025,7 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(true, 'Settings says the records are on the Raspberry Pi or PC');
     ok(!piAdmin.errors.length, `no page errors: ${piAdmin.errors.join(' | ')}`);
     await piAdmin.context().close();
+    lan.server.close();
     fs.rmSync(boxDir, { recursive: true, force: true });
 
     // ================================================================ the install page

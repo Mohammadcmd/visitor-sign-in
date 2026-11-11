@@ -115,7 +115,7 @@ function renderAgreement() {
 function buildFlow() {
   if (extra?.joining) return ['connect'];
   // With licensing on, the business accepts the license agreement after giving its name.
-  const f = ['device', 'company', ...(PAYWALL.enabled ? ['agreement'] : []), 'admin', 'logo', 'badges', 'storage'];
+  const f = [...(CONFIG.BOX && !window.isSecureContext ? [] : ['device']), 'company', ...(PAYWALL.enabled ? ['agreement'] : []), 'admin', 'logo', 'badges', 'storage'];
   if (draft.storage === 'cloud') f.push('connect');
   f.push('screening', 'hosts', 'touches', 'ready');
   return f;

@@ -64,7 +64,8 @@ This file is the plan and the progress. Each work session updates the checklists
 
 ### Phase 1c: screenless with a Raspberry Pi or PC (built)
 - [x] The records on a Raspberry Pi or PC in the building (`server/`), with the kiosk's own engine, a daily backup, the end of day and retention
-- [x] Reached through the website (a Durable Object relay), so there's no router setup or domain, and phones get HTTPS
+- [x] On the building's Wi-Fi with no website or tokens: the PC or Pi serves the sign-in page itself, with a Wi-Fi QR code on the poster (phones skip the photo there)
+- [x] Optionally through the website (a Durable Object relay), so phones on mobile data reach it over https
 - [x] A one-command Pi installer that starts it by itself, and double-click start files for Windows and Mac
 - [x] Selling: Android tablets, or screenless (iPads aren't offered for now)
 - [ ] Emails from the Pi (host notifications, alerts, the daily summary)

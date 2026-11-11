@@ -111,13 +111,19 @@ export function openBox({ dataDir, name = '', defaultName = '', timeZone = '' })
   /** One request at a time, so two sign-ins never trip over each other. */
   const serial = (fn) => { const run = queue.then(fn, fn); queue = run.catch(() => {}); return run; };
 
+  let localBase = '';
   async function status(extra = {}) {
     const p = await engine.act(store, 'ping', {});
-    return { ...p, sheetName: config.name, backend: 'box', ...extra };
+    // Where phones find it on the local Wi-Fi, for the poster's QR code (local.mjs).
+    const local = localBase ? { web: `${localBase}web/`, api: `${localBase}box/${config.boxId}` } : {};
+    return { ...p, sheetName: config.name, backend: 'box', ...local, ...extra };
   }
 
-  /** Answers one request from a kiosk, the admin screen or a visitor's phone. */
-  async function handle(req) {
+  /**
+   * Answers one request from a kiosk, the admin screen or a visitor's phone.
+   * secure: false for the local Wi-Fi page (http), where phones can't use the camera.
+   */
+  async function handle(req, { secure = true } = {}) {
     if (!req || typeof req !== 'object' || typeof req.action !== 'string') return { ok: false, error: 'bad_request' };
     if (req.action === 'claim') {
       if (typeof req.key !== 'string' || !/^[A-Za-z0-9-]{24,64}$/.test(req.key)) return { ok: false, error: 'bad_key' };
@@ -125,7 +131,7 @@ export function openBox({ dataDir, name = '', defaultName = '', timeZone = '' })
       if (req.key !== config.kioskKey) return { ok: false, error: 'claimed' };
       return status({ claimed: false });
     }
-    const args = req.args && typeof req.args === 'object' ? req.args : {};
+    let args = req.args && typeof req.args === 'object' ? req.args : {};
     if (typeof req.phone === 'string') {
       if (!store.phoneKey || req.phone !== store.phoneKey) return { ok: false, error: 'phone_link' };
       if (!PHONE_ACTIONS.includes(req.action)) return { ok: false, error: 'not_allowed' };
@@ -135,10 +141,16 @@ export function openBox({ dataDir, name = '', defaultName = '', timeZone = '' })
         if (phoneWindow.start !== win) phoneWindow = { start: win, n: 0 };
         if (++phoneWindow.n > PHONE_RATE.max) return { ok: false, error: 'too_many' };
       }
+      if (!secure) args = { ...args, noCamera: true };
     } else if (req.key !== config.kioskKey) {
       return { ok: false, error: 'kiosk_key' };
     }
     if (req.action === 'ping') return status();
+    if (req.action === 'phoneStart' && !secure) {
+      // No camera on a page that isn't https: the phone skips the photo.
+      const out = await engine.act(store, 'phoneStart', {});
+      return out.ok ? { ...out, settings: { ...out.settings, photos: 'off', quickEntry: false } } : out;
+    }
 
     const write = !READS.has(req.action);
     const rid = write && typeof req.rid === 'string' && /^[A-Za-z0-9-]{6,64}$/.test(req.rid) ? req.rid : '';
@@ -190,6 +202,8 @@ export function openBox({ dataDir, name = '', defaultName = '', timeZone = '' })
     config,
     handle,
     chores,
+    /** Where it's served on the local network (serveLocal), so the admin screen's QR code points there. */
+    setLocal(base) { localBase = base ? base.replace(/\/?$/, '/') : ''; },
     /** For the README and the console: where to open the kiosk connected to this box. */
     links(siteUrl) {
       const site = siteUrl.replace(/\/?$/, '/');

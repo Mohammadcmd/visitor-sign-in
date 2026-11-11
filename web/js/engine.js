@@ -26,7 +26,7 @@ async function phoneHash(token) {
 const phoneArgs = (a) => ({
   first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: a.purpose, agreed: a.agreed === true,
   photo: a.photo, answers: a.answers, flags: a.flags, reasons: a.reasons, signature: a.signature, agreement: a.agreement,
-  language: a.language, email: a.email, method: 'phone',
+  language: a.language, email: a.email, method: 'phone', noCamera: a.noCamera === true,
 });
 
 /** A company with no records yet. */
@@ -219,7 +219,8 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
         if (st.form.askHost && !v.visiting) missing.push('visiting');
         if (st.form.askPurpose && !v.purpose) missing.push('purpose');
         if (st.form.rules.length && !v.agreed) missing.push('agreed');
-        if (!a.photo && st.photos === 'all') missing.push('photo');
+        // A phone on a page that can't use its camera (not https: the local Wi-Fi) signs in without one.
+        if (!a.photo && st.photos === 'all' && !(a.method === 'phone' && a.noCamera)) missing.push('photo');
         if (missing.length) return { ok: false, error: 'missing', fields: missing };
         v.answers = cleanAnswers(a.answers);
         const flags = cleanFlags(a.flags);
@@ -417,7 +418,7 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
             org: { name: st.org.name || '', tagline: st.org.tagline || '', accent: st.org.accent || '' },
             form: st.form, screening: { questions: st.screening.questions || [], declineMessage: st.screening.declineMessage || '' },
             photos: st.photos, languages: st.languages, translations: st.translations, signature: { ...st.signature, emailCopy: false },
-            trialStarted: st.trialStarted || '', phone: st.phone || {},
+            trialStarted: st.trialStarted || '', phone: { code: st.phone?.code || '', license: st.phone?.license || '' },
           },
         };
       }

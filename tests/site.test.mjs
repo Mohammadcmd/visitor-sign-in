@@ -160,7 +160,8 @@ try {
   const unzipped = join(out, 'server-app');
   execFileSync('unzip', ['-q', serverZip, '-d', unzipped]);
   const printed = execFileSync(process.execPath, [join(unzipped, 'server/visitor-server.mjs'), '--data', join(out, 'server-data'), '--print-link'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  ok(printed.startsWith(`${siteUrl}web/?api=${encodeURIComponent(`${siteUrl}box/`)}`), `the unzipped program runs on its own and prints its setup link: ${printed.trim().slice(0, 90)}…`);
+  ok(/^http:\/\/[^/]+:8080\/web\/\?api=http%3A%2F%2F[^&]+%3A8080%2Fbox%2F[a-z0-9]{20}&key=k-[A-Z0-9]{30}\s*$/.test(printed), `the unzipped program runs on its own and prints its setup link on the Wi-Fi: ${printed.trim().slice(0, 90)}…`);
+  ok(existsSync(join(unzipped, 'web/index.html')) && existsSync(join(unzipped, 'START HERE.txt')), 'with the kiosk it serves, and a START HERE note');
   const installer = readFileSync(join(site, 'downloads', 'install-pi.sh'), 'utf8');
   ok(!installer.includes('@SITE@') && installer.includes(`SITE="\${VSI_SITE:-${siteUrl}}"`), 'the Pi installer knows the website');
   ok(readFileSync(join(site, 'downloads.html'), 'utf8').includes('install-pi.sh | sudo bash'), 'the downloads page shows the one command for a Pi');

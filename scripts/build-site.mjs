@@ -73,19 +73,9 @@ if (opt('web-zip')) {
 // Screenless sign-in on a Raspberry Pi or PC (server/): the program as a zip, and the Pi installer.
 let serverZip = null;
 {
-  const stage = mkdtempSync(join(tmpdir(), 'vsi-server-'));
-  try {
-    const files = ['server/box.mjs', 'server/relay.mjs', 'server/visitor-server.mjs', 'server/README.md', 'server/start-windows.cmd', 'server/start-mac.command',
-      'web/config.js', 'web/js/engine.js', 'web/js/match.js', 'web/js/settings.js', 'web/js/qr.js', 'web/vendor/qrcode/qrcode.js', 'LICENSE'];
-    for (const f of files) { mkdirSync(dirname(join(stage, f)), { recursive: true }); copyFileSync(join(root, f), join(stage, f)); }
-    // Node reads the kiosk's files as modules, without a warning.
-    writeFileSync(join(stage, 'web/package.json'), '{ "type": "module" }\n');
-    execFileSync('zip', ['-qr', join(out, 'downloads', 'visitor-sign-in-server.zip'), '.'], { cwd: stage });
-    serverZip = { version, ...file('visitor-sign-in-server.zip') };
-  } catch (err) {
-    if (err.syscall === 'spawnSync zip' || err.path === 'zip') console.log("The Raspberry Pi / PC download wasn't made: there's no zip command here.");
-    else throw err;
-  } finally { rmSync(stage, { recursive: true, force: true }); }
+  const { buildServerZip } = await import(pathToFileURL(join(root, 'scripts/build-server.mjs')).href);
+  if (buildServerZip(join(out, 'downloads', 'visitor-sign-in-server.zip'))) serverZip = { version, ...file('visitor-sign-in-server.zip') };
+  else console.log("The Raspberry Pi / PC download wasn't made: there's no zip command here.");
   writeFileSync(join(out, 'downloads', 'install-pi.sh'), read('server/install-pi.sh').replaceAll('@SITE@', siteUrl));
 }
 
