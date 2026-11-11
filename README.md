@@ -2,7 +2,7 @@
 
 A visitor sign-in kiosk for any business's lobby tablet. It runs as an **Android app** or in a browser (iPad or any tablet). A short **setup wizard** makes it yours: your company name, logo and colors, an admin PIN, your NFC/RFID visitor badges, where records are kept, and optional **screening questions** that can politely decline a visitor, alert your staff and still be overridden by an admin.
 
-**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: selling the kiosk](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: licenses per kiosk](docs/PAYWALL.md)
+**Version 1.1.0** · [Launch checklist](docs/LAUNCH.md) · [Releases](../../releases) (Android app, browser kiosk, backend script) · [Changelog](CHANGELOG.md) · [Roadmap: selling the kiosk](docs/ROADMAP.md) · [Privacy notice template](docs/privacy-notice.md) · [Selling it: licenses per kiosk](docs/PAYWALL.md) · [License agreement and privacy policy (drafts)](docs/legal/README.md)
 
 | | | |
 |---|---|---|
@@ -23,7 +23,7 @@ android/       the Android app that wraps web/ (guide: android/README.md)
 apps-script/   the Google Sheets backend (Apps Script), used when records go to Google Sheets
 scripts/       build-android.mjs builds the APK; sync-backend.mjs bundles the backend into the wizard
 tests/         backend tests, file checks, and an end-to-end browser test
-docs/          launch checklist, privacy notice template, presets, screenshots, project history
+docs/          launch checklist, privacy notice template, legal drafts, presets, screenshots, project history
 media/         product demo videos; downloads/ an earlier demo build of the app
 tools/         icon rendering (tools/icons/) and the demo video kit (tools/demo-video/)
 ```
@@ -33,7 +33,7 @@ How it was designed, and why, is in [docs/PROJECT_HISTORY.md](docs/PROJECT_HISTO
 ## Getting started
 
 1. **Try it:** `npm start`, then open `http://localhost:8080/web/?demo` (sample company, a panel that simulates badge taps, admin PIN `123456`, nothing saved).
-2. **Install it:** open the kiosk's address on the tablet (with GitHub Pages, `https://<owner>.github.io/<repository>/`). The install page recognizes the device: an Android tablet gets the latest app to download, an iPad gets the kiosk and the Add to Home Screen steps, and a computer shows a QR code to scan with the tablet.
+2. **Install it:** open the website on the tablet (`https://visitor-sign-in.mohammadjalbibi.workers.dev/`, see [site/README.md](site/README.md); or with GitHub Pages, `https://<owner>.github.io/<repository>/`). The install page recognizes the device: an Android tablet gets the latest app to download, an iPad gets the kiosk and the Add to Home Screen steps, and a computer shows a QR code to scan with the tablet.
 3. **Set it up:** the first setup step checks the tablet (camera, face recognition, badge reader, internet, clock, storage, screen and software) and says how to fix anything. Then a few questions, and you're ready. The [launch checklist](docs/LAUNCH.md) has every step.
 
 ## Setup: the first start
@@ -94,13 +94,25 @@ Electronic signatures are generally accepted for agreements like these (in the U
 
 ### Phone sign-in: a QR code instead of a tablet
 
-With Google Sheets, a business with no tablet by the door can put up a QR code instead. Visitors scan it with their phone's camera and sign in on their own phone: the same questions, rules, finger signature, photo, Spanish and polite declines, with host emails and staff alerts as usual.
+With Google Sheets, or screenless with a **Raspberry Pi or PC** (below), a business with no tablet by the door can put up a QR code instead. Visitors scan it with their phone's camera and sign in on their own phone: the same questions, rules, finger signature, photo, Spanish and polite declines, with host emails and staff alerts as usual.
 
 - **Switching it on:** Admin → Settings → **Phone sign-in (QR code)** → **Switch on**. Then **Print the poster**, or save it as an image to print elsewhere. Set up and run the admin screen on any tablet or computer browser.
 - **Signing out:** the visitor's phone remembers them. "Leaving?" signs them out, and next time "Sign in as Ana Lopez" signs them back in with one tap. Staff can also sign them out on the admin screen, and End of day still applies.
 - **Kept safe:** phones get their own key, and it only signs visitors in and out and records declines. A phone never sees other visitors, the staff list, face data or the admin screen, and it can only sign out the visitor it signed in. To limit a photographed poster, the script accepts at most 60 phone sign-ins in 10 minutes, and **Change the QR code** makes old posters stop working.
 - **Left out on phones:** badges, staff overrides, face recognition and expected-visitor greetings. Staff can still let a declined visitor in from Needs attention.
-- **Where the poster points:** the QR code points at this kiosk on the web. For the Android app, set `PUBLIC_URL` in `web/config.js` to where the browser kiosk is hosted.
+- **Where the poster points:** the QR code points at this kiosk on the web. From the Android app, it points at the kiosk on your website (`SITE_URL` in `web/config.js`), or at `PUBLIC_URL` if that's set.
+
+### Screenless: a PC or Raspberry Pi on your Wi-Fi
+
+For a door with no tablet and no Google account. A PC or Raspberry Pi in the building keeps the records and shows the sign-in page on the building's Wi-Fi. Visitors sign in on their phones as above. There's no website, account or token, and it works without internet. See [server/README.md](server/README.md).
+
+- **The file to send:** `npm run server:zip` makes `visitor-sign-in-server.zip`, with a START HERE note.
+  - **On a PC:** install Node.js, unzip, and double-click `server/start-windows.cmd` or `start-mac.command`.
+  - **On a Pi:** `sudo bash server/install-pi.sh`, which makes it start by itself.
+- **It prints a setup link.** Open it on any computer or tablet on the same Wi-Fi, set up, then switch on phone sign-in and type the guest Wi-Fi. The poster shows a code that joins the Wi-Fi, then the sign-in code.
+- **On the Wi-Fi, phones skip the visitor photo:** phones only allow the camera on https websites. Names, questions, rules, signatures and passes all work.
+- **Records** are files in one folder (records, settings and signatures as images), with a daily backup copy. It also signs everyone out at the end of the day and deletes old records.
+- **Not yet:** emails (host notifications, alerts, daily summary). Optionally, later, `--site` connects it to a website (`site/`) so phones on mobile data can reach it over https.
 
 ### Languages
 
@@ -129,6 +141,8 @@ Press and hold the logo for 2.5 seconds, then enter the PIN. It closes itself af
 ## Where records are kept
 
 **On this tablet:** visitors, visits, badges and photos stay in the browser's storage on that tablet, private and offline. The kiosk asks the browser to keep them permanently. Good for one tablet and simple needs; export from Admin → History now and then.
+
+**A Raspberry Pi or PC:** for screenless sign-in (above). Everything is in its records folder: `records.json`, `settings.json`, and photos and signatures as image files ([server/README.md](server/README.md)).
 
 **Google Sheets:** the script in `apps-script/Code.gs` runs in your own Google account. It makes these tabs (columns are found by header name, so you can reorder or add columns):
 
@@ -161,6 +175,7 @@ The first kiosk to connect becomes the sheet's owner: its random kiosk key is sa
 | **Tests** | On every push: backend tests, file checks, and the end-to-end test in Chromium. Screenshots are attached to each run. |
 | **Build Android app** | On every change to the app: an APK to download (`visitor-sign-in`). |
 | **Release** | Push a tag like `v1.0.0` (matching `package.json`): a GitHub Release with the APK, the browser kiosk as a zip, and `Code.gs`, with notes from the changelog. |
+| **Publish the website (Cloudflare)** | Publishes the website ([site/README.md](site/README.md)): install page, browser kiosk, downloads, update check and license status files. Releases do it by themselves once the `CLOUDFLARE_API_TOKEN` secret is added. |
 | **Publish the kiosk (GitHub Pages)** | Hosts the browser kiosk at `https://<owner>.github.io/<repository>/`. Turn on Pages once (Settings → Pages → Source: GitHub Actions) and run it; add the repository variable `KIOSK_PAGES` = `on` to publish on every change. |
 
 The version lives in `package.json`, `web/config.js` and `web/sw.js` (the tests check they match); the Android version code is worked out from it, so each release installs as an update.
@@ -172,8 +187,9 @@ The kiosk includes per-tablet licensing, **switched off** until you turn it on. 
 - **Keys for one tablet:** each key names a tablet (by its code) and the date it's paid until. You sign them with your own key, and the kiosk checks them offline.
 - **Reminders, a grace period, then a pause:** the admin screen reminds staff before the date and allows a grace period after it. Then new sign-ins pause until the license is renewed.
 - **Nothing is lost while paused:** signing out, the roll call, the admin screen and exports keep working, and records are never deleted.
-- **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check) through small signed status files on your website.
+- **Renew or switch off from your side:** you can renew a kiosk or switch it off early (for example, after a bounced check). The tools send a small signed status file to your website ([site/](site/README.md)), which accepts only files signed with your key.
 - **Tools on your computer:** issue, renew, switch off and on, list what's due, and keep a payments ledger with checks included (`npm run license:*`).
+- **A license agreement in setup:** the business accepts it with a name, and the kiosk keeps who and when. Drafts of the agreement and a privacy policy, for a lawyer to review, are in [docs/legal/](docs/legal/README.md).
 
 See [docs/PAYWALL.md](docs/PAYWALL.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 

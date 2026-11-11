@@ -4,6 +4,8 @@
 //    sign-in, a declined visitor, a staff override, the admin screen and a sign-out.
 // 2. Setup with Google Sheets (the real apps-script/Code.gs, running on the fakes
 //    in tests/fake-google.js) and no badges, then a second tablet joining by link.
+// 4. Screenless: a Raspberry Pi or PC (the real server/) serving the kiosk on the
+//    Wi-Fi, set up from its setup link, then a visitor on their own phone.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +19,7 @@ const os = require('os');
 const WEB = path.join(__dirname, '..');
 const APP_VERSION = JSON.parse(fs.readFileSync(path.join(WEB, 'package.json'), 'utf8')).version;
 const SHOTS = process.env.SHOTS || '';
+const SITE_URL = /^\s*SITE_URL: '([^']*)'/m.exec(fs.readFileSync(path.join(__dirname, '../web/config.js'), 'utf8'))[1];
 const PIN = '482916';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const EXEC = 'https://script.google.com/macros/s/TEST-deployment_1/exec';
@@ -49,6 +52,10 @@ async function open(browser, url, backend, { offline = false, device = null } = 
       assets: [{ name: 'visitor-sign-in-9.9.9.apk', size: 12e6, browser_download_url: 'https://github.com/example/visitor-sign-in/releases/download/v9.9.9/visitor-sign-in-9.9.9.apk' }],
     }),
   }));
+  // The seller's website (CONFIG.SITE_URL): a newer version to offer, and nothing else from the real site.
+  await ctx.route(`${SITE_URL}**`, (route) => (new URL(route.request().url()).pathname === '/latest.json'
+    ? route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ version: '9.9.9', page: SITE_URL, apk: { version: '9.9.9', name: 'visitor-sign-in-9.9.9.apk', size: 12e6, url: `${SITE_URL}downloads/visitor-sign-in-9.9.9.apk` } }) })
+    : route.fulfill({ status: 404, body: '' })));
   // Only the backend address is faked: the tablet check's reachability test goes to the real network
   // (an intercepted reply can't answer a no-cors request).
   await ctx.route('https://script.google.com/macros/**', async (route) => {
@@ -848,6 +855,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(/License added: Northwind Labs, paid until \d{4}-/.test(await text(paid, '[data-toast]')), 'the key is added');
     await paid.waitForFunction(() => /Licensed to Northwind Labs, paid until/.test(document.querySelector('[data-plan-text]').textContent));
     ok(true, 'the License card shows it');
+    // The license agreement: not accepted on this kiosk yet, so the admin reads and accepts it.
+    ok(/hasn't been accepted on this kiosk yet/.test(await text(paid, '[data-plan-text]')), 'the License card says the agreement is not accepted yet');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    const agText = await text(paid, '[data-ag-text]');
+    ok(/Shock Tech/.test(agText) && /Northwind Labs/.test(agText) && /14-day grace/.test(agText) && /sales@shocktech\.example/.test(agText), "the agreement names the seller and the business, with the kiosk's real grace period");
+    ok(!/\{\w+\}/.test(agText), 'no blanks left in braces');
+    ok(/state where Shock Tech is based/.test(agText), 'with no governing law set, it says where the seller is based');
+    await snap(paid, 'agreement-admin');
+    await paid.click('[data-ag-agree]');
+    ok(/Type your name/.test(await text(paid, '[data-ag-error]')), 'accepting needs a name');
+    await set(paid, 'input[name="ag-name"]', 'Jordan Lee');
+    await paid.click('[data-ag-agree]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
+    await paid.waitForFunction(() => /accepted by Jordan Lee/.test(document.querySelector('[data-plan-text]').textContent));
+    ok(true, 'the License card shows who accepted it');
+    ok(await paid.evaluate(async () => (await import('./js/settings.js')).settings().agreement.by) === 'Jordan Lee', 'and it is kept with the settings');
+    await paid.click('[data-agreement-open]');
+    await paid.waitForSelector('[data-overlay="agreement"]:not([hidden])');
+    ok(await paid.$eval('[data-ag-agree]', (e) => e.hidden) && /accepted by Jordan Lee/.test(await text(paid, '[data-ag-status]')), 'opened again, it is just to read');
+    await paid.click('[data-ag-close]');
+    await paid.waitForSelector('[data-overlay="agreement"][hidden]', { state: 'attached' });
     await paid.click('[data-admin-exit]');
     await waitView(paid, 'welcome');
     ok(await paid.$eval('[data-paused]', (e) => e.hidden), 'the kiosk is back on');
@@ -870,6 +899,135 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(!paid.errors.length, `no page errors: ${paid.errors.join(' | ')}`);
     await paid.context().close();
 
+    // ================================================================ 4. screenless: a Raspberry Pi or PC
+    const { openBox } = await import('../server/box.mjs');
+    const { serveLocal, lanAddress } = await import('../server/local.mjs');
+    const boxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsi-e2e-box-'));
+    const pi = openBox({ dataDir: boxDir, name: 'Lobby Pi' });
+    // The Pi serves the kiosk on the Wi-Fi itself, at this computer's network address (not https, like a real one).
+    const lan = await serveLocal({ box: pi, webDir: path.join(__dirname, '../web'), port: 0, address: lanAddress() });
+    pi.setLocal(lan.base);
+    const piLinks = pi.links(lan.base);
+    ok(piLinks.setup.startsWith(`${lan.base}web/?api=`) && /^http:\/\//.test(lan.base), `the box prints a setup link on the Wi-Fi: ${lan.base}`);
+    const piAdmin = await open(browser, piLinks.setup);
+    await waitView(piAdmin, 'setup');
+    ok(await piAdmin.evaluate(() => !window.isSecureContext), 'a Wi-Fi address, not https');
+    ok(await piAdmin.$eval('[data-sstep="company"]', (e) => e.classList.contains('active')), "setup skips the tablet check: this isn't the kiosk tablet");
+    await set(piAdmin, 'input[name="s-org"]', 'Initrode');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await set(piAdmin, 'input[name="s-admin"]', 'Dana Ruiz');
+    await set(piAdmin, 'input[name="s-pin"]', PIN);
+    await set(piAdmin, 'input[name="s-pin2"]', PIN);
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-setup-skip]'); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-badges-choice] .option[data-value="passes"]');
+    await set(piAdmin, 'input[name="s-passes"]', '2');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(/Raspberry Pi or PC/.test(await text(piAdmin, '[data-storage-builtin]')), 'records are kept on the Raspberry Pi or PC');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(/Connect to your Raspberry Pi or PC/.test(await text(piAdmin, '[data-sstep="connect"] h2')), 'the connect step names it');
+    await piAdmin.waitForSelector('[data-connect-status].ok');
+    ok(/Connected to "Lobby Pi"/.test(await text(piAdmin, '[data-connect-status]')), 'connected by the setup link, nothing to paste');
+    await snap(piAdmin, 'box-connected');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(await piAdmin.$eval('[data-alert-field]', (e) => e.hidden), 'no alert emails (it sends none yet)');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    ok(await piAdmin.$eval('[data-notify-toggle]', (e) => e.hidden), 'no host emails');
+    await next(piAdmin); await piAdmin.waitForTimeout(600);
+    await piAdmin.click('[data-photos-choice] [data-value="all"]');
+    await piAdmin.click('[data-sign-choice] [data-value="new"]');
+    ok(await piAdmin.$eval('[data-sign-email-toggle]', (e) => e.hidden), 'no emailed signed copy');
+    await piAdmin.click('[data-eod-choice] [data-value="23:59"]');
+    ok(await piAdmin.$eval('[data-summary-box]', (e) => e.hidden), 'no daily summary email');
+    await next(piAdmin);
+    await piAdmin.waitForFunction(() => document.querySelector('[data-setup-count]').textContent === 'Setup complete');
+    ok(/Raspberry Pi or PC: "Lobby Pi"/.test(await text(piAdmin, '[data-sstep="ready"]')), 'the summary says where records are');
+    await snap(piAdmin, 'box-ready');
+    await next(piAdmin);
+    await waitView(piAdmin, 'welcome');
+    ok(JSON.parse(fs.readFileSync(path.join(boxDir, 'settings.json'), 'utf8')).org.name === 'Initrode', 'the settings are kept on the box');
+
+    // The admin switches on the QR code for the door.
+    await holdLogo(piAdmin);
+    await piAdmin.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(piAdmin, PIN);
+    await waitView(piAdmin, 'admin');
+    await piAdmin.click('[data-admin-tab="settings"]');
+    await piAdmin.waitForSelector('[data-phone-card]:not([hidden]) [data-phone-on]');
+    ok(/go to your Raspberry Pi or PC/.test(await text(piAdmin, '[data-phone-text]')), 'phone sign-in, to the box');
+    await piAdmin.click('[data-phone-on]');
+    await piAdmin.waitForSelector('[data-phone-qr]:not([hidden]) svg.qr');
+    const piPhoneUrl = await text(piAdmin, '[data-phone-qr] code');
+    ok(piPhoneUrl.startsWith(`${lan.base}web/?visit=`) && piPhoneUrl.includes(encodeURIComponent(piLinks.api)), `the QR code points phones to the box on the Wi-Fi: ${piPhoneUrl}`);
+    ok(/need to be on your Wi-Fi/.test(await text(piAdmin, '[data-phone-text]')), 'the admin is told visitors need the Wi-Fi');
+    // The guest Wi-Fi goes on the poster, as a second code that connects phones.
+    await set(piAdmin, 'input[name="wifi-name"]', 'Initrode Guest');
+    await set(piAdmin, 'input[name="wifi-password"]', 'welcome;123');
+    await piAdmin.click('[data-wifi-save]');
+    await piAdmin.waitForFunction(() => /Wi-Fi saved/.test(document.querySelector('[data-toast]').textContent));
+    ok(JSON.parse(fs.readFileSync(path.join(boxDir, 'settings.json'), 'utf8')).phone.wifiName === 'Initrode Guest', 'the Wi-Fi is kept with the settings');
+    await piAdmin.click('[data-phone-poster]');
+    await piAdmin.waitForSelector('[data-overlay="poster"]:not([hidden]) [data-poster-wifi]:not([hidden]) svg.qr');
+    ok(/1\. Join the Wi-Fi "Initrode Guest" \(password: welcome;123\)/.test(await text(piAdmin, '[data-poster-wifi-text]')) && !(await piAdmin.$eval('[data-poster-step2]', (e) => e.hidden)), 'the poster: join the Wi-Fi, then scan to sign in');
+    await snap(piAdmin, 'box-poster-wifi');
+    await piAdmin.click('[data-poster-close]');
+    await piAdmin.click('[data-admin-exit]');
+    await waitView(piAdmin, 'welcome');
+
+    // A visitor scans it with their phone, on the Wi-Fi.
+    const piPhone = await open(browser, piPhoneUrl, null, { device: devices['iPhone 13'] });
+    await waitView(piPhone, 'welcome');
+    ok(await piPhone.$eval('[data-org-name]', (e) => e.textContent) === 'Initrode', 'the phone shows the company');
+    ok(await piPhone.evaluate(() => !window.isSecureContext), 'from the Wi-Fi address, not https');
+    await piPhone.tap('[data-screen="welcome"] .welcome-title');
+    await waitView(piPhone, 'form');
+    await formNext(piPhone);
+    await piPhone.tap('input[name="first"]');
+    await piPhone.fill('input[name="first"]', 'Milton');
+    await piPhone.fill('input[name="last"]', 'Waddams');
+    await formNext(piPhone);
+    for (const [name, value] of [['company', 'Initech'], ['visiting', 'Bill Lumbergh'], ['purpose', 'My stapler']]) {
+      await piPhone.tap(`input[name="${name}"]`);
+      await piPhone.fill(`input[name="${name}"]`, value);
+    }
+    await formNext(piPhone);
+    ok(await step(piPhone) === 'rules', 'the rules, to sign');
+    ok(await piPhone.$eval('[data-sign-email]', (e) => e.hidden), 'no offer to email a copy');
+    await sign(piPhone);
+    await formNext(piPhone);
+    await waitView(piPhone, 'done');
+    ok(/You're all set, Milton/.test(await text(piPhone, '[data-done-title]')), 'signed in on the phone');
+    ok(await text(piPhone, '[data-done-pass]') === 'Please take visitor pass V1.', 'with a pass to take');
+    await snap(piPhone, 'box-phone-done');
+    const records = JSON.parse(fs.readFileSync(path.join(boxDir, 'records.json'), 'utf8'));
+    const miltonVisit = records.visits.find((v) => v.first === 'Milton');
+    ok(miltonVisit && miltonVisit.method === 'phone' && !miltonVisit.signedOut && miltonVisit.badge === 'V1', 'the visit is in the records on the box');
+    ok(fs.readdirSync(path.join(boxDir, 'files')).some((f) => f.startsWith('signature-') && f.endsWith('.png')), 'and the signature, as a picture file');
+    ok(!fs.readdirSync(path.join(boxDir, 'files')).some((f) => f.startsWith('visitor-')), 'no photo was asked for on the Wi-Fi (phones need https for the camera)');
+    await piPhone.tap('[data-screen="done"] [data-go="welcome"]');
+    await waitView(piPhone, 'welcome');
+    await piPhone.tap('[data-leave-open]');
+    await piPhone.waitForSelector('[data-overlay="signout"]:not([hidden])');
+    ok(/Goodbye, Milton/.test(await text(piPhone, '[data-signout-title]')) && /give visitor pass V1 back/.test(await text(piPhone, '[data-signout-text]')), 'signed out on the phone, and asked for the pass back');
+    ok(!piPhone.errors.length, `no page errors on the phone: ${piPhone.errors.join(' | ')}`);
+    await piPhone.context().close();
+
+    // The admin screen sees it, and says where the records are.
+    await holdLogo(piAdmin);
+    await piAdmin.waitForSelector('[data-overlay="pin"]:not([hidden])');
+    await enterPin(piAdmin, PIN);
+    await waitView(piAdmin, 'admin');
+    await piAdmin.click('[data-admin-tab="history"]');
+    await piAdmin.waitForSelector('[data-history-list] .admin-row');
+    ok(/Milton/.test(await text(piAdmin, '[data-history-list]')), 'the visit is in History');
+    await piAdmin.click('[data-admin-tab="settings"]');
+    await piAdmin.waitForFunction(() => /kept on your Raspberry Pi or PC/.test(document.querySelector('[data-storage-info]')?.textContent || ''));
+    ok(true, 'Settings says the records are on the Raspberry Pi or PC');
+    ok(!piAdmin.errors.length, `no page errors: ${piAdmin.errors.join(' | ')}`);
+    await piAdmin.context().close();
+    lan.server.close();
+    fs.rmSync(boxDir, { recursive: true, force: true });
+
     // ================================================================ the install page
     const home = await open(browser, site);
     await home.waitForSelector('[data-for="desktop"]:not([hidden]) [data-page-qr] svg.qr');
@@ -888,6 +1046,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     ok(await dpage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === 'https://example.com/visitor-sign-in-9.9.9.apk', 'an Android tablet gets the latest app to download');
     await snap(dpage, 'install-android');
     await droid.close();
+    // An iPad is pointed to Android tablets or screenless sign-in (iPads aren't offered for now).
+    const ipad = await browser.newContext({ ...devices['iPad Pro 11'] });
+    const ipage = await ipad.newPage();
+    await ipage.goto(site);
+    await ipage.waitForSelector('[data-for="ios"]:not([hidden])');
+    ok(/runs on Android tablets/.test(await ipage.$eval('[data-for="ios"]', (e) => e.textContent)), 'an iPad is told it runs on Android tablets, or screenless');
+    await ipad.close();
+    // On the seller's website, the install page offers the app from latest.json, not GitHub.
+    const own = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' });
+    let askedGithub = false;
+    await own.route('https://api.github.com/**', (route) => { askedGithub = true; return route.abort(); });
+    await own.route(`${site}latest.json`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ version: '9.9.10', apk: { version: '9.9.10', name: 'visitor-sign-in-9.9.10.apk', size: 13e6, url: `${site}downloads/visitor-sign-in-9.9.10.apk` } }) }));
+    const opage = await own.newPage();
+    await opage.goto(site);
+    await opage.waitForFunction(() => /Version 9\.9\.10, 13 MB/.test(document.querySelector('[data-apk-note]').textContent));
+    ok(await opage.$eval('[data-for="android"] [data-apk]', (a) => a.href) === `${site}downloads/visitor-sign-in-9.9.10.apk`, 'on the website, the app comes from its own downloads');
+    ok(await opage.$eval('[data-link="releases"]', (a) => a.getAttribute('href')) === 'downloads.html' && await opage.$eval('[data-link="privacy"]', (a) => a.getAttribute('href')) === 'privacy-notice.html', "and the footer links to the website's own pages");
+    ok(!askedGithub, 'without asking GitHub');
+    ok(await opage.$eval('[data-screenless] [data-screenless-link]', (a) => a.getAttribute('href')) === 'downloads.html#screenless', 'screenless sign-in links to the Raspberry Pi / PC downloads');
+    await opage.setViewportSize({ width: 1280, height: 800 });
+    ok(await opage.$eval('[data-buy]', (e) => e.hidden), 'no "Buy" section while licensing is off');
+    await own.close();
 
     // ================================================================ 3. the Shock Tech preset
     const preset = await open(browser, base);
@@ -897,6 +1077,28 @@ async function signInNewVisitor(page, { first, last, citizen, country, sick = 'N
     await preset.waitForFunction(() => document.querySelector('input[name="s-org"]').value === 'Shock Tech');
     ok(await preset.$eval('[data-preview-logo]', (e) => e.src.startsWith('data:image/png')), 'preset logo loaded');
     await snap(preset, 'preset');
+    // With licensing on, setup asks the business to accept the license agreement after its name.
+    await preset.evaluate(async () => {
+      const plans = await import('./js/plans.js');
+      Object.assign(plans.PAYWALL, { enabled: true, seller: 'Shock Tech', supportEmail: 'sales@shocktech.example', law: 'Michigan' });
+      document.dispatchEvent(new Event('kiosk-license-changed'));
+    });
+    await preset.waitForTimeout(400);
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="agreement"].active');
+    const setupAg = await text(preset, '[data-agreement-text]');
+    ok(/Shock Tech/.test(setupAg) && /laws of Michigan/.test(setupAg), 'setup shows the agreement with the seller and the governing law');
+    ok(/Shock Tech/.test(await text(preset, '[data-sstep="agreement"] .hint')), 'for the business being set up');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Type your name/.test(await text(preset, '[data-setup-error]')), 'it needs a name');
+    await set(preset, 'input[name="s-agree-name"]', 'Jordan Lee');
+    await next(preset); await preset.waitForTimeout(300);
+    ok(/Tick "I agree"/.test(await text(preset, '[data-setup-error]')), 'and "I agree"');
+    await preset.click('[data-agree-toggle]');
+    await snap(preset, 'setup-agreement');
+    await next(preset); await preset.waitForTimeout(600);
+    await preset.waitForSelector('[data-sstep="admin"].active');
+    ok(true, 'then on to the admin login');
     ok(!preset.errors.length, `no page errors: ${preset.errors.join(' | ')}`);
     console.log(`kiosk e2e passed (${checks} checks)`);
   } finally {

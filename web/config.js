@@ -69,7 +69,11 @@ const saved = connection();
 export const APP_VERSION = '1.1.0';
 
 export const CONFIG = {
-  // Where new versions are published (GitHub owner/repository). Admin → Settings → Diagnostics says when one is out.
+  // The seller's website (site/): the newest version (latest.json) and the app download, the
+  // browser kiosk (web/) and the license status files. Admin → Settings → Diagnostics says
+  // when a new version is out.
+  SITE_URL: 'https://visitor-sign-in.mohammadjalbibi.workers.dev/',
+  // Asked instead when the website can't be reached (GitHub owner/repository, while its releases are public).
   UPDATES_FROM: 'Mohammadcmd/visitor-sign-in',
 
   // Apps Script web app URL ending in /exec, and the key this kiosk connected with
@@ -80,9 +84,11 @@ export const CONFIG = {
   // ?demo: sample company and data, a panel that simulates badge taps, admin PIN 123456
   DEMO: query.has('demo') && !saved.api,
   // ?visit=…&api=…: a visitor's phone, from the QR code by the door
-  PHONE: /^ph[A-Z0-9]{30}$/.test(query.get('visit') || '') && /^https:\/\//.test(query.get('api') || '') ? { key: query.get('visit'), api: query.get('api') } : null,
+  PHONE: /^ph[A-Z0-9]{30}$/.test(query.get('visit') || '') && /^https?:\/\//.test(query.get('api') || '') ? { key: query.get('visit'), api: query.get('api') } : null,
+  // Records on a Raspberry Pi or PC (server/), reached through the website (…/box/<id>): no emails from it yet.
+  BOX: [saved.api, query.get('api')].some((u) => /^https?:\/\/[^/]+\/box\/[a-z0-9]{20}$/.test(u || '')),
   // Where this kiosk is on the web (such as 'https://yourcompany.com/web/'), for the phone sign-in QR code.
-  // Empty: the address it's open at (browser kiosks); the Android app needs it set.
+  // Empty: the address it's open at (browser kiosks), or the website's kiosk (SITE_URL + 'web/') in the Android app.
   PUBLIC_URL: '',
 
   // Return to the welcome screen after this long without a touch (ms)

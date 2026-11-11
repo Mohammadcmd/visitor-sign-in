@@ -5,7 +5,7 @@
   "description": "Visitor sign-in kiosk for any business: setup wizard, NFC/RFID badges, screening questions, records on the tablet or in Google Sheets, and an Android app",
   "scripts": {
     "start": "python3 -m http.server 8080",
-    "test": "node tests/apps-script.test.js && node tests/web.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/license.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/engine.test.mjs && node scripts/sync-backend.mjs --check",
+    "test": "node tests/apps-script.test.js && node tests/web.test.js && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/license.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/engine.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/site.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/server.test.mjs && node scripts/sync-backend.mjs --check && node scripts/sync-agreement.mjs --check",
     "test:e2e": "node tests/kiosk.e2e.js",
     "sync-backend": "node scripts/sync-backend.mjs",
     "icons": "node tools/icons/render.js",
@@ -17,7 +17,14 @@
     "license:off": "node tools/license/switch.mjs off",
     "license:on": "node tools/license/switch.mjs on",
     "license:list": "node tools/license/list.mjs",
-    "license:payments": "node tools/license/list.mjs payments"
+    "license:payments": "node tools/license/list.mjs payments",
+    "license:publish": "node tools/license/publish.mjs",
+    "server": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning server/visitor-server.mjs",
+    "test:relay": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/relay.test.mjs",
+    "server:zip": "node scripts/build-server.mjs",
+    "site:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-site.mjs",
+    "site:deploy": "npm run site:build && npx --yes wrangler@4.157.0 deploy --config site/wrangler.jsonc",
+    "sync-agreement": "node scripts/sync-agreement.mjs"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",

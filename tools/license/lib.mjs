@@ -4,12 +4,14 @@
 // Everything lives in the folder you run the tools from (next to
 // license-private.pem), never in the repository:
 //   licenses.json      every license you've issued and every payment recorded (keep it backed up)
-//   license-status/    one small signed file per license; put this folder on your website
-//                      (PAYWALL.statusUrl). Kiosks read their own file to pick up renewals
-//                      and to know if a license was switched off.
-import { createPrivateKey, randomBytes, sign } from 'node:crypto';
+//   license-status/    one small signed file per license. Each one is also sent to the
+//                      website (PAYWALL.statusUrl, site/README.md), which keeps it only if
+//                      it's signed with your key. Kiosks read their own file to pick up
+//                      renewals and to know if a license was switched off.
+import { createPrivateKey, createPublicKey, randomBytes, sign } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const args = process.argv.slice(2);
 export const opt = (name, fallback = '') => { const i = args.indexOf(`--${name}`); return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback; };
@@ -77,6 +79,41 @@ export function writeStatus(lic) {
   if (!existsSync(headers)) writeFileSync(headers, '/*\n  Access-Control-Allow-Origin: *\n  Access-Control-Expose-Headers: Date\n  Cache-Control: no-store\n');
   writeFileSync(join(dir, `${lic.id}.txt`), `${signed('VSS1', { id: lic.id, status: lic.status, key: lic.key, at: new Date().toISOString() })}\n`);
   return join(dir, `${lic.id}.txt`);
+}
+
+/**
+ * Where status files are sent: --publish <url>, or PAYWALL.statusUrl in
+ * web/js/plans.js once licensing is switched on there with this signing key's
+ * public half. Otherwise { why } says why not. --no-publish: never.
+ */
+export async function publishTarget() {
+  if (flag('no-publish')) return { why: '--no-publish' };
+  if (opt('publish')) return { url: opt('publish').replace(/\/?$/, '/') };
+  globalThis.localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const here = dirname(fileURLToPath(import.meta.url));
+  const { PAYWALL } = await import(pathToFileURL(join(here, '../../web/js/plans.js')).href);
+  if (!PAYWALL.statusUrl) return { why: 'PAYWALL.statusUrl in web/js/plans.js is empty' };
+  if (!PAYWALL.enabled) return { why: "licensing isn't switched on in web/js/plans.js yet (PAYWALL.enabled)" };
+  const mine = createPublicKey(key()).export({ format: 'jwk' });
+  if (PAYWALL.publicKey?.x !== mine.x || PAYWALL.publicKey?.y !== mine.y) return { why: "this signing key isn't the one in PAYWALL.publicKey (web/js/plans.js)" };
+  return { url: PAYWALL.statusUrl.replace(/\/?$/, '/') };
+}
+
+/** Sends a license's status file to the website. Returns a line to print. */
+export async function publishStatus(id, target) {
+  const file = join(statusDir(), `${id}.txt`);
+  if (!target) target = await publishTarget();
+  if (!target.url) return `Not sent to the website: ${target.why}. Kiosks pick it up once it is (npm run license:publish).`;
+  try {
+    const res = await fetch(`${target.url}${id}.txt`, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: readFileSync(file, 'utf8') });
+    const text = (await res.text()).trim();
+    if (res.ok) return `Sent to the website: ${text}`;
+    process.exitCode = 1;
+    return `The website refused it (${res.status}): ${text}`;
+  } catch (err) {
+    process.exitCode = 1;
+    return `Couldn't reach the website (${err.cause?.code || err.message}). When you're online: npm run license:publish -- --id ${id}`;
+  }
 }
 
 /** Records a payment if --paid was given: --paid check|card|bank|other --amount 149 --ref 1234 --note "…" */

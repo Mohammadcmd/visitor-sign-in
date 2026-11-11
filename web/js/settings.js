@@ -103,7 +103,8 @@ export const DEFAULTS = Object.freeze({
   translations: {},            // { es: { "English text": "texto" } } for the business's own text
   signature: { mode: 'off', emailCopy: false }, // visitors sign the rules: 'off' (tick box), 'new' visitors, 'every' visit
   license: '',                 // a license key from the vendor (see js/plans.js)
-  phone: { code: '', license: '' }, // phone sign-in by QR code (Google Sheets): the QR code's license code and key
+  phone: { code: '', license: '', wifiName: '', wifiPassword: '' }, // phone sign-in by QR code: its license code and key, and the guest Wi-Fi for the poster
+  agreement: { version: '', by: '', at: '' }, // who accepted the license agreement, when, and which version (licensing on)
   trialStarted: '',            // when setup was first finished: the Pro trial runs from here
 });
 
@@ -224,9 +225,16 @@ export function normalize(input) {
       emailCopy: (s.signature || {}).emailCopy === true,
     },
     license: typeof s.license === 'string' ? s.license.trim().slice(0, 2000) : '',
+    agreement: {
+      version: str((s.agreement || {}).version, 40),
+      by: str((s.agreement || {}).by, 80),
+      at: typeof (s.agreement || {}).at === 'string' && !Number.isNaN(new Date(s.agreement.at).getTime()) ? s.agreement.at : '',
+    },
     phone: {
       code: /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test((s.phone || {}).code || '') ? s.phone.code : '',
       license: typeof (s.phone || {}).license === 'string' ? s.phone.license.trim().slice(0, 2000) : '',
+      wifiName: str((s.phone || {}).wifiName, 32),
+      wifiPassword: str((s.phone || {}).wifiPassword, 63),
     },
     trialStarted: typeof s.trialStarted === 'string' && !Number.isNaN(new Date(s.trialStarted).getTime()) ? s.trialStarted : '',
   };

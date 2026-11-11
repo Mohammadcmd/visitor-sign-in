@@ -901,6 +901,25 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; p
 .sign-clear { position: absolute; right: 10px; top: 8px; }
 .sign-box .field { margin-top: 14px; }
 .signed-card { text-align: left; width: min(760px, calc(100% - 48px)); max-height: calc(100% - 48px); overflow-y: auto; }
+/* Screenless on the local Wi-Fi: the guest Wi-Fi for the poster */
+.phone-wifi { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; width: 100%; margin-top: 12px; }
+.phone-wifi .field { margin: 0; }
+.poster-wifi[hidden], .poster-step[hidden] { display: none; }
+.poster-step { font-size: 20px; font-weight: 700; margin: 12px 0 4px; }
+.poster.with-wifi .poster-qr svg { max-width: 260px; height: auto; }
+
+/* The license agreement: a scrolling box in setup and on the admin screen */
+.agreement-text { max-height: 46vh; overflow-y: auto; margin: 14px 0; padding: 16px 20px; text-align: left; border: 1px solid var(--line); border-radius: 14px; background: #fff; font-size: 15px; line-height: 1.5; -webkit-user-select: text; user-select: text; }
+.agreement-text h3 { font-size: 17px; margin: 16px 0 6px; }
+.agreement-text h3:first-child { margin-top: 0; }
+.agreement-text p, .agreement-text ul { margin: 6px 0; }
+.agreement-text ul { padding-left: 22px; }
+.agreement-card { width: min(820px, calc(100% - 40px)); max-height: calc(100% - 40px); overflow-y: auto; }
+.agreement-card h2 { font-size: 26px; }
+.agreement-card .agreement-text { max-height: 36vh; }
+.agreement-card [data-ag-accept] { text-align: left; }
+[data-ag-accept][hidden] { display: none; }
+
 /* Numbered visitor passes: which one to take, big enough to read across the room */
 .pass-panel { margin-top: 18px; max-width: 420px; }
 .pass-panel[hidden] { display: none; }

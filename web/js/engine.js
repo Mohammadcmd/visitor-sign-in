@@ -12,11 +12,28 @@ import { hashPin } from './settings.js';
 const ATTENTION_DAYS = 14;
 const PASS_MS = 2 * 60 * 60 * 1000;
 
+/** The actions a visitor's phone may use (with the phone key from the QR code), and nothing else. */
+export const PHONE_ACTIONS = ['phoneStart', 'phoneRegister', 'phoneCheckIn', 'phoneSignOut', 'phoneDecline'];
+
+const CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+/** A random code of letters and digits, from the system's secure random numbers. */
+export const randomCode = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((x) => CODE_ALPHABET[x % 36]).join('');
+async function phoneHash(token) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`visitor-phone:${token}`)));
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+/** Only what a visitor may send from a phone: no override, no quick entry, no expected-visitor lookup. */
+const phoneArgs = (a) => ({
+  first: a.first, last: a.last, company: a.company, visiting: a.visiting, purpose: a.purpose, agreed: a.agreed === true,
+  photo: a.photo, answers: a.answers, flags: a.flags, reasons: a.reasons, signature: a.signature, agreement: a.agreement,
+  language: a.language, email: a.email, method: 'phone', noCamera: a.noCamera === true,
+});
+
 /** A company with no records yet. */
 export const emptyStore = () => ({ visitors: [], visits: [], faces: [], passes: [], expected: [], badges: [] });
 
 /** Actions that only read: nothing to save afterwards. */
-export const READS = new Set(['ping', 'getSettings', 'faceIndex', 'findVisitor', 'findOpenVisits', 'findExpected', 'adminLogin',
+export const READS = new Set(['ping', 'getSettings', 'phoneStart', 'faceIndex', 'findVisitor', 'findOpenVisits', 'findExpected', 'adminLogin',
   'adminInside', 'adminBadges', 'adminAttention', 'adminHistory', 'adminVisitors', 'adminPhoto', 'adminExpected', 'adminSignature']);
 
 /**
@@ -164,6 +181,18 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
     return visit;
   }
 
+  /** The visitor this phone signed in, if its token matches. */
+  async function phonePerson(s, visitorId, token) {
+    if (typeof token !== 'string' || token.length < 20) return null;
+    const v = s.visitors.find((x) => x.id === String(visitorId || ''));
+    return v && v.phoneKey && v.phoneKey === (await phoneHash(token)) ? v : null;
+  }
+  /** A visit started on a phone: with numbered passes, the phone tells them which pass to take. */
+  function phoneVisit(s, a) {
+    const st = settings();
+    return act(s, st.passes && !st.badges ? 'assignPass' : 'checkIn', a);
+  }
+
   async function act(s, action, a) {
     const st = settings();
     const byTag = (t) => s.badges.find((b) => normalizeTag(b.tag) === normalizeTag(t) && normalizeTag(t));
@@ -190,7 +219,8 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
         if (st.form.askHost && !v.visiting) missing.push('visiting');
         if (st.form.askPurpose && !v.purpose) missing.push('purpose');
         if (st.form.rules.length && !v.agreed) missing.push('agreed');
-        if (!a.photo && st.photos === 'all') missing.push('photo');
+        // A phone on a page that can't use its camera (not https: the local Wi-Fi) signs in without one.
+        if (!a.photo && st.photos === 'all' && !(a.method === 'phone' && a.noCamera)) missing.push('photo');
         if (missing.length) return { ok: false, error: 'missing', fields: missing };
         v.answers = cleanAnswers(a.answers);
         const flags = cleanFlags(a.flags);
@@ -374,6 +404,61 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
         if (!demo) saveSettings({ ...st, admin: { ...st.admin, pinHash: await hashPin(pin) } });
         return { ok: true, token: newToken(), ttl: 900 };
       }
+
+      // ---------------------------------------------------------- phone sign-in (a QR code by the door)
+      // The server checks the phone key and allows a phone only these actions
+      // (PHONE_ACTIONS). Each visitor's phone keeps a secret token, and only its
+      // hash is kept here, so a phone can sign in again, or out, only the visitor it signed in.
+      case 'phoneStart': {
+        if (!st.setupComplete) return { ok: false, error: 'not_set_up' };
+        return {
+          ok: true, version, logo: st.org.logo || '',
+          settings: {
+            setupComplete: true, storage: 'cloud', badges: false, passes: !!st.passes && !st.badges, quickEntry: false, hosts: [], notifyHosts: false,
+            org: { name: st.org.name || '', tagline: st.org.tagline || '', accent: st.org.accent || '' },
+            form: st.form, screening: { questions: st.screening.questions || [], declineMessage: st.screening.declineMessage || '' },
+            photos: st.photos, languages: st.languages, translations: st.translations, signature: { ...st.signature, emailCopy: false },
+            trialStarted: st.trialStarted || '', phone: { code: st.phone?.code || '', license: st.phone?.license || '' },
+          },
+        };
+      }
+      case 'phoneRegister': {
+        const args = phoneArgs(a);
+        const reg = await act(s, 'register', args);
+        if (!reg.ok) return reg;
+        const token = randomCode(32);
+        const v = s.visitors.find((x) => x.id === reg.visitor.id);
+        v.phoneKey = await phoneHash(token);
+        const started = await phoneVisit(s, { visitorId: v.id, method: 'phone', flags: args.flags, visiting: args.visiting, purpose: args.purpose });
+        return { ok: true, visitor: reg.visitor, visitId: started.visitId, hostNotified: false, badge: started.badge || '', noPass: !!started.noPass, token };
+      }
+      case 'phoneCheckIn': {
+        const v = await phonePerson(s, a.visitorId, a.token);
+        if (!v) return { ok: false, error: 'phone_visitor' };
+        const args = phoneArgs(a);
+        // Staff may have let them in after a decline (Needs attention → Let in): that approval is kept with the visit.
+        const pass = takePass(s, v.first, v.last);
+        const started = await phoneVisit(s, {
+          visitorId: v.id, method: 'phone', flags: pass ? [] : args.flags, visiting: args.visiting, purpose: args.purpose,
+          signature: args.signature, agreement: args.agreement, language: args.language, override: pass || undefined,
+        });
+        return { ok: true, visitId: started.visitId, hostNotified: false, badge: started.badge || '', noPass: !!started.noPass, first: v.first };
+      }
+      case 'phoneSignOut': {
+        const visit = s.visits.find((x) => x.id === a.visitId);
+        if (!visit) return { ok: false, error: 'not_found' };
+        if (!(await phonePerson(s, visit.visitorId, a.token))) return { ok: false, error: 'phone_visitor' };
+        if (visit.signedOut) return { ok: true, already: true, first: visit.first };
+        signOut(s, visit, 'Signed out on their phone');
+        return { ok: true, first: visit.first, badge: visit.badge || '' };
+      }
+      case 'phoneDecline': {
+        // If staff already let them in, the phone carries on, and the approval stays for phoneRegister or phoneCheckIn.
+        const key = passKey(clean(a.first), clean(a.last));
+        const pass = (s.passes || []).find((x) => x.key === key && x.until > Date.now());
+        if (pass) return { ok: true, passed: true, reason: pass.reason || '', by: pass.by || '' };
+        return act(s, 'recordDecline', phoneArgs(a));
+      }
     }
     if (!checkToken(a.token)) return { ok: false, error: 'admin' };
     switch (action) {
@@ -486,6 +571,13 @@ export function createEngine({ version, settings, saveSettings, files, clock = m
         else next.org.logo = st.org.logo;
         saveSettings(next);
         return { ok: true };
+      }
+      case 'adminPhoneLink': {
+        // Switches phone sign-in on (making the key the QR code carries), changes the key (a new QR code), or off; peek only reads it.
+        if (a.off) { s.phoneKey = ''; return { ok: true, key: '' }; }
+        if (a.peek) return { ok: true, key: s.phoneKey || '' };
+        if (!s.phoneKey || a.change) s.phoneKey = `ph${randomCode(30)}`;
+        return { ok: true, key: s.phoneKey };
       }
       case 'adminBadges': return { ok: true, badges: s.badges.map((b) => ({ badge: b.badge, tag: b.tag || '', status: b.status, holder: b.holder || '', since: b.since || '', note: b.note || '' })) };
       case 'adminSignOut': {

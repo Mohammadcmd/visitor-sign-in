@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+**Screenless sign-in on a PC or Raspberry Pi, on your Wi-Fi**
+- The PC or Pi shows the sign-in page on the building's Wi-Fi itself (`http://<its address>:8080/`): no website, accounts or tokens, and no internet needed. `npm run server:zip` makes the file to send, with a START HERE note.
+- The poster can show a second QR code that joins the guest Wi-Fi (Admin → Settings → Phone sign-in: the Wi-Fi name and password).
+- Phones on the Wi-Fi page skip the visitor photo, since phones only allow the camera on https sites. Setup from a Wi-Fi page skips the tablet check.
+- The Pi installer works from the unzipped folder, with no download.
+- Fix: it kept retrying when a website couldn't be reached (Node reports only an error for a failed connection). Two harmless Node warnings are hidden.
+- No tablet by the door, and no Google account: a Raspberry Pi or a PC in the building keeps the records, and visitors sign in on their own phones with the QR code (`server/`).
+- One command installs it on a Pi and makes it start by itself. On Windows or Mac, double-click the start file.
+- It prints a setup link: open it on any computer or tablet for setup and the admin screen.
+- Optionally (`--site`), it stays connected to a website, so phones on mobile data reach it over https too. The website passes requests along and checks the box's secret.
+- Records are files in one folder, with a daily backup copy. It signs everyone out at the end of the day and deletes old records, as a tablet would. No emails yet.
+- The kiosk says "Raspberry Pi or PC" instead of "Google Sheet" when it's connected to one, and hides the email options.
+- Phone sign-in is now in the shared engine as well as the Google Sheets script.
+- The install page offers Android tablets and screenless sign-in. iPads aren't offered for now.
+- Every kiosk, server and website script is checked to parse in `npm test`.
+
+**Your own website, on Cloudflare**
+- The install page, the browser kiosk, the Android app download, the update check (`latest.json`) and the license status files, at https://visitor-sign-in.mohammadjalbibi.workers.dev/ (`site/`). It keeps everything working once the GitHub repository is private.
+- Kiosks check the website for updates, falling back to GitHub. The Android app compares its own version with the app on the website.
+- The Android app's phone sign-in QR codes point to the website's kiosk, with no setting needed.
+- License tools send each status file to the website as they change it (`npm run license:publish` sends them all again). The website keeps one only if it's signed with your key and newer than the one it has.
+- Releases publish the website with the new app once the `CLOUDFLARE_API_TOKEN` secret is added. There's also a workflow to publish it without a release.
+- The install page shows the price and how to buy (check or card) once licensing is on. The website has a downloads page, the launch checklist and the privacy notice template.
+
+**A license agreement in setup (when licensing is on)**
+- Setup asks the business to read and accept the license agreement, with a name and "I agree", right after the company name. Who accepted it, which version and when are kept with the settings.
+- Admin → Settings → License shows whether it has been accepted and opens it to read. A kiosk set up before, or one with an older version accepted, asks the admin to accept the current one. Sign-ins aren't blocked by it.
+- The agreement fills in the seller, support email, price, governing law and the kiosk's real trial and grace periods. `PAYWALL` has a new `law` field.
+- Drafts for a lawyer to review in [docs/legal/](docs/legal/README.md): the license and maintenance agreement, and a privacy policy for the seller's website. The visitor privacy notice now covers signatures, phone sign-in and passes.
+- `scripts/sync-agreement.mjs` copies the agreement into the kiosk, and `npm test` checks it's up to date.
+
 **Numbered visitor passes (no reader)**
 - A third choice in setup next to NFC/RFID badges and no badges: numbered passes (V1, V2, …). At the end of signing in, the kiosk or the visitor's phone says which pass to take: the lowest-numbered free one, or the same one when signing in again.
 - Signing out frees the pass and asks for it back. With every pass out, the visitor is still signed in and asked to get one at the front desk.

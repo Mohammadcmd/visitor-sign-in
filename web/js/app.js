@@ -14,6 +14,7 @@ import { Kiosk, saveFile, toCsv, dateStamp } from './files.js';
 import { t, tc, setLang, lang, LANGS, translateDom, locale } from './i18n.js';
 import { PAYWALL, FEATURES, can, entitlement, refresh as refreshPlan, verifyLicense, isPaused, tabletCode, saveKey, checkStatus, usePoint } from './plans.js';
 import { SignaturePad } from './signature.js';
+import { AGREEMENT_VERSION, AGREEMENT_TITLE, agreementHtml, agreementAccepted } from './agreement.js';
 // QR codes are only drawn in the admin screen, so their code loads when first needed.
 let qrModule = null;
 const qrSvg = async (text, opts) => (await (qrModule ||= import('./qr.js'))).qrSvg(text, opts);
@@ -569,7 +570,7 @@ function renderStep({ instant = false, back = false } = {}) {
     const signing = signMode() !== 'off';
     $('[data-agree]').hidden = signing;
     $('[data-sign-box]').hidden = !signing;
-    $('[data-sign-email]').hidden = !(signing && (MODE === 'cloud' || PHONE) && settings().signature.emailCopy);
+    $('[data-sign-email]').hidden = !(signing && (MODE === 'cloud' || PHONE) && !CONFIG.BOX && settings().signature.emailCopy);
     $('[data-screen="form"] .step[data-step="rules"]').classList.toggle('signing', signing);
     if (signing) setTimeout(() => pad.resize(), 450); // after the step transition
   }
@@ -1424,6 +1425,7 @@ function exitAdmin() {
   state.adminMode = null;
   $('[data-overlay="rollcall"]').hidden = true;
   $('[data-overlay="signed"]').hidden = true;
+  $('[data-overlay="agreement"]').hidden = true;
   $('[data-expected-form]').hidden = true;
   show('welcome');
 }
@@ -1550,7 +1552,7 @@ async function loadExpected() {
   const list = $('[data-expected-list]');
   $('[data-expected-new]').hidden = !can('expected');
   if (!can('expected')) { list.innerHTML = upsell('expected'); return; }
-  $('[data-expected-hint]').textContent = MODE === 'cloud'
+  $('[data-expected-hint]').textContent = MODE === 'cloud' && !CONFIG.BOX
     ? 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them. Staff can also type rows straight into the Expected tab of your Google Sheet: a date, a first and last name, and anything else.'
     : 'Visitors staff are expecting today and in the next two weeks. When they sign in, their company, host and purpose are filled in for them.';
   list.innerHTML = '<div class="empty">Loading…</div>';
@@ -1661,7 +1663,7 @@ async function loadHistory() {
   const n = res.visits.length;
   note.textContent = `${n ? n.toLocaleString() : 'No'} visit${n === 1 ? '' : 's'} ${span}${hist.q ? ` matching "${hist.q}"` : ''}.`
     + (n > HISTORY_SHOWN ? ` Showing the latest ${HISTORY_SHOWN}; the export has them all.` : '')
-    + (MODE === 'cloud' ? ' Your Google Sheet keeps every visit.' : '');
+    + (MODE === 'cloud' ? ` ${CONFIG.BOX ? 'The Raspberry Pi or PC' : 'Your Google Sheet'} keeps every visit.` : '');
   if (!n) { list.innerHTML = '<div class="empty">Nothing to show.</div>'; return; }
   list.innerHTML = res.visits.slice(0, HISTORY_SHOWN).map((v) => {
     const declined = /^declined/i.test(v.kind || '') || /^declined/i.test(v.screening || '');
@@ -1931,9 +1933,9 @@ const SETTING_ROWS = [
     return qs.length ? `${qs.length} question${qs.length > 1 ? 's' : ''}: ${qs.map((q) => q.label).join(', ')}` : 'No extra questions';
   }],
   ['hosts', 'Hosts', (s) => (s.hosts.length
-    ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
+    ? `${s.hosts.length} ${s.hosts.length > 1 ? 'people' : 'person'}${MODE === 'cloud' && !CONFIG.BOX && s.notifyHosts && s.hosts.some((h) => h.email) ? ' · emailed when their visitor arrives' : ''}`
     : 'Nobody listed: visitors type any name')],
-  ['touches', 'Photos, reasons, rules, records, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
+  ['touches', 'Photos, reasons, rules, records, end of day and languages', (s) => `Photos: ${{ all: 'every new visitor', declined: 'declined visitors only', off: 'off' }[s.photos]} · ${s.form.rules.length} rules · ${s.endOfDay ? `everyone signed out at ${timeLabel(s.endOfDay)}${MODE === 'cloud' && !CONFIG.BOX && s.dailySummary ? ', daily summary email' : ''}` : 'no automatic sign-out'} · ${s.languages.map((c) => LANGS[c]).join(', ')}`],
 ];
 
 function loadSettingsPane() {
@@ -1950,7 +1952,14 @@ function loadSettingsPane() {
   $('[data-connect-qr]').hidden = true;
   renderPlanCard();
   renderPhoneCard();
-  if (MODE === 'cloud') {
+  if (MODE === 'cloud' && CONFIG.BOX) {
+    info.textContent = `Every sign-in, photo and badge is kept on your Raspberry Pi or PC${state.lastPing?.sheetName ? ` ("${state.lastPing.sheetName}")` : ''}, which phones and this screen reach through your website. Keep it switched on and connected to the internet.`;
+    actions.innerHTML = '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>';
+    $('[data-connect-another]', actions)?.addEventListener('click', (e) => { const btn = e.currentTarget; confirmTap(btn, 'Tap again to show the private link', async () => {
+      secret.hidden = false;
+      secret.innerHTML = `Open this link on the other tablet or computer: it connects to the same Raspberry Pi or PC.<br><code>${esc(location.origin + location.pathname)}?api=${esc(encodeURIComponent(CONFIG.API_URL))}&amp;key=${esc(encodeURIComponent(CONFIG.KIOSK_KEY))}</code>`;
+    }); });
+  } else if (MODE === 'cloud') {
     info.textContent = `Every sign-in goes to your Google Sheet${CONFIG.BUILT_IN ? ' (built into this app)' : ''}. Visitor photos are in your Google Drive.`
       + (state.oldBackend ? ' Your Apps Script code is out of date: copy the latest script into it and deploy a new version.' : '');
     actions.innerHTML = `${CONFIG.BUILT_IN ? '' : '<button type="button" class="btn-secondary" data-connect-another>Connect another tablet</button>'}
@@ -1994,10 +2003,11 @@ async function renderDiagnostics() {
   if (MODE === 'cloud') {
     await refreshAttention();
     const p = state.lastPing;
-    add('Records', p?.sheetName ? `Google Sheets: "${p.sheetName}"` : 'Google Sheets');
-    add('Connection', p && Date.now() - p.at < 60000 ? `Connected · checked ${ago(p.at)}` : "Can't reach the Google Sheet right now", !(p && Date.now() - p.at < 60000));
+    const where = CONFIG.BOX ? 'Raspberry Pi or PC' : 'Google Sheets';
+    add('Records', p?.sheetName ? `${where}: "${p.sheetName}"` : where);
+    add('Connection', p && Date.now() - p.at < 60000 ? `Connected · checked ${ago(p.at)}` : `Can't reach the ${CONFIG.BOX ? 'Raspberry Pi or PC (is it on, and online?)' : 'Google Sheet'} right now`, !(p && Date.now() - p.at < 60000));
     const v = p?.version || 1;
-    add('Apps Script version', v < BACKEND_VERSION ? `${v} · update needed (copy the latest code, deploy a new version)` : `${v} · up to date`, v < BACKEND_VERSION);
+    add(CONFIG.BOX ? 'Server version' : 'Apps Script version', v < BACKEND_VERSION ? `${v} · update needed (copy the latest code, deploy a new version)` : `${v} · up to date`, v < BACKEND_VERSION);
     const waiting = pendingCount();
     add('Waiting to send', waiting ? `${waiting} item${waiting > 1 ? 's' : ''} (sent automatically when the connection is back)` : 'Nothing', waiting > 10);
   } else {
@@ -2030,17 +2040,32 @@ const newer = (a, b) => {
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
   return false;
 };
-/** Asks GitHub for the latest release, once per session, and offers it in Diagnostics. */
+/** The newest version from the website (latest.json), in the shape of a GitHub release; null if unavailable. */
+async function siteRelease() {
+  if (!CONFIG.SITE_URL) return null;
+  try {
+    const res = await fetch(`${CONFIG.SITE_URL.replace(/\/?$/, '/')}latest.json`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const l = await res.json();
+    if (!l?.version) return null;
+    // The Android app updates to the newest app on the website; a browser kiosk to the newest kiosk.
+    const version = Kiosk ? (l.apk ? l.apk.version || l.version : '0') : l.version;
+    return { tag_name: `v${version}`, html_url: l.page || CONFIG.SITE_URL, assets: l.apk ? [{ name: l.apk.name, size: l.apk.size, browser_download_url: l.apk.url }] : [] };
+  } catch { return null; }
+}
+/** Asks the website (or GitHub) for the newest version, once per session, and offers it in Diagnostics. */
 async function checkForUpdate() {
   const box = $('[data-update-box]');
-  if (!CONFIG.UPDATES_FROM) return;
-  if (!latest) {
+  if (!CONFIG.SITE_URL && !CONFIG.UPDATES_FROM) return;
+  if (!latest) latest = await siteRelease();
+  if (!latest && CONFIG.UPDATES_FROM) {
     try {
       const res = await fetch(`https://api.github.com/repos/${CONFIG.UPDATES_FROM}/releases/latest`, { cache: 'no-store' });
       if (!res.ok) return;
       latest = await res.json();
     } catch { return; }
   }
+  if (!latest) return;
   if (!latest?.tag_name || !newer(latest.tag_name, APP_VERSION)) { box.hidden = true; return; }
   const version = latest.tag_name.replace(/^v/, '');
   const apk = (latest.assets || []).find((a) => /\.apk$/i.test(a.name));
@@ -2059,13 +2084,24 @@ const newPointCode = () => {
   const c = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => POINT_ALPHABET[x % 32]).join('');
   return `${c.slice(0, 4)}-${c.slice(4)}`;
 };
-/** Where this kiosk is on the web, for the QR code. The Android app needs CONFIG.PUBLIC_URL. */
+/** Where this kiosk is on the web, for the QR code: PUBLIC_URL, the address it's open at, or (the Android app) the website's kiosk. */
 function kioskWebAddress() {
   if (CONFIG.PUBLIC_URL) return CONFIG.PUBLIC_URL.replace(/\/?$/, '/');
-  if (Kiosk || !/^https?:$/.test(location.protocol)) return '';
+  if (Kiosk || !/^https?:$/.test(location.protocol)) return CONFIG.SITE_URL ? `${CONFIG.SITE_URL.replace(/\/?$/, '/')}web/` : '';
   return `${location.origin}${location.pathname.replace(/[^/]*$/, '')}`;
 }
-const phoneLink = (key) => `${kioskWebAddress()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(CONFIG.API_URL)}`;
+// A Raspberry Pi or PC on the local Wi-Fi says where phones find it (its own address, not "localhost").
+const boxOnWifi = () => CONFIG.BOX && /^http:/.test(CONFIG.API_URL) && !!state.lastPing?.web;
+const phoneWeb = () => (boxOnWifi() ? state.lastPing.web : kioskWebAddress());
+const phoneApi = () => (boxOnWifi() ? state.lastPing.api : CONFIG.API_URL);
+/** Phones reach this sign-in over the local Wi-Fi only (an http address): visitors must join it first. */
+const phoneOnWifi = () => /^http:/.test(phoneApi());
+const phoneLink = (key) => `${phoneWeb()}?visit=${encodeURIComponent(key)}&api=${encodeURIComponent(phoneApi())}`;
+/** The QR code that joins a Wi-Fi network (the format phone cameras understand). */
+const wifiCode = (name, password) => {
+  const q = (v) => String(v).replace(/([\\;,:"])/g, '\\$1');
+  return password ? `WIFI:T:WPA;S:${q(name)};P:${q(password)};;` : `WIFI:T:nopass;S:${q(name)};;`;
+};
 
 /** Admin → Settings → Phone sign-in: switch it on, the QR code and poster, a new code, off. Google Sheets only. */
 async function renderPhoneCard() {
@@ -2078,7 +2114,7 @@ async function renderPhoneCard() {
   $('[data-phone-license]').hidden = true;
   if (!res.ok) { text.textContent = errorText(res); actions.innerHTML = ''; return; }
   if (!res.key) {
-    text.textContent = 'No tablet by the door? Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and photo, and the sign-ins go to your Google Sheet. '
+    text.textContent = `No tablet by the door? Put up a QR code: visitors scan it and sign in on their own phone, with the same questions, rules and photo, and the sign-ins go to ${CONFIG.BOX ? 'your Raspberry Pi or PC' : 'your Google Sheet'}. `
       + 'Phones can only sign visitors in and out: they never see other visitors, your staff list or anything on this admin screen.';
     actions.innerHTML = '<button type="button" class="btn-primary" data-phone-on>Switch on phone sign-in</button>';
     $('[data-phone-on]', actions).addEventListener('click', () => phoneLinkAction({}));
@@ -2096,8 +2132,9 @@ async function renderPhoneCard() {
       } catch (err) { licensed = err.message; }
     }
   }
-  const web = kioskWebAddress();
+  const web = phoneWeb();
   text.textContent = `Phone sign-in is on${PAYWALL.enabled ? ` · QR code ${s.phone.code} · ${licensed}` : ''}. `
+    + (phoneOnWifi() ? 'Visitors need to be on your Wi-Fi to use it: add the Wi-Fi below, and the poster shows a second code that connects them. ' : '')
     + (web ? 'Print the poster and put it by the door. Visitors who sign in on their phone sign out on it, or at the front desk.'
       : "To make its QR code, open this admin screen in the browser kiosk, or set the kiosk's web address (PUBLIC_URL in web/config.js).");
   actions.innerHTML = `${web ? '<button type="button" class="btn-primary" data-phone-poster>Print the poster</button>' : ''}
@@ -2108,6 +2145,20 @@ async function renderPhoneCard() {
     qr.hidden = false;
     qr.innerHTML = `${await qrSvg(link, { size: 170, label: 'Phone sign-in link' })}<code>${esc(link)}</code>`;
     $('[data-phone-poster]', actions).addEventListener('click', () => openPoster(link));
+  }
+  if (phoneOnWifi()) {
+    const wifi = document.createElement('div');
+    wifi.className = 'phone-wifi';
+    wifi.innerHTML = `<label class="field"><span>Wi-Fi name (for visitors)</span><input readonly inputmode="none" name="wifi-name" maxlength="32" autocomplete="off" value="${esc(s.phone.wifiName)}"></label>
+      <label class="field"><span>Wi-Fi password</span><input readonly inputmode="none" name="wifi-password" maxlength="63" autocomplete="off" value="${esc(s.phone.wifiPassword)}" placeholder="None"></label>
+      <button type="button" class="btn-secondary" data-wifi-save>Save the Wi-Fi</button>`;
+    actions.append(wifi);
+    $('[data-wifi-save]', wifi).addEventListener('click', async () => {
+      kb.close();
+      const next = { ...settings(), phone: { ...settings().phone, wifiName: $('input[name="wifi-name"]', wifi).value.trim(), wifiPassword: $('input[name="wifi-password"]', wifi).value } };
+      const res = await saveSettingsAsAdmin(next);
+      toast(res.ok ? (next.phone.wifiName ? 'Wi-Fi saved: the poster shows how to join it.' : 'Wi-Fi removed from the poster.') : errorText(res));
+    });
   }
   $('[data-phone-change]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again: printed posters stop working', () => phoneLinkAction({ change: true })));
   $('[data-phone-off]', actions).addEventListener('click', (e) => confirmTap(e.currentTarget, 'Tap again to switch off', () => phoneLinkAction({ off: true })));
@@ -2125,12 +2176,14 @@ async function phoneLinkAction(args) {
   renderPhoneCard();
 }
 
-async function savePhoneSettings(phone) {
-  const next = { ...settings(), phone };
+const savePhoneSettings = (phone) => saveSettingsAsAdmin({ ...settings(), phone });
+
+/** Saves changed settings from the admin screen (the logo stays as it is). */
+async function saveSettingsAsAdmin(next) {
   const toSave = JSON.parse(JSON.stringify(next));
   toSave.org.logo = '';
   const res = await adminApi('adminSaveSettings', { settings: toSave });
-  if (res.ok) useSettings(next, { cache: true });
+  if (res.ok) useSettings(next, { cache: MODE === 'cloud' });
   return res;
 }
 
@@ -2152,7 +2205,16 @@ $('[data-phone-license-apply]').addEventListener('click', async () => {
 let posterLink = '';
 async function openPoster(link) {
   posterLink = link;
-  $('[data-poster-qr]').innerHTML = await qrSvg(link, { size: 340, label: 'Scan to sign in' });
+  const { wifiName, wifiPassword } = settings().phone;
+  const wifi = phoneOnWifi() && wifiName;
+  $('[data-poster]').classList.toggle('with-wifi', !!wifi);
+  $('[data-poster-wifi]').hidden = !wifi;
+  if (wifi) {
+    $('[data-poster-wifi-qr]').innerHTML = await qrSvg(wifiCode(wifiName, wifiPassword), { size: 220, label: 'Join the Wi-Fi' });
+    $('[data-poster-wifi-text]').textContent = `1. Join the Wi-Fi "${wifiName}"${wifiPassword ? ` (password: ${wifiPassword})` : ''}`;
+  }
+  $('[data-poster-step2]').hidden = !wifi;
+  $('[data-poster-qr]').innerHTML = await qrSvg(link, { size: wifi ? 260 : 340, label: 'Scan to sign in' });
   $('[data-overlay="poster"]').hidden = false;
 }
 $('[data-poster-close]').addEventListener('click', () => { $('[data-overlay="poster"]').hidden = true; });
@@ -2172,9 +2234,28 @@ $('[data-poster-save]').addEventListener('click', async () => {
 async function posterSvg(link) {
   const s = settings();
   const qr = await qrSvg(link, { size: 480, label: 'Scan to sign in' });
-  const qrData = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(qr)))}`;
+  const dataUrl = (svg) => `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  const qrData = dataUrl(qr);
   const logo = logoFor(s);
-  const text = (y, size, value, color = '#0d1b2a', weight = 400) => `<text x="425" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${esc(value)}</text>`;
+  const text = (y, size, value, color = '#0d1b2a', weight = 400, x = 425) => `<text x="${x}" y="${y}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${esc(value)}</text>`;
+  if (phoneOnWifi() && s.phone.wifiName) {
+    // Two codes: join the Wi-Fi, then sign in.
+    const wifiData = dataUrl(await qrSvg(wifiCode(s.phone.wifiName, s.phone.wifiPassword), { size: 340, label: 'Join the Wi-Fi' }));
+    return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="850" height="1100" viewBox="0 0 850 1100">
+  <rect width="850" height="1100" fill="#ffffff"/>
+  <image href="${logo}" xlink:href="${logo}" x="225" y="60" width="400" height="120" preserveAspectRatio="xMidYMid meet"/>
+  ${text(255, 60, 'Visitor sign-in', '#0d1b2a', 700)}
+  ${text(305, 30, s.org.name, '#4a5a6b')}
+  ${text(390, 30, '1. Join the Wi-Fi', '#0d1b2a', 700, 220)}
+  <image href="${wifiData}" xlink:href="${wifiData}" x="60" y="420" width="320" height="320"/>
+  ${text(780, 24, s.phone.wifiName, '#0d1b2a', 700, 220)}
+  ${s.phone.wifiPassword ? text(815, 22, `Password: ${s.phone.wifiPassword}`, '#4a5a6b', 400, 220) : ''}
+  ${text(390, 30, '2. Scan to sign in', '#0d1b2a', 700, 630)}
+  <image href="${qrData}" xlink:href="${qrData}" x="470" y="420" width="320" height="320"/>
+  ${text(950, 28, "Open your phone's camera and point it at each code.")}
+  ${text(995, 24, '1. Conéctese al Wi-Fi.  2. Escanee el código para registrarse.', '#4a5a6b')}
+</svg>`;
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="850" height="1100" viewBox="0 0 850 1100">
   <rect width="850" height="1100" fill="#ffffff"/>
   <image href="${logo}" xlink:href="${logo}" x="225" y="70" width="400" height="140" preserveAspectRatio="xMidYMid meet"/>
@@ -2210,6 +2291,7 @@ function licenseNotice() {
   if (!PAYWALL.enabled) return '';
   if (e.status === 'paused') return `${planLine()}. Signing out, the roll call and exports still work. Settings → License to renew.`;
   if (e.status === 'grace') return `${planLine()}. Settings → License.`;
+  if (!agreementAccepted(settings())) return 'Please read and accept the license agreement: Settings → License → License agreement.';
   if (e.status === 'licensed' && e.renewSoon) return `This kiosk's license is due for renewal on ${e.license.expires} (${plural(e.daysLeft, 'day')}). Settings → License.`;
   if (e.status === 'trial' && e.daysLeft <= 7) return `The trial ends in ${plural(e.daysLeft, 'day')}. Settings → License.`;
   return '';
@@ -2245,8 +2327,46 @@ function renderPlanCard() {
   const e = entitlement();
   $('[data-plan-text]').innerHTML = `<strong>${esc(planLine())}</strong>${e.error ? `<br><span class="warn">${esc(e.error)}</span>` : ''}`
     + `<br>Tablet code: <strong>${esc(tabletCode())}</strong>${sellerLine() ? `<br>${esc(sellerLine())}` : ''}`
-    + '<br>Signing out, records, exports and the roll call always keep working, even without a license.';
+    + '<br>Signing out, records, exports and the roll call always keep working, even without a license.'
+    + `<br>${esc(agreementLine())}`;
+  $('[data-agreement-open]').textContent = agreementAccepted(settings()) ? 'License agreement' : 'Read and accept the license agreement';
 }
+
+function agreementLine() {
+  const ag = settings().agreement;
+  if (agreementAccepted(settings())) return `License agreement (version ${ag.version}) accepted by ${ag.by} on ${new Date(ag.at).toLocaleDateString()}.`;
+  return ag.by ? `An updated license agreement (version ${AGREEMENT_VERSION}) needs accepting.` : "The license agreement hasn't been accepted on this kiosk yet.";
+}
+
+/** The license agreement: to read, and to accept when this kiosk hasn't accepted the current version. */
+function openAgreement() {
+  const s = settings();
+  const need = PAYWALL.enabled && !agreementAccepted(s);
+  $('[data-ag-title]').textContent = AGREEMENT_TITLE;
+  $('[data-ag-version]').textContent = AGREEMENT_VERSION;
+  $('[data-ag-status]').textContent = agreementAccepted(s) ? ` · accepted by ${s.agreement.by} on ${new Date(s.agreement.at).toLocaleDateString()}` : '';
+  $('[data-ag-text]').innerHTML = agreementHtml(s.org.name);
+  $('[data-ag-company]').textContent = s.org.name || 'your business';
+  $('[data-ag-accept]').hidden = !need;
+  $('[data-ag-agree]').hidden = !need;
+  $('input[name="ag-name"]').value = '';
+  $('[data-ag-error]').textContent = '';
+  $('[data-overlay="agreement"]').hidden = false;
+}
+$('[data-agreement-open]').addEventListener('click', openAgreement);
+$('[data-ag-close]').addEventListener('click', () => { kb.close(); $('[data-overlay="agreement"]').hidden = true; });
+$('[data-ag-agree]').addEventListener('click', async () => {
+  const who = $('input[name="ag-name"]').value.trim();
+  if (!who) { $('[data-ag-error]').textContent = 'Type your name to accept it.'; return; }
+  busy(true, 'Saving…');
+  const res = await saveSettingsAsAdmin({ ...settings(), agreement: { version: AGREEMENT_VERSION, by: who, at: new Date().toISOString() } });
+  busy(false);
+  if (!res.ok) { $('[data-ag-error]').textContent = errorText(res); return; }
+  kb.close();
+  $('[data-overlay="agreement"]').hidden = true;
+  toast('License agreement accepted.');
+  renderPlanCard();
+});
 
 /** Has the feature, or shows what Pro adds and how to get it. */
 function requirePro(feature) {

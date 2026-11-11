@@ -11,11 +11,11 @@ This file is the plan and the progress. Each work session updates the checklists
 | The app | The APK from your own website (built by GitHub Actions) | Free |
 | Google's developer verification | Google is making Android tablets install apps only from verified developers, even outside the Play Store (in four countries since September 2026, worldwide from 2027). Register once in the Android Developer Console | **$25 once**, with an ID check |
 | Licenses | Signed keys made on your computer (`npm run license:*`), checked by the kiosk offline | Free |
-| License status files (renewals, switching off) and APK downloads | Any static website, such as Cloudflare Pages | Free |
+| Your website: APK downloads, update checks, the browser kiosk, license status files | A Cloudflare Worker on the free plan ([site/README.md](../site/README.md)) | Free |
 | Domain | Cloudflare Registrar (sold at cost) | About $10 a year for a .com |
 | Payments | Checks (no fee), or a Stripe Payment Link for cards | Stripe: about 2.9% + 30¢ per card payment, and no monthly fee |
 | Customer records | On their tablet, or in their own Google Sheet (their Google account) | Nothing to you |
-| Terms of service, license agreement, privacy policy | Drafted here; a lawyer's review is worth paying for before launch | Review fee only |
+| License agreement, privacy policy | Drafted in [docs/legal/](legal/README.md); a lawyer's review is worth paying for before launch | Review fee only |
 
 **To launch: about $36**: $25 for Google's registration and about $11 for a domain.
 
@@ -62,11 +62,24 @@ This file is the plan and the progress. Each work session updates the checklists
 - [x] A QR code is licensed like a kiosk (its own code in Admin → Settings → Phone sign-in)
 - [ ] Decide the price of a QR code (the same as a kiosk, or less: there's no tablet)
 
+### Phase 1c: screenless with a Raspberry Pi or PC (built)
+- [x] The records on a Raspberry Pi or PC in the building (`server/`), with the kiosk's own engine, a daily backup, the end of day and retention
+- [x] On the building's Wi-Fi with no website or tokens: the PC or Pi serves the sign-in page itself, with a Wi-Fi QR code on the poster (phones skip the photo there)
+- [x] Optionally through the website (a Durable Object relay), so phones on mobile data reach it over https
+- [x] A one-command Pi installer that starts it by itself, and double-click start files for Windows and Mac
+- [x] Selling: Android tablets, or screenless (iPads aren't offered for now)
+- [ ] Emails from the Pi (host notifications, alerts, the daily summary)
+- [ ] Try it on a real Raspberry Pi
+
 ### Phase 2: selling without Google Play
-- [ ] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private)
+- [x] Downloads and update checks from your own website instead of GitHub's public releases (needed once the repository is private): [site/](../site/README.md), at visitor-sign-in.mohammadjalbibi.workers.dev
+- [x] License status files on the website, sent by the license tools and accepted only with your signature
+- [ ] Publish it: a working Cloudflare API token as the `CLOUDFLARE_API_TOKEN` secret, then a release
+- [ ] Your own domain (about $10 a year) instead of the workers.dev address
 - [ ] Updates that install themselves overnight on tablets in locked kiosk mode (no one has to tap Install)
-- [ ] The website: what it does, the price, how to buy (check or card), the APK download, the license status folder
-- [ ] A license agreement shown at setup (per tablet, yearly fee, what happens if it isn't paid), plus terms and a privacy policy
+- [x] The website: what it does, the price and how to buy (check or card, shown once licensing is on), the APK download, the launch checklist and privacy notice
+- [x] A license agreement shown at setup (per tablet, yearly fee, what happens if it isn't paid), plus a privacy policy for the website ([drafts](legal/README.md))
+- [ ] A lawyer's review of the drafts, then fill in `seller`, `supportEmail`, `supportPhone`, `price` and `law` in `PAYWALL`
 
 ### Phase 3: less work for you
 - [ ] A renewal invoice to email or print, with "make checks payable to" and your mailing address
