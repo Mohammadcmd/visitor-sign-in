@@ -38,7 +38,7 @@ Wants=network-online.target
 
 [Service]
 User=visitorsignin
-ExecStart=$NODE $APP/server/visitor-server.mjs --data $DATA --site $SITE${VSI_NAME:+ --name "$VSI_NAME"}
+ExecStart=$NODE --disable-warning=ExperimentalWarning $APP/server/visitor-server.mjs --data $DATA --site $SITE${VSI_NAME:+ --name "$VSI_NAME"}
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -57,6 +57,6 @@ systemctl restart visitor-sign-in
 echo
 echo "Installed. It starts by itself whenever the Pi is switched on."
 echo "Open this setup link on the computer or tablet you'll use for the admin screen (keep it private):"
-sudo -u visitorsignin "$NODE" "$APP/server/visitor-server.mjs" --data "$DATA" --site "$SITE" --print-link
+sudo -u visitorsignin "$NODE" --disable-warning=ExperimentalWarning "$APP/server/visitor-server.mjs" --data "$DATA" --site "$SITE" --print-link
 echo
 echo "Check on it: systemctl status visitor-sign-in   ·   journalctl -u visitor-sign-in -f"

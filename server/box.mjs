@@ -62,10 +62,11 @@ function fileStore(dir) {
 
 /**
  * Opens (or makes, the first time) the records in dataDir.
- *   name      what this computer is called in the kiosk ("Front desk Pi")
+ *   name         what this computer is called in the kiosk ("Front desk Pi")
+ *   defaultName  the name the first time, when none is given (this computer's name)
  *   timeZone  the calendar for expected visitors and the end of day ('' = this computer's)
  */
-export function openBox({ dataDir, name = '', timeZone = '' }) {
+export function openBox({ dataDir, name = '', defaultName = '', timeZone = '' }) {
   mkdirSync(dataDir, { recursive: true });
   const configFile = join(dataDir, 'config.json');
   let config = readJson(configFile, null);
@@ -73,7 +74,7 @@ export function openBox({ dataDir, name = '', timeZone = '' }) {
     // The box's address on the website, its secret for connecting there, and the kiosk key.
     config = {
       boxId: randomCode(20).toLowerCase(), boxSecret: randomBytes(32).toString('base64url'),
-      kioskKey: `k-${randomCode(30)}`, name: name || 'Visitor Sign-In box', created: new Date().toISOString(),
+      kioskKey: `k-${randomCode(30)}`, name: name || defaultName || 'Visitor Sign-In box', created: new Date().toISOString(),
     };
     writeJson(configFile, config);
   } else if (name && name !== config.name) {

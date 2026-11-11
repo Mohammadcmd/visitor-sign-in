@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBox, BACKEND_VERSION, PHONE_RATE } from '../server/box.mjs';
-import { chunks } from '../server/relay.mjs';
+import { chunks, connectRelay } from '../server/relay.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 let checks = 0;
@@ -86,14 +86,30 @@ try {
   ok((await box.handle({ key: config.kioskKey, action: 'ping' })).ok, 'and so does the admin screen');
 
   // The daily jobs a kiosk would do: the end of day and old records.
+  // Tomorrow at 7 p.m.: after the 6 p.m. end of day, whatever time the test runs (today's visits are all before it).
   const late = new Date();
+  late.setDate(late.getDate() + 1);
   late.setHours(19, 0, 0, 0);
-  if (late < new Date()) late.setDate(late.getDate() + 1); // the next 7 p.m. from now, after the 6 p.m. end of day
   const done = await box.chores(late);
   eq(done.endOfDay, 1, 'at the end of the day, everyone still inside is signed out');
   eq((await box.chores(late)).endOfDay, 0, 'once');
   ok(done.purged, 'old records are checked once a day');
   eq((await box.handle({ key: config.kioskKey, action: 'adminInside', args: { token: relog.token } })).inside.length, 0, 'nobody inside');
+
+  // A website that can't be reached (not published yet, or no internet): it says so, and keeps trying.
+  {
+    let tries = 0;
+    class Unreachable extends EventTarget {
+      constructor() { super(); tries++; setTimeout(() => this.dispatchEvent(new Event('error')), 5); } // like Node: an error, and no close
+      close() {}
+    }
+    const said = [];
+    const r = connectRelay({ siteUrl: 'https://site.example/', box, log: (m) => said.push(m), WebSocketImpl: Unreachable, retryMs: 20 });
+    await new Promise((done) => setTimeout(done, 400));
+    r.close();
+    ok(tries >= 3, `it keeps trying (${tries} tries)`);
+    ok(said.length === 1 && /Can't reach the website \(https:\/\/site\.example\/\) yet/.test(said[0]), `and says once that it's waiting: ${said[0]}`);
+  }
 
   // The connection to the website carries long answers in parts.
   const long = 'x'.repeat(600 * 1024);

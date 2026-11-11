@@ -25,15 +25,16 @@ export function chunks(id, type, text) {
  *   log       where to report (console.log)
  * Resolves { close(), connected() }.
  */
-export function connectRelay({ siteUrl, box, log = () => {}, WebSocketImpl = globalThis.WebSocket }) {
+export function connectRelay({ siteUrl, box, log = () => {}, WebSocketImpl = globalThis.WebSocket, retryMs = 1000 }) {
   if (!WebSocketImpl) throw new Error('This Node.js has no WebSocket: install Node.js 22 or newer.');
   const url = `${siteUrl.replace(/\/?$/, '/').replace(/^http/, 'ws')}box/${box.config.boxId}/connect`;
   let ws = null;
   let ready = false;
   let stopped = false;
-  let wait = 1000;
+  let wait = retryMs;
   let lastHeard = 0;
   let timer = null;
+  let failures = 0;
   const incoming = new Map(); // request id → parts
 
   function open() {
@@ -52,7 +53,8 @@ export function connectRelay({ siteUrl, box, log = () => {}, WebSocketImpl = glo
       try { msg = JSON.parse(text); } catch { return; }
       if (msg.type === 'ready') {
         ready = true;
-        wait = 1000;
+        wait = retryMs;
+        failures = 0;
         log('Connected to the website: phones and the admin screen can reach this computer.');
       } else if (msg.type === 'refused') {
         log(`The website refused this computer: ${msg.error || 'unknown'}. ${msg.error === 'secret' ? 'Another computer already uses this box id: set up again with a new data folder.' : ''}`);
@@ -66,8 +68,18 @@ export function connectRelay({ siteUrl, box, log = () => {}, WebSocketImpl = glo
         answer(msg.id, got.join(''));
       }
     });
-    ws.addEventListener('close', () => { if (ready) log('Lost the connection to the website: reconnecting…'); ready = false; retry(); });
-    ws.addEventListener('error', () => {});
+    // A connection that fails before it opens only reports an error (no close), so either one means try again, once.
+    let gone = false;
+    const lost = () => {
+      if (gone) return;
+      gone = true;
+      if (ready) log('Lost the connection to the website: reconnecting…');
+      else if (++failures === 1 || failures % 30 === 0) log(`Can't reach the website (${siteUrl}) yet: is this computer online, and is the website published? Trying again every minute.`);
+      ready = false;
+      retry();
+    };
+    ws.addEventListener('close', lost);
+    ws.addEventListener('error', lost);
   }
 
   async function answer(id, body) {
@@ -81,7 +93,7 @@ export function connectRelay({ siteUrl, box, log = () => {}, WebSocketImpl = glo
     if (stopped) return;
     clearTimeout(timer);
     timer = setTimeout(open, wait);
-    wait = Math.min(wait * 2, 60 * 1000);
+    wait = Math.min(wait * 2, Math.max(retryMs, 60 * 1000));
   }
 
   // A small ping keeps the connection alive through home routers; silence means it's gone.

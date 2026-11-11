@@ -19,7 +19,7 @@
     "license:list": "node tools/license/list.mjs",
     "license:payments": "node tools/license/list.mjs payments",
     "license:publish": "node tools/license/publish.mjs",
-    "server": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON server/visitor-server.mjs",
+    "server": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning server/visitor-server.mjs",
     "test:relay": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/relay.test.mjs",
     "site:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-site.mjs",
     "site:deploy": "npm run site:build && npx --yes wrangler@4.157.0 deploy --config site/wrangler.jsonc",

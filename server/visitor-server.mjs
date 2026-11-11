@@ -8,7 +8,7 @@
 // can reach it, and does the daily jobs: signing everyone out at the end of
 // the day and deleting old records. Leave it running (install-pi.sh makes it
 // start by itself).
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ if (major < 22) { console.error(`Visitor Sign-In needs Node.js 22 or newer (this
 const siteFromConfig = (/^\s*SITE_URL: '([^']*)'/m.exec(readFileSync(join(here, '../web/config.js'), 'utf8')) || [])[1] || '';
 const site = (opt('site', process.env.VSI_SITE || siteFromConfig)).replace(/\/?$/, '/');
 const dataDir = resolve(opt('data', process.env.VSI_DATA || join(homedir(), 'Visitor Sign-In')));
-const box = openBox({ dataDir, name: opt('name', process.env.VSI_NAME || ''), timeZone: opt('tz', process.env.VSI_TZ || '') });
+const box = openBox({ dataDir, name: opt('name', process.env.VSI_NAME || ''), defaultName: hostname(), timeZone: opt('tz', process.env.VSI_TZ || '') });
 const { setup } = box.links(site);
 if (args.includes('--print-link')) { console.log(setup); process.exit(0); }
 
@@ -40,7 +40,7 @@ ${qrSvg(setup, { size: 260, label: 'Setup link' })}
 <p><strong>Keep this link private:</strong> it gives admin access to the setup (the admin PIN protects the admin screen afterwards).</p>
 </body>`);
 
-console.log(`Visitor Sign-In ${box.config.name}
+console.log(`Visitor Sign-In on "${box.config.name}"
   Records:    ${dataDir}
   Website:    ${site}
   Setup link: ${setup}
